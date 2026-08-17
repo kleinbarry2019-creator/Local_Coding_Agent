@@ -16,7 +16,7 @@ V48 release:
 
 V48 bounded-response and filesystem enumeration limits enabled.
 
-Built: 2026-08-17T23:46:15+02:00
+Built: 2026-08-18T01:12:29+02:00
 
 Model: qwen2.5-coder:7b-instruct
 Ollama URL: http://127.0.0.1:11434/api/chat

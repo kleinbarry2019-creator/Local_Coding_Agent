@@ -677,7 +677,7 @@ def list_files():
             RUNTIME
         ).as_posix()
 
-        if len(str(relative)) > MAX_LIST_PATH_CHARS:
+        if len(relative) > MAX_LIST_PATH_CHARS:
             raise PermissionError(
                 "Dateipfad überschreitet Größenlimit."
             )
