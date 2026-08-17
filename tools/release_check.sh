@@ -17,11 +17,14 @@ echo "[3/4] End-to-end tests"
 ./autonomous_agent/tools/test_end_to_end_v49.sh
 
 echo "[4/4] Version check"
+(
+cd autonomous_agent
 python3 - <<'PY'
 import safe_agent_v49 as agent
 assert agent.VERSION == 49
 print("VERSION OK:", agent.VERSION)
 PY
+)
 
 echo
 echo "=== RELEASE CHECK PASSED ==="
