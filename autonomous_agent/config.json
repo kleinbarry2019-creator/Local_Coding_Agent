@@ -1,0 +1,13 @@
+{
+  "version": "30",
+  "security": {
+    "state_hash": true,
+    "audit": true,
+    "recovery": true,
+    "atomic_write": true
+  },
+  "limits": {
+    "max_output": 4096,
+    "timeout": 10
+  }
+}

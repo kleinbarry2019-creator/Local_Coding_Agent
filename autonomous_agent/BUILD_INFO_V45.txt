@@ -1,0 +1,34 @@
+SAFE AGENT V45
+
+Built: 2026-08-17T21:10:42+02:00
+
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+
+Mission policy:
+- immutable per mission
+- policy digest
+- default
+- readonly
+- noexec
+
+Budgets:
+- total
+- reads
+- writes
+- execution
+
+Path security:
+- runtime-only
+- /workspace normalization
+- symlink rejection
+- agent code read-only
+
+Sandbox:
+- bubblewrap
+- network namespace disabled
+- capabilities dropped
+
+Integrity:
+- state hash
+- audit hash chain

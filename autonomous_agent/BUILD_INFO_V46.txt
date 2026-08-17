@@ -1,0 +1,36 @@
+SAFE AGENT V46
+
+Built: 2026-08-17T21:11:42+02:00
+
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+
+Limits:
+- task bytes
+- model response bytes
+- message count
+- message bytes
+- tool budgets
+- audit detail size
+- file content size
+- output size
+
+Path security:
+- runtime-only
+- /workspace normalization
+- symlink rejection
+- agent code read-only
+
+Sandbox:
+- bubblewrap
+- unshared network
+- unshared PID
+- unshared IPC
+- unshared UTS
+- unshared cgroup
+- capabilities dropped
+
+Integrity:
+- state hash
+- chained audit hash
+- immutable mission policy snapshot

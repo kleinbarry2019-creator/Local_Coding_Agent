@@ -1,0 +1,28 @@
+SAFE AGENT V44
+
+Built: 2026-08-17T21:07:48+02:00
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+
+Mission policy:
+- default
+- readonly
+- noexec
+
+Tool budgets:
+- total
+- reads
+- writes
+- execution
+
+Security:
+- direct tools
+- strict path validation
+- workspace prefix normalization
+- content limit
+- argument limit
+- isolated Python execution
+- network namespace disabled
+- capabilities dropped
+- agent code read-only
+- audit hash chain

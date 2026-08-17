@@ -1,0 +1,8 @@
+SAFE AGENT V40
+Built: 2026-08-17T20:58:13+02:00
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+Sandbox: bubblewrap
+Network inside sandbox: disabled
+Workspace: writable inside sandbox
+Host filesystem: isolated

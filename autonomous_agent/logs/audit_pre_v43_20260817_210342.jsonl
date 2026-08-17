@@ -1,0 +1,54 @@
+{"time": 1786986307.2967145, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 0, "last_result": null}}
+{"time": 1786986355.1674795, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 0, "last_result": null}}
+{"time": 1786986425.6854665, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 0, "last_result": null}}
+{"time": 1786986447.7484317, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 0, "last_result": null}}
+{"time": 1786986505.596213, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 0, "last_result": null}}
+{"time": 1786986511.8391614, "event": "TASK_COMPLETED", "data": {"version": 1, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786986642.831802, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786986649.1236122, "event": "TASK_COMPLETED", "data": {"version": 1, "tasks_completed": 2, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786986687.8583887, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 99}}
+{"time": 1786986694.0770965, "event": "TASK_COMPLETED", "data": {"version": 1, "tasks_completed": 100, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786986747.5222373, "event": "AGENT_START", "data": {"version": 1, "tasks_completed": 99}}
+{"time": 1786986753.7354965, "event": "TASK_COMPLETED", "data": {"version": 1, "tasks_completed": 100, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786989974.1795585, "event": "AGENT_START", "data": null}
+{"time": 1786990011.270546, "event": "AGENT_START", "data": null}
+{"time": 1786990149.3465424, "event": "AGENT_START", "data": null}
+{"time": 1786990178.8756583, "event": "AGENT_START", "data": null}
+{"time": 1786990637.7583013, "event": "AGENT_START", "data": null}
+{"time": 1786990816.7824044, "event": "AGENT_START", "data": null}
+{"time": 1786990938.2280505, "event": "AGENT_START", "data": {"version": 34, "tasks_completed": 0, "last_result": "initialized"}}
+{"time": 1786990944.4978752, "event": "TASK_COMPLETED", "data": {"version": 34, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786990944.5477693, "event": "AGENT_START", "data": {"version": 34, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786990950.773272, "event": "TASK_COMPLETED", "data": {"version": 34, "tasks_completed": 2, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786991141.3958993, "event": "AGENT_START", "data": {"version": 35, "tasks_completed": 0, "last_result": "initialized"}}
+{"time": 1786991147.677181, "event": "TASK_COMPLETED", "data": {"version": 35, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786991147.7243774, "event": "AGENT_START", "data": {"version": 35, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786991154.0728793, "event": "TASK_COMPLETED", "data": {"version": 35, "tasks_completed": 2, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786991338.133459, "event": "AGENT_START", "data": {"version": 36, "tasks_completed": 0, "last_result": "initialized"}}
+{"timestamp": "2026-08-17T18:29:04.456357+00:00", "event": "state_saved", "details": {"tasks_completed": 1}}
+{"time": 1786991344.4564059, "event": "TASK_COMPLETED", "data": {"version": 36, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"time": 1786991344.5042832, "event": "AGENT_START", "data": {"version": 36, "tasks_completed": 1, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"timestamp": "2026-08-17T18:29:10.857805+00:00", "event": "state_saved", "details": {"tasks_completed": 2}}
+{"time": 1786991350.8578565, "event": "TASK_COMPLETED", "data": {"version": 36, "tasks_completed": 2, "last_result": "safe_test.py wurde erfolgreich in der isolierten Sandbox ausgeführt. Das Skript hat alle Schritte erfolgreich abgeschlossen und meldet 'SAFE TEST OK'."}}
+{"timestamp": "2026-08-17T18:32:51.180598+00:00", "event": "state_saved", "details": {"tasks_completed": 2}}
+{"timestamp": "2026-08-17T18:36:25.173098+00:00", "event": "state_saved", "details": {"tasks_completed": 2}}
+{"timestamp": "2026-08-17T18:39:50.841401+00:00", "event": "state_saved", "details": {"tasks_completed": 2}}
+{"timestamp": "2026-08-17T18:42:47.718096+00:00", "event": "state_saved", "details": {"tasks_completed": 2}}
+{"timestamp": "2026-08-17T18:49:19.150120+00:00", "event": "state_saved", "details": {"tasks_completed": 3}}
+{"details": {}, "event": "STATE_INITIALIZED", "timestamp": "2026-08-17T18:58:14.171674+00:00"}
+{"details": {}, "event": "STATE_INITIALIZED", "timestamp": "2026-08-17T18:58:14.224690+00:00"}
+{"details": {"model": "qwen2.5-coder:7b-instruct", "task": "Erstelle in /workspace eine Datei namens e2e_agent_test.txt mit exakt dem Inhalt AGENT_E2E_OK. Prüfe danach, ob die Datei existiert und ob ihr Inhalt exakt AGENT_E2E_OK ist. Wenn alles stimmt, antworte mit done."}, "event": "MISSION_START", "timestamp": "2026-08-17T18:59:06.074331+00:00"}
+{"details": {"command": "echo 'AGENT_E2E_OK' > /workspace/e2e_agent_test.txt", "exit_code": 0, "status": "OK", "step": 1}, "event": "COMMAND", "timestamp": "2026-08-17T18:59:06.834355+00:00"}
+{"details": {"command": "cat /workspace/e2e_agent_test.txt", "exit_code": 0, "status": "OK", "step": 2}, "event": "COMMAND", "timestamp": "2026-08-17T18:59:07.390961+00:00"}
+{"details": {"result": "done", "step": 3}, "event": "MISSION_DONE", "timestamp": "2026-08-17T18:59:07.789848+00:00"}
+{"details": {}, "event": "STATE_INITIALIZED", "timestamp": "2026-08-17T19:00:21.878778+00:00"}
+{"details": {"model": "qwen2.5-coder:7b-instruct", "task": "Erstelle in /workspace eine Datei v41_agent_test.txt mit exakt dem Inhalt V41_AGENT_OK. Prüfe danach den Inhalt. Wenn er exakt stimmt, antworte mit done."}, "event": "MISSION_START", "timestamp": "2026-08-17T19:00:22.606239+00:00"}
+{"details": {"command": "echo 'V41_AGENT_OK' > /workspace/v41_agent_test.txt", "exit_code": 0, "status": "OK", "step": 1}, "event": "COMMAND", "timestamp": "2026-08-17T19:00:23.234602+00:00"}
+{"details": {"command": "cat /workspace/v41_agent_test.txt", "exit_code": 0, "status": "OK", "step": 2}, "event": "COMMAND", "timestamp": "2026-08-17T19:00:23.680022+00:00"}
+{"details": {"result": "done", "step": 3}, "event": "MISSION_DONE", "timestamp": "2026-08-17T19:00:24.022620+00:00"}
+{"details": {}, "event": "STATE_INITIALIZED", "timestamp": "2026-08-17T19:02:00.949839+00:00"}
+{"details": {"model": "qwen2.5-coder:7b-instruct", "task": "Erstelle v42_agent_test.txt mit exakt dem Inhalt V42_AGENT_OK. Lies die Datei danach wieder ein und prüfe den Inhalt. Antworte erst danach mit done."}, "event": "MISSION_START", "timestamp": "2026-08-17T19:02:01.637077+00:00"}
+{"details": {"name": "write_file", "status": "OK", "step": 1}, "event": "TOOL", "timestamp": "2026-08-17T19:02:02.367228+00:00"}
+{"details": {"name": "read_file", "status": "OK", "step": 2}, "event": "TOOL", "timestamp": "2026-08-17T19:02:02.851296+00:00"}
+{"details": {"result": "Die Datei v42_agent_test.txt wurde erfolgreich erstellt und enthält den Inhalt 'V42_AGENT_OK'. Der Inhalt wurde dann gelesen und bestätigt.", "step": 3}, "event": "MISSION_DONE", "timestamp": "2026-08-17T19:02:03.698913+00:00"}
+{"digest": "ddbfec1eb47bba81e43f34fa69a54802450766610de25ce0d61d6d600f3a3a80", "entry": {"details": {"ok": true}, "event": "TEST_EVENT", "timestamp": "2026-08-17T19:03:12.337646+00:00"}, "prev": "0000000000000000000000000000000000000000000000000000000000000000"}

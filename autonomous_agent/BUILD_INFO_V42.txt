@@ -1,0 +1,17 @@
+SAFE AGENT V42
+
+Built: 2026-08-17T21:02:00+02:00
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+
+Tools:
+- list_files
+- read_file
+- write_file
+- run_python
+
+No normal shell tool.
+Runtime workspace isolated.
+Agent code read-only in sandbox.
+Network unshared.
+Capabilities dropped.

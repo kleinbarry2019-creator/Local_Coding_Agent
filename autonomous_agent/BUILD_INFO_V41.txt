@@ -1,0 +1,21 @@
+SAFE AGENT V41
+
+Built: 2026-08-17T21:00:21+02:00
+
+Model: qwen2.5-coder:7b-instruct
+Ollama URL: http://127.0.0.1:11434/api/chat
+
+Agent code:
+READ-ONLY inside sandbox as /agent
+
+Task workspace:
+WRITABLE inside sandbox as /workspace
+
+Host home:
+HIDDEN
+
+Network:
+UNSHARED
+
+Capabilities:
+DROPPED
