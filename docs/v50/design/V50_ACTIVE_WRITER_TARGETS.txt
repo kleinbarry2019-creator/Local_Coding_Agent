@@ -1,0 +1,1273 @@
+autonomous_agent/audit_log.jsonl:11:{"digest": "96ed5a39f4cba689d8c0353110416126ac1a4996dbd25e095a50d977a1445b48", "entry": {"details": {"source": "/var/home/mklein/aider_workspace/autonomous_agent/agent_state.json.bak"}, "event": "STATE_RECOVERY", "timestamp": "2026-08-17T19:25:56.041793+00:00"}, "prev": "10f1f7ce7e0b851a564b1e4e00e3360e05ebe30f6857cdd01dc14a31dcebc705"}
+autonomous_agent/audit_log.jsonl:13:{"digest": "752654af7366930bed1f0d77bd4bc2ba6307220b0eb6f50b1da66af919d701b1", "entry": {"details": {"source": "/var/home/mklein/aider_workspace/autonomous_agent/agent_state.json.bak"}, "event": "STATE_RECOVERY", "timestamp": "2026-08-17T19:25:56.759596+00:00"}, "prev": "12dc05dbfba8778f6b5d675d0089264ae56c59cdde06fc2c91405990d60a6c25"}
+autonomous_agent/audit_log.jsonl:21:{"digest": "5aef63e5fa9115a260f555feb1b58e7f4cf5ade1e13f4e19528d05ba89d0ffca", "entry": {"details": {"source": "/var/home/mklein/aider_workspace/autonomous_agent/agent_state.json.bak"}, "event": "STATE_RECOVERY", "timestamp": "2026-08-17T19:31:26.819192+00:00"}, "prev": "3003359bf5d36fc483b24a8be918baaaba63f658db124e894c374454dffae70c"}
+autonomous_agent/audit_log.jsonl:29:{"digest": "5600735b6aa94aa7137cbbacc6b2742cc5674035841faf8e9452e16f9dadffb8", "entry": {"details": {"source": "/var/home/mklein/aider_workspace/autonomous_agent/agent_state.json.bak"}, "event": "STATE_RECOVERY", "timestamp": "2026-08-17T19:33:50.646435+00:00"}, "prev": "0e43d40079761055b2ad4042ec37f2546d654431cd6a92b461cecb1a52077e31"}
+autonomous_agent/audit_log.jsonl:37:{"digest": "2deac028cb683ccb90762163a446c4fa87341de158e66a94204483f58c06f574", "entry": {"details": {"source": "/var/home/mklein/aider_workspace/autonomous_agent/agent_state.json.bak"}, "event": "STATE_RECOVERY", "timestamp": "2026-08-17T19:42:36.850809+00:00"}, "prev": "7dadca19c43f72894ccbcaae05d93e3c185befffd5c6a6b62af513df0a74f343"}
+autonomous_agent/autobuild.py:16:Path(target).write_text(Path(base).read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/autobuild.py:28:        "STATE_FILE = Path(\"agent_state.json\")",
+autonomous_agent/autobuild.py:29:        "STATE_FILE = Path(\"agent_state.json\")\nSTATE_BACKUP_FILE = Path(\"agent_state.json.bak\")\nSTATE_HASH_FILE = Path(\"agent_state.sha256\")\nAUDIT_LOG_FILE = Path(\"audit_log.jsonl\")"
+autonomous_agent/autobuild.py:55:    return hashlib.sha256(_json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/autobuild.py:57:if "def audit_log" not in s:
+autonomous_agent/autobuild.py:59:def audit_log(event, details=None):
+autonomous_agent/autobuild.py:62:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/autobuild.py:63:        f.write(_json.dumps(entry) + "\\n")
+autonomous_agent/autobuild.py:78:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/autobuild.py:79:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/autobuild.py:80:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/autobuild.py:81:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/autobuild.py:84:src_path.write_text(s, encoding="utf-8")
+autonomous_agent/autobuild.py:86:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/autobuild.py:91:for f in agent_state.json agent_state.json.bak agent_state.sha256; do
+autonomous_agent/autobuild.py:98:Path("tools/verify_state_hash.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/autobuild.py:104:state = json.loads(Path('agent_state.json').read_text())
+autonomous_agent/autobuild.py:105:actual = hashlib.sha256(json.dumps(state, sort_keys=True).encode('utf-8')).hexdigest()
+autonomous_agent/autobuild.py:106:expected = Path('agent_state.sha256').read_text().strip()
+autonomous_agent/autonomous_agent.py:47:    target.write_text(content, encoding="utf-8")
+autonomous_agent/autonomous_agent.py:126:        data=json.dumps(payload).encode("utf-8"),
+autonomous_agent/autonomous_agent.py:131:    with urllib.request.urlopen(request, timeout=300) as response:
+autonomous_agent/build_agent.sh:47:        "STATE_FILE = Path(\"agent_state.json\")",
+autonomous_agent/build_agent.sh:49:            "STATE_FILE = Path(\"agent_state.json\")\n"
+autonomous_agent/build_agent.sh:50:            "STATE_BACKUP_FILE = Path(\"agent_state.json.bak\")\n"
+autonomous_agent/build_agent.sh:51:            "STATE_HASH_FILE = Path(\"agent_state.sha256\")\n"
+autonomous_agent/build_agent.sh:52:            "AUDIT_LOG_FILE = Path(\"audit_log.jsonl\")"
+autonomous_agent/build_agent.sh:83:    encoded = _json.dumps(state, sort_keys=True).encode("utf-8")
+autonomous_agent/build_agent.sh:84:    return hashlib.sha256(encoded).hexdigest()
+autonomous_agent/build_agent.sh:86:if "def audit_log" not in s:
+autonomous_agent/build_agent.sh:88:def audit_log(event, details=None):
+autonomous_agent/build_agent.sh:96:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_agent.sh:97:        f.write(_json.dumps(entry) + "\\n")
+autonomous_agent/build_agent.sh:112:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/build_agent.sh:113:    encoded = json.dumps(state, indent=2)
+autonomous_agent/build_agent.sh:114:    STATE_FILE.write_text(encoded, encoding="utf-8")
+autonomous_agent/build_agent.sh:115:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_agent.sh:116:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_agent.sh:123:src.write_text(s, encoding="utf-8")
+autonomous_agent/build_agent.sh:138:for f in agent_state.json agent_state.json.bak agent_state.sha256; do
+autonomous_agent/build_agent_v40.sh:44:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v40.sh:45:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v40.sh:46:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v40.sh:47:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v40.sh:116:    return json.dumps(
+autonomous_agent/build_agent_v40.sh:125:    return hashlib.sha256(
+autonomous_agent/build_agent_v40.sh:182:        with os.fdopen(
+autonomous_agent/build_agent_v40.sh:204:    encoded = json.dumps(
+autonomous_agent/build_agent_v40.sh:308:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v40.sh:313:            json.dumps(
+autonomous_agent/build_agent_v40.sh:334:        data=json.dumps(payload).encode("utf-8"),
+autonomous_agent/build_agent_v40.sh:341:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v40.sh:598:        print(json.dumps(
+autonomous_agent/build_agent_v40.sh:609:                    + json.dumps(
+autonomous_agent/build_agent_v40.sh:823:cp -f agent_state.json agent_state.json.test-backup
+autonomous_agent/build_agent_v40.sh:824:cp -f agent_state.sha256 agent_state.sha256.test-backup
+autonomous_agent/build_agent_v40.sh:827:    mv -f agent_state.json.test-backup agent_state.json
+autonomous_agent/build_agent_v40.sh:828:    mv -f agent_state.sha256.test-backup agent_state.sha256
+autonomous_agent/build_agent_v40.sh:833:printf '%s\n' 'BROKEN' > agent_state.json
+autonomous_agent/build_agent_v41.sh:50:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v41.sh:51:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v41.sh:52:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v41.sh:53:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v41.sh:129:    return json.dumps(
+autonomous_agent/build_agent_v41.sh:138:    return hashlib.sha256(
+autonomous_agent/build_agent_v41.sh:158:        with os.fdopen(
+autonomous_agent/build_agent_v41.sh:195:    encoded = json.dumps(
+autonomous_agent/build_agent_v41.sh:299:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v41.sh:304:            json.dumps(
+autonomous_agent/build_agent_v41.sh:329:        data=json.dumps(
+autonomous_agent/build_agent_v41.sh:338:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v41.sh:650:            json.dumps(
+autonomous_agent/build_agent_v41.sh:662:                    + json.dumps(
+autonomous_agent/build_agent_v41.sh:935:    data=json.dumps(payload).encode(),
+autonomous_agent/build_agent_v41.sh:941:with urllib.request.urlopen(
+autonomous_agent/build_agent_v42.sh:42:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v42.sh:43:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v42.sh:44:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v42.sh:45:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v42.sh:121:    return json.dumps(
+autonomous_agent/build_agent_v42.sh:130:    return hashlib.sha256(
+autonomous_agent/build_agent_v42.sh:150:        with os.fdopen(
+autonomous_agent/build_agent_v42.sh:187:    encoded = json.dumps(
+autonomous_agent/build_agent_v42.sh:290:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v42.sh:295:            json.dumps(
+autonomous_agent/build_agent_v42.sh:604:        data=json.dumps(
+autonomous_agent/build_agent_v42.sh:613:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v42.sh:863:            json.dumps(
+autonomous_agent/build_agent_v42.sh:877:                    + json.dumps(
+autonomous_agent/build_agent_v42.sh:1051:        json.dumps({
+autonomous_agent/build_agent_v42.sh:1187:    data=json.dumps(payload).encode(),
+autonomous_agent/build_agent_v42.sh:1193:with urllib.request.urlopen(
+autonomous_agent/build_agent_v43.sh:23:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v43.sh:24:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v43.sh:26:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v43.sh:29:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v43.sh:32:rm -f audit_head.sha256
+autonomous_agent/build_agent_v43.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v43.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v43.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v43.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v43.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v43.sh:148:    return json.dumps(
+autonomous_agent/build_agent_v43.sh:157:    return hashlib.sha256(
+autonomous_agent/build_agent_v43.sh:177:        with os.fdopen(
+autonomous_agent/build_agent_v43.sh:214:    encoded = json.dumps(
+autonomous_agent/build_agent_v43.sh:312:    return hashlib.sha256(
+autonomous_agent/build_agent_v43.sh:317:def read_audit_head():
+autonomous_agent/build_agent_v43.sh:348:    previous = read_audit_head()
+autonomous_agent/build_agent_v43.sh:361:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v43.sh:366:            json.dumps(
+autonomous_agent/build_agent_v43.sh:386:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v43.sh:425:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v43.sh:786:        data=json.dumps(
+autonomous_agent/build_agent_v43.sh:795:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v43.sh:1183:            json.dumps(
+autonomous_agent/build_agent_v43.sh:1200:                    + json.dumps(
+autonomous_agent/build_agent_v43.sh:1414:    direct = json.dumps({
+autonomous_agent/build_agent_v43.sh:1439:    shorthand = json.dumps({
+autonomous_agent/build_agent_v43.sh:1628:    data=json.dumps(payload).encode(),
+autonomous_agent/build_agent_v43.sh:1634:with urllib.request.urlopen(
+autonomous_agent/build_agent_v44.sh:26:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v44.sh:27:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v44.sh:29:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v44.sh:32:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v44.sh:35:rm -f audit_head.sha256
+autonomous_agent/build_agent_v44.sh:58:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v44.sh:59:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v44.sh:60:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v44.sh:62:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v44.sh:63:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v44.sh:144:    return hashlib.sha256(
+autonomous_agent/build_agent_v44.sh:145:        json.dumps(
+autonomous_agent/build_agent_v44.sh:245:    return json.dumps(
+autonomous_agent/build_agent_v44.sh:254:    return hashlib.sha256(
+autonomous_agent/build_agent_v44.sh:274:        with os.fdopen(
+autonomous_agent/build_agent_v44.sh:311:    encoded = json.dumps(
+autonomous_agent/build_agent_v44.sh:405:    return hashlib.sha256(
+autonomous_agent/build_agent_v44.sh:414:def read_audit_head():
+autonomous_agent/build_agent_v44.sh:448:    previous = read_audit_head()
+autonomous_agent/build_agent_v44.sh:461:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v44.sh:466:            json.dumps(
+autonomous_agent/build_agent_v44.sh:486:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v44.sh:525:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v44.sh:980:        data=json.dumps(
+autonomous_agent/build_agent_v44.sh:989:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v44.sh:1337:            json.dumps(
+autonomous_agent/build_agent_v44.sh:1354:                    + json.dumps(
+autonomous_agent/build_agent_v44.sh:1587:    direct = json.dumps({
+autonomous_agent/build_agent_v44.sh:1610:    shorthand = json.dumps({
+autonomous_agent/build_agent_v44.sh:1746:    data=json.dumps(payload).encode(),
+autonomous_agent/build_agent_v44.sh:1752:with urllib.request.urlopen(
+autonomous_agent/build_agent_v45.sh:27:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v45.sh:28:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v45.sh:30:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v45.sh:33:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v45.sh:36:rm -f audit_head.sha256
+autonomous_agent/build_agent_v45.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v45.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v45.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v45.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v45.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v45.sh:146:    return hashlib.sha256(
+autonomous_agent/build_agent_v45.sh:147:        json.dumps(
+autonomous_agent/build_agent_v45.sh:247:    return json.dumps(
+autonomous_agent/build_agent_v45.sh:256:    return hashlib.sha256(
+autonomous_agent/build_agent_v45.sh:276:        with os.fdopen(
+autonomous_agent/build_agent_v45.sh:316:    encoded = json.dumps(
+autonomous_agent/build_agent_v45.sh:410:    return hashlib.sha256(
+autonomous_agent/build_agent_v45.sh:419:def read_audit_head():
+autonomous_agent/build_agent_v45.sh:453:    previous = read_audit_head()
+autonomous_agent/build_agent_v45.sh:466:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v45.sh:471:            json.dumps(
+autonomous_agent/build_agent_v45.sh:491:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v45.sh:532:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v45.sh:1083:        data=json.dumps(
+autonomous_agent/build_agent_v45.sh:1092:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v45.sh:1464:            json.dumps(
+autonomous_agent/build_agent_v45.sh:1481:                    + json.dumps(
+autonomous_agent/build_agent_v45.sh:1783:        json.dumps({
+autonomous_agent/build_agent_v45.sh:1936:    data=json.dumps(
+autonomous_agent/build_agent_v45.sh:1944:with urllib.request.urlopen(
+autonomous_agent/build_agent_v46.sh:27:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v46.sh:28:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v46.sh:30:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v46.sh:33:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v46.sh:36:rm -f audit_head.sha256
+autonomous_agent/build_agent_v46.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v46.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v46.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v46.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v46.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v46.sh:159:    return hashlib.sha256(
+autonomous_agent/build_agent_v46.sh:160:        json.dumps(
+autonomous_agent/build_agent_v46.sh:263:    return json.dumps(
+autonomous_agent/build_agent_v46.sh:272:    return hashlib.sha256(
+autonomous_agent/build_agent_v46.sh:292:        with os.fdopen(
+autonomous_agent/build_agent_v46.sh:334:    encoded = json.dumps(
+autonomous_agent/build_agent_v46.sh:438:    return hashlib.sha256(
+autonomous_agent/build_agent_v46.sh:447:def read_audit_head():
+autonomous_agent/build_agent_v46.sh:464:    encoded = json.dumps(
+autonomous_agent/build_agent_v46.sh:476:        "sha256": hashlib.sha256(
+autonomous_agent/build_agent_v46.sh:505:    previous = read_audit_head()
+autonomous_agent/build_agent_v46.sh:518:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v46.sh:523:            json.dumps(
+autonomous_agent/build_agent_v46.sh:543:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v46.sh:586:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v46.sh:1141:    encoded_messages = json.dumps(
+autonomous_agent/build_agent_v46.sh:1166:        data=json.dumps(
+autonomous_agent/build_agent_v46.sh:1175:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v46.sh:1633:            json.dumps(
+autonomous_agent/build_agent_v46.sh:1647:            + json.dumps(
+autonomous_agent/build_agent_v46.sh:2096:        json.dumps({
+autonomous_agent/build_agent_v46.sh:2253:    data=json.dumps(
+autonomous_agent/build_agent_v46.sh:2261:with urllib.request.urlopen(
+autonomous_agent/build_agent_v47.sh:27:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v47.sh:28:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v47.sh:30:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v47.sh:33:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v47.sh:36:rm -f audit_head.sha256
+autonomous_agent/build_agent_v47.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v47.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v47.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v47.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v47.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v47.sh:162:    return hashlib.sha256(
+autonomous_agent/build_agent_v47.sh:163:        json.dumps(
+autonomous_agent/build_agent_v47.sh:266:    return json.dumps(
+autonomous_agent/build_agent_v47.sh:275:    return hashlib.sha256(
+autonomous_agent/build_agent_v47.sh:295:        with os.fdopen(
+autonomous_agent/build_agent_v47.sh:337:    encoded = json.dumps(
+autonomous_agent/build_agent_v47.sh:441:    return hashlib.sha256(
+autonomous_agent/build_agent_v47.sh:450:def read_audit_head():
+autonomous_agent/build_agent_v47.sh:467:    encoded = json.dumps(
+autonomous_agent/build_agent_v47.sh:479:        "sha256": hashlib.sha256(
+autonomous_agent/build_agent_v47.sh:508:    previous = read_audit_head()
+autonomous_agent/build_agent_v47.sh:521:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v47.sh:526:            json.dumps(
+autonomous_agent/build_agent_v47.sh:546:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v47.sh:589:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v47.sh:1186:    encoded_messages = json.dumps(
+autonomous_agent/build_agent_v47.sh:1211:        data=json.dumps(
+autonomous_agent/build_agent_v47.sh:1220:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v47.sh:1703:            json.dumps(
+autonomous_agent/build_agent_v47.sh:1717:            + json.dumps(
+autonomous_agent/build_agent_v47.sh:2166:        json.dumps({
+autonomous_agent/build_agent_v47.sh:2421:    data=json.dumps(
+autonomous_agent/build_agent_v47.sh:2429:with urllib.request.urlopen(
+autonomous_agent/build_agent_v48.sh:27:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v48.sh:28:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v48.sh:30:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v48.sh:33:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v48.sh:36:rm -f audit_head.sha256
+autonomous_agent/build_agent_v48.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v48.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v48.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v48.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v48.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v48.sh:162:    return hashlib.sha256(
+autonomous_agent/build_agent_v48.sh:163:        json.dumps(
+autonomous_agent/build_agent_v48.sh:266:    return json.dumps(
+autonomous_agent/build_agent_v48.sh:275:    return hashlib.sha256(
+autonomous_agent/build_agent_v48.sh:295:        with os.fdopen(
+autonomous_agent/build_agent_v48.sh:337:    encoded = json.dumps(
+autonomous_agent/build_agent_v48.sh:441:    return hashlib.sha256(
+autonomous_agent/build_agent_v48.sh:450:def read_audit_head():
+autonomous_agent/build_agent_v48.sh:467:    encoded = json.dumps(
+autonomous_agent/build_agent_v48.sh:479:        "sha256": hashlib.sha256(
+autonomous_agent/build_agent_v48.sh:508:    previous = read_audit_head()
+autonomous_agent/build_agent_v48.sh:521:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v48.sh:526:            json.dumps(
+autonomous_agent/build_agent_v48.sh:546:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v48.sh:589:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v48.sh:1186:    encoded_messages = json.dumps(
+autonomous_agent/build_agent_v48.sh:1211:        data=json.dumps(
+autonomous_agent/build_agent_v48.sh:1220:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v48.sh:1703:            json.dumps(
+autonomous_agent/build_agent_v48.sh:1717:            + json.dumps(
+autonomous_agent/build_agent_v48.sh:2166:        json.dumps({
+autonomous_agent/build_agent_v48.sh:2421:    data=json.dumps(
+autonomous_agent/build_agent_v48.sh:2429:with urllib.request.urlopen(
+autonomous_agent/build_agent_v49.sh:27:if [[ -f audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v49.sh:28:    if [[ -s audit_log.jsonl ]]; then
+autonomous_agent/build_agent_v49.sh:30:        cp -f audit_log.jsonl "$backup"
+autonomous_agent/build_agent_v49.sh:33:    rm -f audit_log.jsonl
+autonomous_agent/build_agent_v49.sh:36:rm -f audit_head.sha256
+autonomous_agent/build_agent_v49.sh:64:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/build_agent_v49.sh:65:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/build_agent_v49.sh:66:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/build_agent_v49.sh:68:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/build_agent_v49.sh:69:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/build_agent_v49.sh:162:    return hashlib.sha256(
+autonomous_agent/build_agent_v49.sh:163:        json.dumps(
+autonomous_agent/build_agent_v49.sh:266:    return json.dumps(
+autonomous_agent/build_agent_v49.sh:275:    return hashlib.sha256(
+autonomous_agent/build_agent_v49.sh:295:        with os.fdopen(
+autonomous_agent/build_agent_v49.sh:337:    encoded = json.dumps(
+autonomous_agent/build_agent_v49.sh:441:    return hashlib.sha256(
+autonomous_agent/build_agent_v49.sh:450:def read_audit_head():
+autonomous_agent/build_agent_v49.sh:467:    encoded = json.dumps(
+autonomous_agent/build_agent_v49.sh:479:        "sha256": hashlib.sha256(
+autonomous_agent/build_agent_v49.sh:508:    previous = read_audit_head()
+autonomous_agent/build_agent_v49.sh:521:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v49.sh:526:            json.dumps(
+autonomous_agent/build_agent_v49.sh:546:    with AUDIT_FILE.open(
+autonomous_agent/build_agent_v49.sh:589:    if read_audit_head() != previous:
+autonomous_agent/build_agent_v49.sh:1186:    encoded_messages = json.dumps(
+autonomous_agent/build_agent_v49.sh:1211:        data=json.dumps(
+autonomous_agent/build_agent_v49.sh:1220:        with urllib.request.urlopen(
+autonomous_agent/build_agent_v49.sh:1703:            json.dumps(
+autonomous_agent/build_agent_v49.sh:1717:            + json.dumps(
+autonomous_agent/build_agent_v49.sh:2166:        json.dumps({
+autonomous_agent/build_agent_v49.sh:2427:    data=json.dumps(
+autonomous_agent/build_agent_v49.sh:2435:with urllib.request.urlopen(
+autonomous_agent/build_v37_autonomy.py:31:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v37_autonomy.py:32:        with urllib.request.urlopen(req) as response:
+autonomous_agent/build_v37_autonomy.py:120:Path(target).write_text(s.strip() + "\n\n" + AUTONOMY_LOGIC, encoding="utf-8")
+autonomous_agent/build_v37_autonomy.py:123:Path("tools/test_all.sh").write_text("#!/usr/bin/env bash\nset -Eeuo pipefail\npython3 -m py_compile safe_agent.py\n./tools/verify_state_hash.sh\necho 'Syntax & State OK.'\n", encoding="utf-8")
+autonomous_agent/build_v39_standalone.py:15:STATE_FILE = Path("agent_state.json")
+autonomous_agent/build_v39_standalone.py:16:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/build_v39_standalone.py:17:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/build_v39_standalone.py:18:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/build_v39_standalone.py:36:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/build_v39_standalone.py:38:def audit_log(event, details=None):
+autonomous_agent/build_v39_standalone.py:40:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_v39_standalone.py:41:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/build_v39_standalone.py:59:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/build_v39_standalone.py:60:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/build_v39_standalone.py:61:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_v39_standalone.py:62:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_v39_standalone.py:69:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v39_standalone.py:70:        with urllib.request.urlopen(req) as response:
+autonomous_agent/build_v39_standalone.py:163:Path(target).write_text(V39_CODE, encoding="utf-8")
+autonomous_agent/build_v40.py:15:STATE_FILE = Path("agent_state.json")
+autonomous_agent/build_v40.py:16:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/build_v40.py:17:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/build_v40.py:18:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/build_v40.py:36:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/build_v40.py:38:def audit_log(event, details=None):
+autonomous_agent/build_v40.py:40:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_v40.py:41:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/build_v40.py:59:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/build_v40.py:60:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/build_v40.py:61:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_v40.py:62:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_v40.py:69:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v40.py:70:        with urllib.request.urlopen(req) as response:
+autonomous_agent/build_v40.py:172:Path(target).write_text(V40_CODE, encoding="utf-8")
+autonomous_agent/build_v41_robust.py:15:STATE_FILE = Path("agent_state.json")
+autonomous_agent/build_v41_robust.py:16:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/build_v41_robust.py:17:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/build_v41_robust.py:18:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/build_v41_robust.py:35:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/build_v41_robust.py:37:def audit_log(event, details=None):
+autonomous_agent/build_v41_robust.py:39:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_v41_robust.py:40:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/build_v41_robust.py:56:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/build_v41_robust.py:57:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/build_v41_robust.py:58:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_v41_robust.py:59:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_v41_robust.py:65:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v41_robust.py:66:        with urllib.request.urlopen(req) as response:
+autonomous_agent/build_v41_robust.py:151:                Path(filepath).write_text(content, encoding="utf-8")
+autonomous_agent/build_v41_robust.py:171:Path(target).write_text(V41_CODE, encoding="utf-8")
+autonomous_agent/build_v42.py:15:STATE_FILE = Path("agent_state.json")
+autonomous_agent/build_v42.py:16:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/build_v42.py:17:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/build_v42.py:18:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/build_v42.py:35:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/build_v42.py:37:def audit_log(event, details=None):
+autonomous_agent/build_v42.py:39:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_v42.py:40:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/build_v42.py:56:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/build_v42.py:57:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/build_v42.py:58:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_v42.py:59:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_v42.py:65:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v42.py:66:        with urllib.request.urlopen(req) as response:
+autonomous_agent/build_v42.py:156:                Path(filepath).write_text(content, encoding="utf-8")
+autonomous_agent/build_v42.py:176:Path(target).write_text(V42_CODE, encoding="utf-8")
+autonomous_agent/build_v43_markdown.py:15:STATE_FILE = Path("agent_state.json")
+autonomous_agent/build_v43_markdown.py:16:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/build_v43_markdown.py:17:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/build_v43_markdown.py:18:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/build_v43_markdown.py:33:def calculate_state_hash(state): return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/build_v43_markdown.py:35:def audit_log(event, details=None):
+autonomous_agent/build_v43_markdown.py:37:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/build_v43_markdown.py:38:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/build_v43_markdown.py:53:    if STATE_FILE.exists(): STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/build_v43_markdown.py:54:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/build_v43_markdown.py:55:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/build_v43_markdown.py:56:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/build_v43_markdown.py:63:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/build_v43_markdown.py:64:        with urllib.request.urlopen(req) as response:
+autonomous_agent/fix_and_build.py:43:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_and_build.py:46:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_and_build.py:47:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_and_build.py:48:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_and_build.py:49:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_and_build.py:51:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v30.py:42:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_v30.py:45:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_v30.py:46:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v30.py:47:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v30.py:48:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_v30.py:50:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v33.py:42:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_v33.py:45:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_v33.py:46:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v33.py:47:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v33.py:48:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_v33.py:50:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v34_hard.py:57:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_v34_hard.py:60:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_v34_hard.py:61:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v34_hard.py:62:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v34_hard.py:63:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_v34_hard.py:65:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v34_ultimate.py:57:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:58:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:60:        STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:61:        audit_log("state_saved", {{"tasks_completed": state.get("tasks_completed")}})
+autonomous_agent/fix_v34_ultimate.py:72:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:76:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_v34_ultimate.py:77:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:78:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:79:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_v34_ultimate.py:81:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v36.py:24:    "audit_log", "state_hash"
+autonomous_agent/fix_v36.py:34:STATE_FILE = Path("agent_state.json")
+autonomous_agent/fix_v36.py:35:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/fix_v36.py:36:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/fix_v36.py:37:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/fix_v36.py:54:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/fix_v36.py:56:def audit_log(event, details=None):
+autonomous_agent/fix_v36.py:58:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/fix_v36.py:59:        f.write(json.dumps(entry) + "\\n")
+autonomous_agent/fix_v36.py:78:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/fix_v36.py:79:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v36.py:80:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/fix_v36.py:81:    audit_log("state_saved", {{"tasks_completed": state.get("tasks_completed")}})
+autonomous_agent/fix_v36.py:91:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/fix_v36.py:95:encoded = json.dumps(initial_state, sort_keys=True).encode("utf-8")
+autonomous_agent/fix_v36.py:96:Path("agent_state.json").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v36.py:97:Path("agent_state.json.bak").write_text(json.dumps(initial_state, indent=2), encoding="utf-8")
+autonomous_agent/fix_v36.py:98:Path("agent_state.sha256").write_text(hashlib.sha256(encoded).hexdigest(), encoding="utf-8")
+autonomous_agent/fix_v36.py:100:Path("tools/test_all.sh").write_text("""#!/usr/bin/env bash
+autonomous_agent/fix_v38_debug.py:30:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/fix_v38_debug.py:31:        with urllib.request.urlopen(req) as response:
+autonomous_agent/fix_v38_debug.py:128:Path(target).write_text(s, encoding="utf-8")
+autonomous_agent/probe_tool_calls.py:35:    data=json.dumps(payload).encode(),
+autonomous_agent/probe_tool_calls.py:39:with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/probe_tool_calls.py:45:print(json.dumps(message, indent=2, ensure_ascii=False))
+autonomous_agent/probe_tool_calls.py:49:print(json.dumps(
+autonomous_agent/safe_agent.py:20:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent.py:21:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent.py:22:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent.py:23:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent.py:99:    return json.dumps(
+autonomous_agent/safe_agent.py:108:    return hashlib.sha256(
+autonomous_agent/safe_agent.py:128:        with os.fdopen(
+autonomous_agent/safe_agent.py:165:    encoded = json.dumps(
+autonomous_agent/safe_agent.py:268:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent.py:273:            json.dumps(
+autonomous_agent/safe_agent.py:582:        data=json.dumps(
+autonomous_agent/safe_agent.py:591:        with urllib.request.urlopen(
+autonomous_agent/safe_agent.py:841:            json.dumps(
+autonomous_agent/safe_agent.py:855:                    + json.dumps(
+autonomous_agent/safe_agent_v1.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v1.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v1.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v1.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v1.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v1.py:58:            json.dumps(
+autonomous_agent/safe_agent_v1.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v1.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v1.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v1.py:170:        with STATE_BACKUP_FILE.open(
+autonomous_agent/safe_agent_v1.py:183:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v1.py:184:        json.dumps(
+autonomous_agent/safe_agent_v1.py:218:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v1.py:244:    encoded = json.dumps(
+autonomous_agent/safe_agent_v1.py:257:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v1.py:265:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v1.py:465:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v1.py:469:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v1.py:543:    print(json.dumps(
+autonomous_agent/safe_agent_v1.py:620:        print(json.dumps(
+autonomous_agent/safe_agent_v1.py:638:                    + json.dumps(
+autonomous_agent/safe_agent_v11.py:100:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v11.py:201:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v11.py:205:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v11.py:315:                    + json.dumps(
+autonomous_agent/safe_agent_v11.py:322:                    + json.dumps(sorted(used_tools))
+autonomous_agent/safe_agent_v12.py:93:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v12.py:197:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v12.py:201:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v13.py:99:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v13.py:206:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v13.py:210:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v13.py:358:                    + json.dumps(
+autonomous_agent/safe_agent_v13.py:364:                    + json.dumps(sorted(used_tools))
+autonomous_agent/safe_agent_v14.py:107:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v14.py:210:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v14.py:214:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v14.py:344:                    + json.dumps(
+autonomous_agent/safe_agent_v14.py:350:                    + json.dumps(sorted(used_tools))
+autonomous_agent/safe_agent_v15.py:222:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v15.py:226:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v15.py:343:        print(json.dumps(
+autonomous_agent/safe_agent_v15.py:361:                    + json.dumps(
+autonomous_agent/safe_agent_v16.py:195:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v16.py:199:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v16.py:313:        print(json.dumps(
+autonomous_agent/safe_agent_v16.py:331:                    + json.dumps(
+autonomous_agent/safe_agent_v18.py:195:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v18.py:199:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v18.py:313:        print(json.dumps(
+autonomous_agent/safe_agent_v18.py:331:                    + json.dumps(
+autonomous_agent/safe_agent_v19.py:214:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v19.py:218:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v19.py:341:        print(json.dumps(
+autonomous_agent/safe_agent_v19.py:359:                    + json.dumps(
+autonomous_agent/safe_agent_v2.py:63:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v2.py:67:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v20.py:23:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v20.py:43:    with STATE_FILE.open(
+autonomous_agent/safe_agent_v20.py:62:    encoded = json.dumps(
+autonomous_agent/safe_agent_v20.py:73:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v20.py:271:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v20.py:275:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v20.py:344:    print(json.dumps(
+autonomous_agent/safe_agent_v20.py:407:        print(json.dumps(
+autonomous_agent/safe_agent_v20.py:425:                    + json.dumps(
+autonomous_agent/safe_agent_v21.py:23:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v21.py:26:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v21.py:42:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v21.py:47:            json.dumps(
+autonomous_agent/safe_agent_v21.py:71:    with STATE_FILE.open(
+autonomous_agent/safe_agent_v21.py:90:    encoded = json.dumps(
+autonomous_agent/safe_agent_v21.py:101:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v21.py:299:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v21.py:303:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v21.py:377:    print(json.dumps(
+autonomous_agent/safe_agent_v21.py:440:        print(json.dumps(
+autonomous_agent/safe_agent_v21.py:458:                    + json.dumps(
+autonomous_agent/safe_agent_v22.py:23:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v22.py:26:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v22.py:50:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v22.py:55:            json.dumps(
+autonomous_agent/safe_agent_v22.py:79:    with STATE_FILE.open(
+autonomous_agent/safe_agent_v22.py:98:    encoded = json.dumps(
+autonomous_agent/safe_agent_v22.py:109:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v22.py:307:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v22.py:311:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v22.py:385:    print(json.dumps(
+autonomous_agent/safe_agent_v22.py:462:        print(json.dumps(
+autonomous_agent/safe_agent_v22.py:480:                    + json.dumps(
+autonomous_agent/safe_agent_v23.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v23.py:25:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v23.py:28:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v23.py:52:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v23.py:57:            json.dumps(
+autonomous_agent/safe_agent_v23.py:72:    data = json.dumps(
+autonomous_agent/safe_agent_v23.py:78:    return hashlib.sha256(
+autonomous_agent/safe_agent_v23.py:101:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v23.py:124:    with STATE_FILE.open(
+autonomous_agent/safe_agent_v23.py:143:    encoded = json.dumps(
+autonomous_agent/safe_agent_v23.py:154:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v23.py:354:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v23.py:358:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v23.py:432:    print(json.dumps(
+autonomous_agent/safe_agent_v23.py:509:        print(json.dumps(
+autonomous_agent/safe_agent_v23.py:527:                    + json.dumps(
+autonomous_agent/safe_agent_v23_1.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v23_1.py:25:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v23_1.py:28:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v23_1.py:52:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v23_1.py:57:            json.dumps(
+autonomous_agent/safe_agent_v23_1.py:72:    data = json.dumps(
+autonomous_agent/safe_agent_v23_1.py:78:    return hashlib.sha256(
+autonomous_agent/safe_agent_v23_1.py:101:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v23_1.py:126:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v23_1.py:151:    encoded = json.dumps(
+autonomous_agent/safe_agent_v23_1.py:162:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v23_1.py:362:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v23_1.py:366:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v23_1.py:440:    print(json.dumps(
+autonomous_agent/safe_agent_v23_1.py:517:        print(json.dumps(
+autonomous_agent/safe_agent_v23_1.py:535:                    + json.dumps(
+autonomous_agent/safe_agent_v23_2.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v23_2.py:25:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v23_2.py:28:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v23_2.py:52:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v23_2.py:57:            json.dumps(
+autonomous_agent/safe_agent_v23_2.py:72:    data = json.dumps(
+autonomous_agent/safe_agent_v23_2.py:78:    return hashlib.sha256(
+autonomous_agent/safe_agent_v23_2.py:101:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v23_2.py:126:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v23_2.py:151:    encoded = json.dumps(
+autonomous_agent/safe_agent_v23_2.py:162:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v23_2.py:362:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v23_2.py:366:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v23_2.py:440:    print(json.dumps(
+autonomous_agent/safe_agent_v23_2.py:517:        print(json.dumps(
+autonomous_agent/safe_agent_v23_2.py:535:                    + json.dumps(
+autonomous_agent/safe_agent_v24.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v24.py:25:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v24.py:28:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v24.py:52:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v24.py:57:            json.dumps(
+autonomous_agent/safe_agent_v24.py:72:    data = json.dumps(
+autonomous_agent/safe_agent_v24.py:78:    return hashlib.sha256(
+autonomous_agent/safe_agent_v24.py:101:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v24.py:175:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v24.py:203:    encoded = json.dumps(
+autonomous_agent/safe_agent_v24.py:214:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v24.py:414:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v24.py:418:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v24.py:492:    print(json.dumps(
+autonomous_agent/safe_agent_v24.py:569:        print(json.dumps(
+autonomous_agent/safe_agent_v24.py:587:                    + json.dumps(
+autonomous_agent/safe_agent_v25.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v25.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v25.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v25.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v25.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v25.py:58:            json.dumps(
+autonomous_agent/safe_agent_v25.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v25.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v25.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v25.py:170:        with STATE_BACKUP_FILE.open(
+autonomous_agent/safe_agent_v25.py:183:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v25.py:184:        json.dumps(
+autonomous_agent/safe_agent_v25.py:218:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v25.py:244:    encoded = json.dumps(
+autonomous_agent/safe_agent_v25.py:257:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v25.py:265:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v25.py:465:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v25.py:469:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v25.py:543:    print(json.dumps(
+autonomous_agent/safe_agent_v25.py:620:        print(json.dumps(
+autonomous_agent/safe_agent_v25.py:638:                    + json.dumps(
+autonomous_agent/safe_agent_v26.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v26.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v26.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v26.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v26.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v26.py:58:            json.dumps(
+autonomous_agent/safe_agent_v26.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v26.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v26.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v26.py:170:        with STATE_BACKUP_FILE.open(
+autonomous_agent/safe_agent_v26.py:183:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v26.py:184:        json.dumps(
+autonomous_agent/safe_agent_v26.py:218:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v26.py:243:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v26.py:244:    encoded = json.dumps(state, indent=2)
+autonomous_agent/safe_agent_v26.py:245:    STATE_FILE.write_text(encoded, encoding="utf-8")
+autonomous_agent/safe_agent_v26.py:246:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v26.py:247:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v26.py:252:    encoded = json.dumps(
+autonomous_agent/safe_agent_v26.py:265:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v26.py:273:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v26.py:473:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v26.py:477:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v26.py:551:    print(json.dumps(
+autonomous_agent/safe_agent_v26.py:628:        print(json.dumps(
+autonomous_agent/safe_agent_v26.py:646:                    + json.dumps(
+autonomous_agent/safe_agent_v26.py:661:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v26.py:669:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v26.py:670:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v27.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v27.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v27.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v27.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v27.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v27.py:58:            json.dumps(
+autonomous_agent/safe_agent_v27.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v27.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v27.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v27.py:170:        with STATE_BACKUP_FILE.open(
+autonomous_agent/safe_agent_v27.py:183:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v27.py:184:        json.dumps(
+autonomous_agent/safe_agent_v27.py:218:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v27.py:243:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v27.py:244:    encoded = json.dumps(state, indent=2)
+autonomous_agent/safe_agent_v27.py:245:    STATE_FILE.write_text(encoded, encoding="utf-8")
+autonomous_agent/safe_agent_v27.py:246:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v27.py:247:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v27.py:252:    encoded = json.dumps(
+autonomous_agent/safe_agent_v27.py:265:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v27.py:273:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v27.py:473:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v27.py:477:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v27.py:551:    print(json.dumps(
+autonomous_agent/safe_agent_v27.py:628:        print(json.dumps(
+autonomous_agent/safe_agent_v27.py:646:                    + json.dumps(
+autonomous_agent/safe_agent_v27.py:661:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v27.py:669:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v27.py:670:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v28.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v28.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v28.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v28.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v28.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v28.py:58:            json.dumps(
+autonomous_agent/safe_agent_v28.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v28.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v28.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v28.py:170:        with STATE_BACKUP_FILE.open(
+autonomous_agent/safe_agent_v28.py:183:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v28.py:184:        json.dumps(
+autonomous_agent/safe_agent_v28.py:218:        with STATE_FILE.open(
+autonomous_agent/safe_agent_v28.py:243:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v28.py:244:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v28.py:245:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v28.py:246:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v28.py:251:    encoded = json.dumps(
+autonomous_agent/safe_agent_v28.py:264:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v28.py:272:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v28.py:472:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v28.py:476:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v28.py:550:    print(json.dumps(
+autonomous_agent/safe_agent_v28.py:627:        print(json.dumps(
+autonomous_agent/safe_agent_v28.py:645:                    + json.dumps(
+autonomous_agent/safe_agent_v28.py:660:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v28.py:668:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v28.py:669:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v29.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v29.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v29.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v29.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v29.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v29.py:58:            json.dumps(
+autonomous_agent/safe_agent_v29.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v29.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v29.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v29.py:179:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v29.py:180:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v29.py:181:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v29.py:182:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v29.py:187:    encoded = json.dumps(
+autonomous_agent/safe_agent_v29.py:200:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v29.py:208:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v29.py:408:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v29.py:412:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v29.py:486:    print(json.dumps(
+autonomous_agent/safe_agent_v29.py:563:        print(json.dumps(
+autonomous_agent/safe_agent_v29.py:581:                    + json.dumps(
+autonomous_agent/safe_agent_v29.py:596:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v29.py:604:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v29.py:605:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v3.py:80:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v3.py:84:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v30.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v30.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v30.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v30.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v30.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v30.py:58:            json.dumps(
+autonomous_agent/safe_agent_v30.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v30.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v30.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v30.py:184:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v30.py:185:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v30.py:186:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v30.py:187:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v30.py:192:    encoded = json.dumps(
+autonomous_agent/safe_agent_v30.py:205:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v30.py:213:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v30.py:413:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v30.py:417:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v30.py:491:    print(json.dumps(
+autonomous_agent/safe_agent_v30.py:568:        print(json.dumps(
+autonomous_agent/safe_agent_v30.py:586:                    + json.dumps(
+autonomous_agent/safe_agent_v30.py:601:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v30.py:609:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v30.py:610:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v31.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v31.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v31.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v31.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v31.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v31.py:58:            json.dumps(
+autonomous_agent/safe_agent_v31.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v31.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v31.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v31.py:187:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v31.py:188:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v31.py:189:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v31.py:190:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v31.py:195:    encoded = json.dumps(
+autonomous_agent/safe_agent_v31.py:208:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v31.py:216:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v31.py:416:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v31.py:420:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v31.py:494:    print(json.dumps(
+autonomous_agent/safe_agent_v31.py:571:        print(json.dumps(
+autonomous_agent/safe_agent_v31.py:589:                    + json.dumps(
+autonomous_agent/safe_agent_v31.py:604:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v31.py:612:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v31.py:613:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v32.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v32.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v32.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v32.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v32.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v32.py:58:            json.dumps(
+autonomous_agent/safe_agent_v32.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v32.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v32.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v32.py:190:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v32.py:191:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v32.py:192:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v32.py:193:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v32.py:198:    encoded = json.dumps(
+autonomous_agent/safe_agent_v32.py:211:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v32.py:219:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v32.py:419:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v32.py:423:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v32.py:497:    print(json.dumps(
+autonomous_agent/safe_agent_v32.py:574:        print(json.dumps(
+autonomous_agent/safe_agent_v32.py:592:                    + json.dumps(
+autonomous_agent/safe_agent_v32.py:607:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v32.py:615:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v32.py:616:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v33.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v33.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v33.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v33.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v33.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v33.py:58:            json.dumps(
+autonomous_agent/safe_agent_v33.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v33.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v33.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v33.py:164:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(), encoding="utf-8")
+autonomous_agent/safe_agent_v33.py:165:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v33.py:166:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v33.py:167:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v33.py:172:    encoded = json.dumps(
+autonomous_agent/safe_agent_v33.py:185:        STATE_BACKUP_FILE.write_text(
+autonomous_agent/safe_agent_v33.py:193:    STATE_FILE.write_text(
+autonomous_agent/safe_agent_v33.py:393:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v33.py:397:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v33.py:489:    print(json.dumps(
+autonomous_agent/safe_agent_v33.py:566:        print(json.dumps(
+autonomous_agent/safe_agent_v33.py:584:                    + json.dumps(
+autonomous_agent/safe_agent_v33.py:599:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v33.py:607:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v33.py:608:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v34.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v34.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v34.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v34.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v34.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v34.py:58:            json.dumps(
+autonomous_agent/safe_agent_v34.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v34.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v34.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v34.py:302:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v34.py:306:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v34.py:401:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/safe_agent_v34.py:402:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v34.py:404:        STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v34.py:405:        audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v34.py:421:    print(json.dumps(
+autonomous_agent/safe_agent_v34.py:498:        print(json.dumps(
+autonomous_agent/safe_agent_v34.py:516:                    + json.dumps(
+autonomous_agent/safe_agent_v34.py:531:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v34.py:539:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v34.py:540:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v35.py:24:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v35.py:25:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v35.py:26:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v35.py:29:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v35.py:53:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v35.py:58:            json.dumps(
+autonomous_agent/safe_agent_v35.py:73:    data = json.dumps(
+autonomous_agent/safe_agent_v35.py:79:    return hashlib.sha256(
+autonomous_agent/safe_agent_v35.py:102:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v35.py:302:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v35.py:306:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v35.py:401:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/safe_agent_v35.py:402:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v35.py:404:        STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v35.py:405:        audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v35.py:421:    print(json.dumps(
+autonomous_agent/safe_agent_v35.py:498:        print(json.dumps(
+autonomous_agent/safe_agent_v35.py:516:                    + json.dumps(
+autonomous_agent/safe_agent_v35.py:531:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v35.py:539:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v35.py:540:        f.write(_json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v36.py:26:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v36.py:50:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v36.py:55:            json.dumps(
+autonomous_agent/safe_agent_v36.py:82:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v36.py:282:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v36.py:286:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v36.py:352:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v36.py:353:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v36.py:354:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v36.py:355:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v36.py:372:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/safe_agent_v36.py:374:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v36.py:376:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v36.py:377:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v36.py:396:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/safe_agent_v36.py:397:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v36.py:398:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v36.py:399:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v36.py:414:    print(json.dumps(
+autonomous_agent/safe_agent_v36.py:491:        print(json.dumps(
+autonomous_agent/safe_agent_v36.py:509:                    + json.dumps(
+autonomous_agent/safe_agent_v37.py:26:AUDIT_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v37.py:50:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v37.py:55:            json.dumps(
+autonomous_agent/safe_agent_v37.py:82:    STATE_HASH_FILE.write_text(
+autonomous_agent/safe_agent_v37.py:282:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v37.py:286:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v37.py:352:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v37.py:353:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v37.py:354:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v37.py:355:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v37.py:372:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/safe_agent_v37.py:374:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v37.py:376:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v37.py:377:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v37.py:396:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/safe_agent_v37.py:397:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v37.py:398:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v37.py:399:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v37.py:410:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/safe_agent_v37.py:411:        with urllib.request.urlopen(req) as response:
+autonomous_agent/safe_agent_v38.py:16:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/safe_agent_v38.py:17:        with urllib.request.urlopen(req) as response:
+autonomous_agent/safe_agent_v39.py:7:STATE_FILE = Path("agent_state.json")
+autonomous_agent/safe_agent_v39.py:8:STATE_BACKUP_FILE = Path("agent_state.json.bak")
+autonomous_agent/safe_agent_v39.py:9:STATE_HASH_FILE = Path("agent_state.sha256")
+autonomous_agent/safe_agent_v39.py:10:AUDIT_LOG_FILE = Path("audit_log.jsonl")
+autonomous_agent/safe_agent_v39.py:28:    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+autonomous_agent/safe_agent_v39.py:30:def audit_log(event, details=None):
+autonomous_agent/safe_agent_v39.py:32:    with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
+autonomous_agent/safe_agent_v39.py:33:        f.write(json.dumps(entry) + "\n")
+autonomous_agent/safe_agent_v39.py:51:        STATE_BACKUP_FILE.write_text(STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+autonomous_agent/safe_agent_v39.py:52:    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+autonomous_agent/safe_agent_v39.py:53:    STATE_HASH_FILE.write_text(calculate_state_hash(state), encoding="utf-8")
+autonomous_agent/safe_agent_v39.py:54:    audit_log("state_saved", {"tasks_completed": state.get("tasks_completed")})
+autonomous_agent/safe_agent_v39.py:61:        req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+autonomous_agent/safe_agent_v39.py:62:        with urllib.request.urlopen(req) as response:
+autonomous_agent/safe_agent_v4.py:28:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v4.py:81:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v4.py:85:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v40.py:19:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v40.py:20:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v40.py:21:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v40.py:22:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v40.py:91:    return json.dumps(
+autonomous_agent/safe_agent_v40.py:100:    return hashlib.sha256(
+autonomous_agent/safe_agent_v40.py:157:        with os.fdopen(
+autonomous_agent/safe_agent_v40.py:179:    encoded = json.dumps(
+autonomous_agent/safe_agent_v40.py:283:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v40.py:288:            json.dumps(
+autonomous_agent/safe_agent_v40.py:309:        data=json.dumps(payload).encode("utf-8"),
+autonomous_agent/safe_agent_v40.py:316:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v40.py:573:        print(json.dumps(
+autonomous_agent/safe_agent_v40.py:584:                    + json.dumps(
+autonomous_agent/safe_agent_v41.py:21:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v41.py:22:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v41.py:23:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v41.py:24:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v41.py:100:    return json.dumps(
+autonomous_agent/safe_agent_v41.py:109:    return hashlib.sha256(
+autonomous_agent/safe_agent_v41.py:129:        with os.fdopen(
+autonomous_agent/safe_agent_v41.py:166:    encoded = json.dumps(
+autonomous_agent/safe_agent_v41.py:270:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v41.py:275:            json.dumps(
+autonomous_agent/safe_agent_v41.py:300:        data=json.dumps(
+autonomous_agent/safe_agent_v41.py:309:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v41.py:621:            json.dumps(
+autonomous_agent/safe_agent_v41.py:633:                    + json.dumps(
+autonomous_agent/safe_agent_v42.py:20:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v42.py:21:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v42.py:22:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v42.py:23:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v42.py:99:    return json.dumps(
+autonomous_agent/safe_agent_v42.py:108:    return hashlib.sha256(
+autonomous_agent/safe_agent_v42.py:128:        with os.fdopen(
+autonomous_agent/safe_agent_v42.py:165:    encoded = json.dumps(
+autonomous_agent/safe_agent_v42.py:268:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v42.py:273:            json.dumps(
+autonomous_agent/safe_agent_v42.py:582:        data=json.dumps(
+autonomous_agent/safe_agent_v42.py:591:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v42.py:841:            json.dumps(
+autonomous_agent/safe_agent_v42.py:855:                    + json.dumps(
+autonomous_agent/safe_agent_v43.py:20:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v43.py:21:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v43.py:22:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v43.py:24:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v43.py:25:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v43.py:104:    return json.dumps(
+autonomous_agent/safe_agent_v43.py:113:    return hashlib.sha256(
+autonomous_agent/safe_agent_v43.py:133:        with os.fdopen(
+autonomous_agent/safe_agent_v43.py:170:    encoded = json.dumps(
+autonomous_agent/safe_agent_v43.py:268:    return hashlib.sha256(
+autonomous_agent/safe_agent_v43.py:273:def read_audit_head():
+autonomous_agent/safe_agent_v43.py:304:    previous = read_audit_head()
+autonomous_agent/safe_agent_v43.py:317:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v43.py:322:            json.dumps(
+autonomous_agent/safe_agent_v43.py:342:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v43.py:381:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v43.py:742:        data=json.dumps(
+autonomous_agent/safe_agent_v43.py:751:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v43.py:1139:            json.dumps(
+autonomous_agent/safe_agent_v43.py:1156:                    + json.dumps(
+autonomous_agent/safe_agent_v44.py:21:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v44.py:22:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v44.py:23:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v44.py:25:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v44.py:26:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v44.py:107:    return hashlib.sha256(
+autonomous_agent/safe_agent_v44.py:108:        json.dumps(
+autonomous_agent/safe_agent_v44.py:208:    return json.dumps(
+autonomous_agent/safe_agent_v44.py:217:    return hashlib.sha256(
+autonomous_agent/safe_agent_v44.py:237:        with os.fdopen(
+autonomous_agent/safe_agent_v44.py:274:    encoded = json.dumps(
+autonomous_agent/safe_agent_v44.py:368:    return hashlib.sha256(
+autonomous_agent/safe_agent_v44.py:377:def read_audit_head():
+autonomous_agent/safe_agent_v44.py:411:    previous = read_audit_head()
+autonomous_agent/safe_agent_v44.py:424:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v44.py:429:            json.dumps(
+autonomous_agent/safe_agent_v44.py:449:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v44.py:488:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v44.py:943:        data=json.dumps(
+autonomous_agent/safe_agent_v44.py:952:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v44.py:1300:            json.dumps(
+autonomous_agent/safe_agent_v44.py:1317:                    + json.dumps(
+autonomous_agent/safe_agent_v45.py:22:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v45.py:23:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v45.py:24:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v45.py:26:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v45.py:27:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v45.py:104:    return hashlib.sha256(
+autonomous_agent/safe_agent_v45.py:105:        json.dumps(
+autonomous_agent/safe_agent_v45.py:205:    return json.dumps(
+autonomous_agent/safe_agent_v45.py:214:    return hashlib.sha256(
+autonomous_agent/safe_agent_v45.py:234:        with os.fdopen(
+autonomous_agent/safe_agent_v45.py:274:    encoded = json.dumps(
+autonomous_agent/safe_agent_v45.py:368:    return hashlib.sha256(
+autonomous_agent/safe_agent_v45.py:377:def read_audit_head():
+autonomous_agent/safe_agent_v45.py:411:    previous = read_audit_head()
+autonomous_agent/safe_agent_v45.py:424:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v45.py:429:            json.dumps(
+autonomous_agent/safe_agent_v45.py:449:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v45.py:490:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v45.py:1041:        data=json.dumps(
+autonomous_agent/safe_agent_v45.py:1050:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v45.py:1422:            json.dumps(
+autonomous_agent/safe_agent_v45.py:1439:                    + json.dumps(
+autonomous_agent/safe_agent_v46.py:22:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v46.py:23:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v46.py:24:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v46.py:26:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v46.py:27:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v46.py:117:    return hashlib.sha256(
+autonomous_agent/safe_agent_v46.py:118:        json.dumps(
+autonomous_agent/safe_agent_v46.py:221:    return json.dumps(
+autonomous_agent/safe_agent_v46.py:230:    return hashlib.sha256(
+autonomous_agent/safe_agent_v46.py:250:        with os.fdopen(
+autonomous_agent/safe_agent_v46.py:292:    encoded = json.dumps(
+autonomous_agent/safe_agent_v46.py:396:    return hashlib.sha256(
+autonomous_agent/safe_agent_v46.py:405:def read_audit_head():
+autonomous_agent/safe_agent_v46.py:422:    encoded = json.dumps(
+autonomous_agent/safe_agent_v46.py:434:        "sha256": hashlib.sha256(
+autonomous_agent/safe_agent_v46.py:463:    previous = read_audit_head()
+autonomous_agent/safe_agent_v46.py:476:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v46.py:481:            json.dumps(
+autonomous_agent/safe_agent_v46.py:501:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v46.py:544:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v46.py:1099:    encoded_messages = json.dumps(
+autonomous_agent/safe_agent_v46.py:1124:        data=json.dumps(
+autonomous_agent/safe_agent_v46.py:1133:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v46.py:1591:            json.dumps(
+autonomous_agent/safe_agent_v46.py:1605:            + json.dumps(
+autonomous_agent/safe_agent_v47.py:22:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v47.py:23:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v47.py:24:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v47.py:26:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v47.py:27:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v47.py:120:    return hashlib.sha256(
+autonomous_agent/safe_agent_v47.py:121:        json.dumps(
+autonomous_agent/safe_agent_v47.py:224:    return json.dumps(
+autonomous_agent/safe_agent_v47.py:233:    return hashlib.sha256(
+autonomous_agent/safe_agent_v47.py:253:        with os.fdopen(
+autonomous_agent/safe_agent_v47.py:295:    encoded = json.dumps(
+autonomous_agent/safe_agent_v47.py:399:    return hashlib.sha256(
+autonomous_agent/safe_agent_v47.py:408:def read_audit_head():
+autonomous_agent/safe_agent_v47.py:425:    encoded = json.dumps(
+autonomous_agent/safe_agent_v47.py:437:        "sha256": hashlib.sha256(
+autonomous_agent/safe_agent_v47.py:466:    previous = read_audit_head()
+autonomous_agent/safe_agent_v47.py:479:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v47.py:484:            json.dumps(
+autonomous_agent/safe_agent_v47.py:504:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v47.py:547:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v47.py:1144:    encoded_messages = json.dumps(
+autonomous_agent/safe_agent_v47.py:1169:        data=json.dumps(
+autonomous_agent/safe_agent_v47.py:1178:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v47.py:1661:            json.dumps(
+autonomous_agent/safe_agent_v47.py:1675:            + json.dumps(
+autonomous_agent/safe_agent_v48.py:22:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v48.py:23:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v48.py:24:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v48.py:26:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v48.py:27:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v48.py:120:    return hashlib.sha256(
+autonomous_agent/safe_agent_v48.py:121:        json.dumps(
+autonomous_agent/safe_agent_v48.py:224:    return json.dumps(
+autonomous_agent/safe_agent_v48.py:233:    return hashlib.sha256(
+autonomous_agent/safe_agent_v48.py:253:        with os.fdopen(
+autonomous_agent/safe_agent_v48.py:295:    encoded = json.dumps(
+autonomous_agent/safe_agent_v48.py:399:    return hashlib.sha256(
+autonomous_agent/safe_agent_v48.py:408:def read_audit_head():
+autonomous_agent/safe_agent_v48.py:425:    encoded = json.dumps(
+autonomous_agent/safe_agent_v48.py:437:        "sha256": hashlib.sha256(
+autonomous_agent/safe_agent_v48.py:466:    previous = read_audit_head()
+autonomous_agent/safe_agent_v48.py:479:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v48.py:484:            json.dumps(
+autonomous_agent/safe_agent_v48.py:504:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v48.py:547:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v48.py:1144:    encoded_messages = json.dumps(
+autonomous_agent/safe_agent_v48.py:1169:        data=json.dumps(
+autonomous_agent/safe_agent_v48.py:1178:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v48.py:1661:            json.dumps(
+autonomous_agent/safe_agent_v48.py:1675:            + json.dumps(
+autonomous_agent/safe_agent_v49.py:22:STATE_FILE = ROOT / "agent_state.json"
+autonomous_agent/safe_agent_v49.py:23:STATE_BACKUP = ROOT / "agent_state.json.bak"
+autonomous_agent/safe_agent_v49.py:24:STATE_HASH = ROOT / "agent_state.sha256"
+autonomous_agent/safe_agent_v49.py:26:AUDIT_FILE = ROOT / "audit_log.jsonl"
+autonomous_agent/safe_agent_v49.py:27:AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+autonomous_agent/safe_agent_v49.py:120:    return hashlib.sha256(
+autonomous_agent/safe_agent_v49.py:121:        json.dumps(
+autonomous_agent/safe_agent_v49.py:224:    return json.dumps(
+autonomous_agent/safe_agent_v49.py:233:    return hashlib.sha256(
+autonomous_agent/safe_agent_v49.py:253:        with os.fdopen(
+autonomous_agent/safe_agent_v49.py:295:    encoded = json.dumps(
+autonomous_agent/safe_agent_v49.py:399:    return hashlib.sha256(
+autonomous_agent/safe_agent_v49.py:408:def read_audit_head():
+autonomous_agent/safe_agent_v49.py:425:    encoded = json.dumps(
+autonomous_agent/safe_agent_v49.py:437:        "sha256": hashlib.sha256(
+autonomous_agent/safe_agent_v49.py:466:    previous = read_audit_head()
+autonomous_agent/safe_agent_v49.py:479:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v49.py:484:            json.dumps(
+autonomous_agent/safe_agent_v49.py:504:    with AUDIT_FILE.open(
+autonomous_agent/safe_agent_v49.py:547:    if read_audit_head() != previous:
+autonomous_agent/safe_agent_v49.py:1144:    encoded_messages = json.dumps(
+autonomous_agent/safe_agent_v49.py:1169:        data=json.dumps(
+autonomous_agent/safe_agent_v49.py:1178:        with urllib.request.urlopen(
+autonomous_agent/safe_agent_v49.py:1661:            json.dumps(
+autonomous_agent/safe_agent_v49.py:1675:            + json.dumps(
+autonomous_agent/safe_agent_v4_attack.py:28:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v4_attack.py:81:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v4_attack.py:85:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v5.py:60:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v5.py:64:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v5.py:157:                        + json.dumps(tool_result, ensure_ascii=False)
+autonomous_agent/safe_agent_v6.py:62:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v6.py:66:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v6.py:179:                    + json.dumps(state, ensure_ascii=False)
+autonomous_agent/safe_agent_v6.py:192:    print(json.dumps(state, indent=2, ensure_ascii=False))
+autonomous_agent/safe_agent_v6.py:206:                + json.dumps(state, indent=2, ensure_ascii=False)
+autonomous_agent/safe_agent_v7.py:46:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v7.py:113:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v7.py:117:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v8.py:49:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v8.py:126:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v8.py:130:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/safe_agent_v8.py:186:        call_key = json.dumps(
+autonomous_agent/safe_agent_v9.py:49:    target.write_text(content, encoding="utf-8")
+autonomous_agent/safe_agent_v9.py:207:        data=json.dumps(payload).encode(),
+autonomous_agent/safe_agent_v9.py:211:    with urllib.request.urlopen(request, timeout=60) as response:
+autonomous_agent/sandbox_escape_test.py:15:        target.write_text("MUST NOT EXIST", encoding="utf-8")
+autonomous_agent/sandbox_v17_test.py:14:        target.write_text(
+autonomous_agent/sandbox_v18_test.py:17:            p.write_text("TEST")
+autonomous_agent/test_v12_parser.py:32:            "with open('evil.txt', 'w') as f:\n"
+autonomous_agent/test_v9_parser.py:33:    content = """with open('agent_v9_test.txt', 'w') as file:
+autonomous_agent/tool_test.py:34:    data=json.dumps(payload).encode(),
+autonomous_agent/tool_test.py:38:with urllib.request.urlopen(req, timeout=60) as response:
+autonomous_agent/tool_test.py:41:print(json.dumps(result, indent=2))
+Binary file autonomous_agent/__pycache__/autonomous_agent.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v1.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v11.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v12.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v13.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v14.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v20.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v21.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v22.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v23.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v23_1.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v23_2.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v24.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v25.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v4.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v40.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v41.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v42.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v43.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v44.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v45.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v46.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v47.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v48.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v49.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v4_attack.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v7.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v8.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/safe_agent_v9.cpython-314.pyc matches
+Binary file autonomous_agent/__pycache__/sandbox_escape_test.cpython-314.pyc matches
+autonomous_agent/runtime/storage.py:18:    path.write_text(content)
+autonomous_agent/runtime/storage.py:31:    path.write_text(content)
+autonomous_agent/runtime/storage.py:37:    path.write_text(content)
+Binary file autonomous_agent/runtime/__pycache__/storage.cpython-314.pyc matches
+autonomous_agent/state/README.md:3:agent_state.json
+autonomous_agent/state/README.md:4:agent_state.sha256
+autonomous_agent/state/README.md:5:agent_state.backup
+autonomous_agent/tests/test_corrupt_state.sh:9:cp -f agent_state.json agent_state.json.test-backup
+autonomous_agent/tests/test_corrupt_state.sh:10:cp -f agent_state.sha256 agent_state.sha256.test-backup
+autonomous_agent/tests/test_corrupt_state.sh:13:    mv -f agent_state.json.test-backup agent_state.json
+autonomous_agent/tests/test_corrupt_state.sh:14:    mv -f agent_state.sha256.test-backup agent_state.sha256
+autonomous_agent/tests/test_corrupt_state.sh:19:printf '%s\n' 'BROKEN' > agent_state.json
+autonomous_agent/tests/test_hash_attack.py:3:Path("agent_state.json").write_text(
+autonomous_agent/tests/test_missing_fields.py:4:Path("agent_state.json").write_text(
+autonomous_agent/tests/test_missing_fields.py:5:    json.dumps(
+autonomous_agent/tests/test_state_corrupt.py:3:Path("agent_state.json").write_text(
+autonomous_agent/tests/test_v42.py:123:        json.dumps({
+autonomous_agent/tests/test_v43.py:163:    direct = json.dumps({
+autonomous_agent/tests/test_v43.py:188:    shorthand = json.dumps({
+autonomous_agent/tests/test_v44.py:169:    direct = json.dumps({
+autonomous_agent/tests/test_v44.py:192:    shorthand = json.dumps({
+autonomous_agent/tests/test_v45.py:233:        json.dumps({
+autonomous_agent/tests/test_v46.py:363:        json.dumps({
+autonomous_agent/tests/test_v47.py:363:        json.dumps({
+autonomous_agent/tests/test_v48.py:363:        json.dumps({
+autonomous_agent/tests/test_v49.py:363:        json.dumps({
+autonomous_agent/tools/test_end_to_end.sh:49:    data=json.dumps(payload).encode(),
+autonomous_agent/tools/test_end_to_end.sh:55:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v41.sh:45:    data=json.dumps(payload).encode(),
+autonomous_agent/tools/test_end_to_end_v41.sh:51:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v42.sh:46:    data=json.dumps(payload).encode(),
+autonomous_agent/tools/test_end_to_end_v42.sh:52:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v43.sh:46:    data=json.dumps(payload).encode(),
+autonomous_agent/tools/test_end_to_end_v43.sh:52:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v44.sh:41:    data=json.dumps(payload).encode(),
+autonomous_agent/tools/test_end_to_end_v44.sh:47:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v45.sh:44:    data=json.dumps(
+autonomous_agent/tools/test_end_to_end_v45.sh:52:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v46.sh:41:    data=json.dumps(
+autonomous_agent/tools/test_end_to_end_v46.sh:49:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v47.sh:41:    data=json.dumps(
+autonomous_agent/tools/test_end_to_end_v47.sh:49:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v48.sh:41:    data=json.dumps(
+autonomous_agent/tools/test_end_to_end_v48.sh:49:with urllib.request.urlopen(
+autonomous_agent/tools/test_end_to_end_v49.sh:41:    data=json.dumps(
+autonomous_agent/tools/test_end_to_end_v49.sh:49:with urllib.request.urlopen(
+autonomous_agent/tools/verify_state_hash.sh:7:state = json.loads(Path('agent_state.json').read_text())
+autonomous_agent/tools/verify_state_hash.sh:8:actual = hashlib.sha256(json.dumps(state, sort_keys=True).encode('utf-8')).hexdigest()
+autonomous_agent/tools/verify_state_hash.sh:9:expected = Path('agent_state.sha256').read_text().strip()
