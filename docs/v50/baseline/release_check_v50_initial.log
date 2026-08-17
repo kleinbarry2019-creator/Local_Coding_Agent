@@ -1,0 +1,164 @@
+=== SAFE AGENT RELEASE CHECK ===
+[1/4] Git status
+[2/4] Unit tests
+[TEST] Policy Mutation
+       BLOCKED: RuntimeError
+[TEST] Total Budget
+       BLOCKED: RuntimeError
+[TEST] Task Limit
+       BLOCKED: RuntimeError
+[TEST] Model Response Limit
+       BLOCKED: RuntimeError
+[TEST] Message Count
+       BLOCKED: RuntimeError
+[TEST] Path ../escape.txt
+       BLOCKED: PermissionError
+[TEST] Path ../../escape.txt
+       BLOCKED: PermissionError
+[TEST] Path /etc/shadow
+       BLOCKED: PermissionError
+[TEST] Path /var/home/mklein/x
+       BLOCKED: PermissionError
+[TEST] Symlink Read
+       BLOCKED: PermissionError
+[TEST] Symlink Write
+       BLOCKED: PermissionError
+[TEST] Symlink Directory Escape
+       BLOCKED: PermissionError
+[TEST] Prose
+       BLOCKED: RuntimeError
+[TEST] Model Response Limit
+       BLOCKED: RuntimeError
+[TEST] List Files Limit
+       BLOCKED: PermissionError
+[TEST] V49 List Path Length Limit
+       BLOCKED: PermissionError
+[TEST] V49 Content Limit
+       BLOCKED: PermissionError
+[TEST] Symlink Read
+       BLOCKED: PermissionError
+[TEST] Symlink Write
+       BLOCKED: PermissionError
+
+V49 TESTS OK
+STATE OK
+AUDIT CHAIN OK
+
+V49 TESTS PASSED
+[3/4] End-to-end tests
+==========================================
+ V49 END-TO-END
+==========================================
+[TEST] Policy Mutation
+       BLOCKED: RuntimeError
+[TEST] Total Budget
+       BLOCKED: RuntimeError
+[TEST] Task Limit
+       BLOCKED: RuntimeError
+[TEST] Model Response Limit
+       BLOCKED: RuntimeError
+[TEST] Message Count
+       BLOCKED: RuntimeError
+[TEST] Path ../escape.txt
+       BLOCKED: PermissionError
+[TEST] Path ../../escape.txt
+       BLOCKED: PermissionError
+[TEST] Path /etc/shadow
+       BLOCKED: PermissionError
+[TEST] Path /var/home/mklein/x
+       BLOCKED: PermissionError
+[TEST] Symlink Read
+       BLOCKED: PermissionError
+[TEST] Symlink Write
+       BLOCKED: PermissionError
+[TEST] Symlink Directory Escape
+       BLOCKED: PermissionError
+[TEST] Prose
+       BLOCKED: RuntimeError
+[TEST] Model Response Limit
+       BLOCKED: RuntimeError
+[TEST] List Files Limit
+       BLOCKED: PermissionError
+[TEST] V49 List Path Length Limit
+       BLOCKED: PermissionError
+[TEST] V49 Content Limit
+       BLOCKED: PermissionError
+[TEST] Symlink Read
+       BLOCKED: PermissionError
+[TEST] Symlink Write
+       BLOCKED: PermissionError
+
+V49 TESTS OK
+STATE OK
+AUDIT CHAIN OK
+
+V49 TESTS PASSED
+
+=== OLLAMA ===
+{"action":"done","result":"OLLAMA_V49_OK"}
+OLLAMA V49 OK
+
+=== REAL AGENT ===
+=== SAFE AGENT V49 ===
+Project: /var/home/mklein/aider_workspace/autonomous_agent
+Runtime: /var/home/mklein/aider_workspace/autonomous_agent/runtime
+Model: qwen2.5-coder:7b-instruct
+Policy: default
+
+=== STEP 1/20 ===
+MODEL:
+```json
+{
+  "action": "write_file",
+  "arguments": {
+    "path": "/workspace/v49_agent_test.txt",
+    "content": "V49_AGENT_OK"
+  }
+}
+```
+RESULT:
+{
+  "path": "v49_agent_test.txt",
+  "bytes": 12
+}
+
+=== STEP 2/20 ===
+MODEL:
+```json
+{
+  "action": "read_file",
+  "arguments": {
+    "path": "/workspace/v49_agent_test.txt"
+  }
+}
+```
+RESULT:
+V49_AGENT_OK
+
+=== STEP 3/20 ===
+MODEL:
+```json
+{
+  "action": "done",
+  "result": "Die Datei v49_agent_test.txt wurde erfolgreich erstellt und enthält den Inhalt 'V49_AGENT_OK'."
+}
+```
+
+=== DONE ===
+Die Datei v49_agent_test.txt wurde erfolgreich erstellt und enthält den Inhalt 'V49_AGENT_OK'.
+REAL AGENT OK
+
+=== READONLY POLICY ===
+READONLY POLICY OK
+
+=== NOEXEC POLICY ===
+NOEXEC POLICY OK
+
+=== FINAL ===
+AGENT CODE PRESENT
+
+V49 END-TO-END TESTS PASSED
+[4/4] Version check
+VERSION OK: 49
+
+=== RELEASE CHECK PASSED ===

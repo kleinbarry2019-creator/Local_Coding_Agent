@@ -4,6 +4,8 @@ __pycache__/
 *.deb
 runtime/
 *.log
+!docs/v50/baseline/
+!docs/v50/baseline/*.log
 .aider.*
 Modelfile-*
 autonomous_agent/agent_state.json
