@@ -14,3 +14,4 @@ autonomous_agent/agent_state.sha256
 autonomous_agent/audit_head.sha256
 autonomous_agent/audit_log.jsonl
 SAFE_AGENT_*.bundle
+autonomous_agent/logs/*.jsonl
