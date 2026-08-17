@@ -1,0 +1,36 @@
+# SAFE AGENT V50 Runtime Writers Inventory
+
+## Purpose
+
+Identify all locations where runtime state, audit data,
+snapshots or generated files are written.
+
+## Search Targets
+
+- agent_state
+- audit_log
+- audit_head
+- sha256 state files
+- snapshot handling
+- JSON persistence
+- runtime cache writes
+
+## Required Migration
+
+Each writer must be classified:
+
+1. Source controlled
+   - Must not receive runtime mutations.
+
+2. Runtime state
+   - Must write only below:
+     autonomous_agent/state/
+
+3. Temporary execution data
+   - Must write only below:
+     autonomous_agent/runtime/
+
+## Status
+
+Initial inventory placeholder.
+Detailed writer locations will be recorded after source scan.
