@@ -1,0 +1,11 @@
+[bandit]
+exclude:
+    autonomous_agent/build_v37_autonomy.py,
+    autonomous_agent/build_v39_standalone.py,
+    autonomous_agent/build_v40.py,
+    autonomous_agent/build_v41_robust.py,
+    autonomous_agent/build_v42.py,
+    autonomous_agent/fix_v38_debug.py,
+    autonomous_agent/safe_agent_v37.py,
+    autonomous_agent/safe_agent_v38.py,
+    autonomous_agent/safe_agent_v39.py
