@@ -26,8 +26,11 @@ s = s.replace(f"SAFE AGENT V{version}", f"SAFE AGENT V{next_version}")
 if "STATE_BACKUP_FILE" not in s:
     s = s.replace(
         "STATE_FILE = Path(\"agent_state.json\")",
-        "STATE_FILE = Path(\"agent_state.json\")\nSTATE_BACKUP_FILE = Path(\"agent_state.json.bak\")\nSTATE_HASH_FILE = Path(\"agent_state.sha256\")\nAUDIT_LOG_FILE = Path(\"audit_log.jsonl\")"
-    )
+        "from runtime.paths import state_path, audit_path\n"
+"STATE_FILE = state_path(\"agent_state.json\")\n"
+"STATE_BACKUP_FILE = state_path(\"agent_state.json.bak\")\n"
+"STATE_HASH_FILE = state_path(\"agent_state.sha256\")\n"
+"AUDIT_LOG_FILE = audit_path(\"audit_log.jsonl\")"
 
 if "def validate_state" not in s:
     validator = """
