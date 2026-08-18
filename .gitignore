@@ -15,3 +15,8 @@ autonomous_agent/audit_head.sha256
 autonomous_agent/audit_log.jsonl
 SAFE_AGENT_*.bundle
 autonomous_agent/logs/*.jsonl
+agent_memory.json
+test_agent_output.txt
+__pycache__/
+agent_state.json
+agent_memory.json
