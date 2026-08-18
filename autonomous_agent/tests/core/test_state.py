@@ -65,6 +65,13 @@ def _insert_session(connection: sqlite3.Connection, session_id: str) -> None:
     )
 
 
+def _assert_schema_drift_is_rejected(store: CoreStateStore) -> None:
+    assert not store.verify_schema()
+    with pytest.raises(StateError) as raised:
+        store.initialize()
+    assert raised.value.code == "schema_verification_failed"
+
+
 def test_fresh_creation_has_exact_schema_and_owner_only_files(tmp_path: Path) -> None:
     store = _store(tmp_path)
 
@@ -159,6 +166,103 @@ def test_out_of_order_migration_record_is_detected(tmp_path: Path) -> None:
     with pytest.raises(StateError) as raised:
         store.initialize()
     assert raised.value.code == "schema_order_invalid"
+
+
+@pytest.mark.parametrize("missing_unique", ["event_id", "current_hash"])
+def test_missing_event_unique_constraint_is_schema_drift(
+    tmp_path: Path, missing_unique: str
+) -> None:
+    store = _store(tmp_path)
+    store.initialize()
+    event_id = "event_id TEXT NOT NULL"
+    current_hash = "current_hash TEXT NOT NULL"
+    if missing_unique != "event_id":
+        event_id += " UNIQUE"
+    if missing_unique != "current_hash":
+        current_hash += " UNIQUE"
+    with store.connection() as connection:
+        connection.execute("DROP TABLE events")
+        connection.execute(
+            f"""CREATE TABLE events (
+                sequence INTEGER PRIMARY KEY,
+                {event_id},
+                session_id TEXT NOT NULL REFERENCES sessions(session_id),
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                previous_hash TEXT NOT NULL,
+                {current_hash},
+                created_at TEXT NOT NULL
+            )"""
+        )
+
+    _assert_schema_drift_is_rejected(store)
+
+
+def test_changed_event_foreign_key_action_is_schema_drift(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.initialize()
+    with store.connection() as connection:
+        connection.execute("DROP TABLE events")
+        connection.execute(
+            """CREATE TABLE events (
+                sequence INTEGER PRIMARY KEY,
+                event_id TEXT NOT NULL UNIQUE,
+                session_id TEXT NOT NULL REFERENCES sessions(session_id)
+                    ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                previous_hash TEXT NOT NULL,
+                current_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )"""
+        )
+
+    _assert_schema_drift_is_rejected(store)
+
+
+def test_explicit_index_cannot_replace_event_unique_constraint(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.initialize()
+    with store.connection() as connection:
+        connection.execute("DROP TABLE events")
+        connection.execute(
+            """CREATE TABLE events (
+                sequence INTEGER PRIMARY KEY,
+                event_id TEXT NOT NULL,
+                session_id TEXT NOT NULL REFERENCES sessions(session_id),
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                previous_hash TEXT NOT NULL,
+                current_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX replacement_event_id_unique ON events(event_id)"
+        )
+
+    _assert_schema_drift_is_rejected(store)
+
+
+@pytest.mark.parametrize(
+    "unexpected_sql",
+    [
+        "CREATE TABLE unexpected_table (value TEXT)",
+        "CREATE INDEX unexpected_index ON sessions(status)",
+        """CREATE TRIGGER unexpected_trigger
+        AFTER INSERT ON sessions BEGIN SELECT 1; END""",
+    ],
+    ids=["table", "index", "trigger"],
+)
+def test_unexpected_schema_object_is_schema_drift(
+    tmp_path: Path, unexpected_sql: str
+) -> None:
+    store = _store(tmp_path)
+    store.initialize()
+    with store.connection() as connection:
+        connection.execute(unexpected_sql)
+
+    _assert_schema_drift_is_rejected(store)
 
 
 def test_failed_migration_rolls_back_and_leaves_prior_schema_usable(

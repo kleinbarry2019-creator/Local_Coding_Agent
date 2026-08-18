@@ -49,35 +49,31 @@ CREATE TABLE config_snapshots (
 # Migration SQL is immutable after release. Its exact UTF-8 bytes are checksummed.
 _MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _MIGRATION_1_SQL),)
 
-_EXPECTED_COLUMNS: dict[str, tuple[tuple[str, str, int, int], ...]] = {
-    "schema_migrations": (
-        ("version", "INTEGER", 0, 1),
-        ("checksum", "TEXT", 1, 0),
-        ("applied_at", "TEXT", 1, 0),
-    ),
-    "sessions": (
-        ("session_id", "TEXT", 0, 1),
-        ("mode", "TEXT", 1, 0),
-        ("status", "TEXT", 1, 0),
-        ("created_at", "TEXT", 1, 0),
-        ("updated_at", "TEXT", 1, 0),
-    ),
-    "events": (
-        ("sequence", "INTEGER", 0, 1),
-        ("event_id", "TEXT", 1, 0),
-        ("session_id", "TEXT", 1, 0),
-        ("event_type", "TEXT", 1, 0),
-        ("payload_json", "TEXT", 1, 0),
-        ("previous_hash", "TEXT", 1, 0),
-        ("current_hash", "TEXT", 1, 0),
-        ("created_at", "TEXT", 1, 0),
-    ),
-    "config_snapshots": (
-        ("session_id", "TEXT", 0, 1),
-        ("config_json", "TEXT", 1, 0),
-        ("created_at", "TEXT", 1, 0),
-    ),
-}
+type _CatalogObject = tuple[str, str, str]
+type _ColumnSignature = tuple[int, str, str, int, str | None, int, int]
+type _IndexColumnSignature = tuple[int, int, str | None, int, str | None, int]
+type _IndexSignature = tuple[int, str, int, tuple[_IndexColumnSignature, ...]]
+type _ForeignKeySignature = tuple[
+    int, int, str, str | None, str | None, str, str, str
+]
+
+
+@dataclass(frozen=True)
+class _TableSignature:
+    name: str
+    object_type: str
+    column_count: int
+    without_rowid: int
+    strict: int
+    columns: tuple[_ColumnSignature, ...]
+    indexes: tuple[_IndexSignature, ...]
+    foreign_keys: tuple[_ForeignKeySignature, ...]
+
+
+@dataclass(frozen=True)
+class _SchemaSignature:
+    catalog: tuple[_CatalogObject, ...]
+    tables: tuple[_TableSignature, ...]
 
 
 @dataclass
@@ -123,7 +119,7 @@ class CoreStateStore:
             _validate_applied_migrations(applied, plan)
             for version, migration_sql in plan[len(applied) :]:
                 _apply_migration(connection, version, migration_sql)
-            if not _schema_structure_matches(connection):
+            if not _schema_structure_matches(connection, plan):
                 raise StateError(
                     "schema_verification_failed",
                     "the core database schema does not match its migration record",
@@ -213,7 +209,7 @@ class CoreStateStore:
                 (version, _migration_checksum(migration_sql))
                 for version, migration_sql in plan
             ]
-            return applied == expected and _schema_structure_matches(connection)
+            return applied == expected and _schema_structure_matches(connection, plan)
 
     def _validate_layout(self) -> None:
         paths = (self.database_path, self.anchor_path, self.lock_path)
@@ -495,35 +491,161 @@ def _execute_migration_sql(
         connection.execute(statement)
 
 
-def _schema_structure_matches(connection: sqlite3.Connection) -> bool:
+def _schema_structure_matches(
+    connection: sqlite3.Connection, plan: Sequence[tuple[int, str]]
+) -> bool:
     try:
-        tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-        if not set(_EXPECTED_COLUMNS).issubset(tables):
-            return False
-        for table, expected_columns in _EXPECTED_COLUMNS.items():
-            actual_columns = tuple(
-                (str(row[1]), str(row[2]), int(row[3]), int(row[5]))
-                for row in connection.execute(f"PRAGMA table_info({table})")
-            )
-            if actual_columns != expected_columns:
-                return False
-        event_foreign_keys = {
-            (str(row[2]), str(row[3]), str(row[4]))
-            for row in connection.execute("PRAGMA foreign_key_list(events)")
-        }
-        snapshot_foreign_keys = {
-            (str(row[2]), str(row[3]), str(row[4]))
-            for row in connection.execute("PRAGMA foreign_key_list(config_snapshots)")
-        }
-    except sqlite3.DatabaseError:
+        actual = _schema_signature(connection)
+        expected = _expected_schema_signature(plan)
+    except (sqlite3.DatabaseError, StateError):
         return False
-    return event_foreign_keys == {("sessions", "session_id", "session_id")} and (
-        snapshot_foreign_keys == {("sessions", "session_id", "session_id")}
+    return actual == expected
+
+
+def _expected_schema_signature(
+    plan: Sequence[tuple[int, str]],
+) -> _SchemaSignature:
+    with sqlite3.connect(":memory:") as expected_database:
+        expected_database.execute("PRAGMA foreign_keys = ON")
+        for _version, migration_sql in plan:
+            _execute_migration_sql(expected_database, migration_sql)
+        return _schema_signature(expected_database)
+
+
+def _schema_signature(connection: sqlite3.Connection) -> _SchemaSignature:
+    catalog = tuple(
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in connection.execute(
+            """
+            SELECT type, name, tbl_name
+            FROM main.sqlite_schema
+            WHERE name NOT GLOB 'sqlite_*'
+            ORDER BY type, name, tbl_name
+            """
+        )
+    )
+    table_options = {
+        str(row[0]): (str(row[1]), int(row[2]), int(row[3]), int(row[4]))
+        for row in connection.execute(
+            """
+            SELECT name, type, ncol, wr, strict
+            FROM pragma_table_list
+            WHERE schema = 'main' AND name NOT GLOB 'sqlite_*'
+            """
+        )
+    }
+    tables = tuple(
+        _table_signature(connection, name, table_options)
+        for object_type, name, _table_name in catalog
+        if object_type == "table"
+    )
+    return _SchemaSignature(catalog=catalog, tables=tables)
+
+
+def _table_signature(
+    connection: sqlite3.Connection,
+    table_name: str,
+    table_options: dict[str, tuple[str, int, int, int]],
+) -> _TableSignature:
+    try:
+        object_type, column_count, without_rowid, strict = table_options[table_name]
+    except KeyError as error:
+        raise sqlite3.DatabaseError("table catalog metadata is incomplete") from error
+
+    columns = tuple(
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            int(row[3]),
+            None if row[4] is None else str(row[4]),
+            int(row[5]),
+            int(row[6]),
+        )
+        for row in connection.execute(
+            """
+            SELECT cid, name, type, "notnull", dflt_value, pk, hidden
+            FROM pragma_table_xinfo(?)
+            ORDER BY cid
+            """,
+            (table_name,),
+        )
+    )
+    indexes = tuple(
+        sorted(
+            (
+                _index_signature(connection, row)
+                for row in connection.execute(
+                    """
+                    SELECT name, "unique", origin, partial
+                    FROM pragma_index_list(?)
+                    """,
+                    (table_name,),
+                )
+            ),
+            key=repr,
+        )
+    )
+    foreign_keys = tuple(
+        (
+            int(row[0]),
+            int(row[1]),
+            str(row[2]),
+            None if row[3] is None else str(row[3]),
+            None if row[4] is None else str(row[4]),
+            str(row[5]),
+            str(row[6]),
+            str(row[7]),
+        )
+        for row in connection.execute(
+            """
+            SELECT id, seq, "table", "from", "to",
+                   on_update, on_delete, match
+            FROM pragma_foreign_key_list(?)
+            ORDER BY id, seq
+            """,
+            (table_name,),
+        )
+    )
+    return _TableSignature(
+        name=table_name,
+        object_type=object_type,
+        column_count=column_count,
+        without_rowid=without_rowid,
+        strict=strict,
+        columns=columns,
+        indexes=indexes,
+        foreign_keys=foreign_keys,
+    )
+
+
+def _index_signature(
+    connection: sqlite3.Connection, index_row: tuple[str, int, str, int]
+) -> _IndexSignature:
+    index_name = str(index_row[0])
+    columns = tuple(
+        (
+            int(row[0]),
+            int(row[1]),
+            None if row[2] is None else str(row[2]),
+            int(row[3]),
+            None if row[4] is None else str(row[4]),
+            int(row[5]),
+        )
+        for row in connection.execute(
+            """
+            SELECT seqno, cid, name, "desc", coll, "key"
+            FROM pragma_index_xinfo(?)
+            ORDER BY seqno
+            """,
+            (index_name,),
+        )
+    )
+    return (
+        int(index_row[1]),
+        str(index_row[2]),
+        int(index_row[3]),
+        columns,
     )
 
 
