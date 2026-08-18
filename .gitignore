@@ -8,6 +8,9 @@ runtime/
 !docs/v50/baseline/*.log
 .aider.*
 .worktrees/
+.venv/
+dist/
+*.egg-info/
 Modelfile-*
 autonomous_agent/agent_state.json
 autonomous_agent/agent_state.json.bak
