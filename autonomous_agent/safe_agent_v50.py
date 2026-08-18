@@ -6,13 +6,13 @@ import json
 import os
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
-
 
 VERSION = 50
 
@@ -91,16 +91,10 @@ def normalize_policy(policy):
         policy,
         dict,
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: Mission Policy muss Objekt sein."
-        )
+        raise RuntimeError("FAIL-CLOSED: Mission Policy muss Objekt sein.")
 
-    if set(policy) != set(
-        DEFAULT_POLICY
-    ):
-        raise RuntimeError(
-            "FAIL-CLOSED: Ungültige Mission Policy."
-        )
+    if set(policy) != set(DEFAULT_POLICY):
+        raise RuntimeError("FAIL-CLOSED: Ungültige Mission Policy.")
 
     if not all(
         isinstance(
@@ -109,9 +103,7 @@ def normalize_policy(policy):
         )
         for value in policy.values()
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: Policy-Werte müssen bool sein."
-        )
+        raise RuntimeError("FAIL-CLOSED: Policy-Werte müssen bool sein.")
 
     return dict(policy)
 
@@ -133,28 +125,21 @@ def build_mission_policy():
     )
 
     if raw == "default":
-        return normalize_policy(
-            DEFAULT_POLICY
-        )
+        return normalize_policy(DEFAULT_POLICY)
 
     if raw == "readonly":
-        return normalize_policy(
-            READ_ONLY_POLICY
-        )
+        return normalize_policy(READ_ONLY_POLICY)
 
     if raw == "noexec":
-        return normalize_policy(
-            NO_EXEC_POLICY
-        )
+        return normalize_policy(NO_EXEC_POLICY)
 
-    raise RuntimeError(
-        "FAIL-CLOSED: Unbekannte SAFE_AGENT_POLICY."
-    )
+    raise RuntimeError("FAIL-CLOSED: Unbekannte SAFE_AGENT_POLICY.")
 
 
 # =========================================================
 # STATE
 # =========================================================
+
 
 def default_state():
     return {
@@ -169,9 +154,7 @@ def validate_state(state):
         state,
         dict,
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: State ist kein Objekt."
-        )
+        raise RuntimeError("FAIL-CLOSED: State ist kein Objekt.")
 
     required = {
         "version",
@@ -182,14 +165,10 @@ def validate_state(state):
     missing = required - set(state)
 
     if missing:
-        raise RuntimeError(
-            f"FAIL-CLOSED: State-Felder fehlen: {sorted(missing)}"
-        )
+        raise RuntimeError(f"FAIL-CLOSED: State-Felder fehlen: {sorted(missing)}")
 
     if state["version"] != VERSION:
-        raise RuntimeError(
-            "FAIL-CLOSED: Falsche State-Version."
-        )
+        raise RuntimeError("FAIL-CLOSED: Falsche State-Version.")
 
     if (
         not isinstance(
@@ -202,20 +181,13 @@ def validate_state(state):
         )
         or state["tasks_completed"] < 0
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: tasks_completed ungültig."
-        )
+        raise RuntimeError("FAIL-CLOSED: tasks_completed ungültig.")
 
-    if (
-        state["last_result"] is not None
-        and not isinstance(
-            state["last_result"],
-            str,
-        )
+    if state["last_result"] is not None and not isinstance(
+        state["last_result"],
+        str,
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: last_result ungültig."
-        )
+        raise RuntimeError("FAIL-CLOSED: last_result ungültig.")
 
     return state
 
@@ -230,9 +202,7 @@ def canonical_json(value):
 
 
 def state_digest(state):
-    return hashlib.sha256(
-        canonical_json(state).encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(canonical_json(state).encode("utf-8")).hexdigest()
 
 
 def atomic_write(path, data):
@@ -271,22 +241,14 @@ def atomic_write(path, data):
 
 def verify_state_hash(state):
     if not STATE_HASH.exists():
-        raise RuntimeError(
-            "FAIL-CLOSED: State-Hash fehlt."
-        )
+        raise RuntimeError("FAIL-CLOSED: State-Hash fehlt.")
 
-    actual = STATE_HASH.read_text(
-        encoding="utf-8"
-    ).strip()
+    actual = STATE_HASH.read_text(encoding="utf-8").strip()
 
-    expected = state_digest(
-        state
-    )
+    expected = state_digest(state)
 
     if actual != expected:
-        raise RuntimeError(
-            "FAIL-CLOSED: State-Hash stimmt nicht."
-        )
+        raise RuntimeError("FAIL-CLOSED: State-Hash stimmt nicht.")
 
 
 def save_state(state):
@@ -298,12 +260,8 @@ def save_state(state):
         indent=2,
     )
 
-    if len(
-        encoded.encode("utf-8")
-    ) > MAX_STATE_BYTES:
-        raise RuntimeError(
-            "FAIL-CLOSED: State zu groß."
-        )
+    if len(encoded.encode("utf-8")) > MAX_STATE_BYTES:
+        raise RuntimeError("FAIL-CLOSED: State zu groß.")
 
     if STATE_FILE.exists():
         shutil.copy2(
@@ -327,51 +285,33 @@ def load_one_state(path):
         return None
 
     if path.stat().st_size > MAX_STATE_BYTES:
-        raise RuntimeError(
-            f"FAIL-CLOSED: State zu groß: {path}"
-        )
+        raise RuntimeError(f"FAIL-CLOSED: State zu groß: {path}")
 
     try:
-        state = json.loads(
-            path.read_text(
-                encoding="utf-8"
-            )
-        )
+        state = json.loads(path.read_text(encoding="utf-8"))
 
-        return validate_state(
-            state
-        )
+        return validate_state(state)
 
     except Exception:
         return None
 
 
 def load_state():
-    current = load_one_state(
-        STATE_FILE
-    )
+    current = load_one_state(STATE_FILE)
 
     if current is not None:
-        verify_state_hash(
-            current
-        )
+        verify_state_hash(current)
         return current
 
-    backup = load_one_state(
-        STATE_BACKUP
-    )
+    backup = load_one_state(STATE_BACKUP)
 
     if backup is not None:
-        save_state(
-            backup
-        )
+        save_state(backup)
 
         audit(
             "STATE_RECOVERY",
             {
-                "source": str(
-                    STATE_BACKUP
-                ),
+                "source": str(STATE_BACKUP),
             },
         )
 
@@ -379,9 +319,7 @@ def load_state():
 
     state = default_state()
 
-    save_state(
-        state
-    )
+    save_state(state)
 
     audit(
         "STATE_INITIALIZED",
@@ -395,13 +333,10 @@ def load_state():
 # AUDIT CHAIN
 # =========================================================
 
+
 def audit_digest(entry, previous):
     return hashlib.sha256(
-        (
-            previous
-            + "\n"
-            + canonical_json(entry)
-        ).encode("utf-8")
+        (previous + "\n" + canonical_json(entry)).encode("utf-8")
     ).hexdigest()
 
 
@@ -409,14 +344,10 @@ def read_audit_head():
     if not AUDIT_HEAD_FILE.exists():
         return "0" * 64
 
-    value = AUDIT_HEAD_FILE.read_text(
-        encoding="utf-8"
-    ).strip()
+    value = AUDIT_HEAD_FILE.read_text(encoding="utf-8").strip()
 
     if len(value) != 64:
-        raise RuntimeError(
-            "FAIL-CLOSED: Audit-Head ungültig."
-        )
+        raise RuntimeError("FAIL-CLOSED: Audit-Head ungültig.")
 
     return value
 
@@ -427,41 +358,25 @@ def bounded_audit_details(details):
         ensure_ascii=False,
     )
 
-    if len(
-        encoded.encode("utf-8")
-    ) <= MAX_AUDIT_DETAIL_CHARS:
+    if len(encoded.encode("utf-8")) <= MAX_AUDIT_DETAIL_CHARS:
         return details
 
     return {
         "truncated": True,
-        "sha256": hashlib.sha256(
-            encoded.encode("utf-8")
-        ).hexdigest(),
-        "preview": encoded[
-            :MAX_AUDIT_DETAIL_CHARS
-        ],
+        "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "preview": encoded[:MAX_AUDIT_DETAIL_CHARS],
     }
 
 
 def audit(event, details):
     entry = {
-        "timestamp": datetime.datetime.now(
-            datetime.timezone.utc
-        ).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "event": event,
-        "details": bounded_audit_details(
-            details
-        ),
+        "details": bounded_audit_details(details),
     }
 
-    if (
-        AUDIT_FILE.exists()
-        and AUDIT_FILE.stat().st_size
-        > MAX_AUDIT_BYTES
-    ):
-        raise RuntimeError(
-            "FAIL-CLOSED: Audit-Log zu groß."
-        )
+    if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size > MAX_AUDIT_BYTES:
+        raise RuntimeError("FAIL-CLOSED: Audit-Log zu groß.")
 
     previous = read_audit_head()
 
@@ -512,23 +427,17 @@ def verify_audit_chain():
             if not line.strip():
                 continue
 
-            record = json.loads(
-                line
-            )
+            record = json.loads(line)
 
             if set(record) != {
                 "prev",
                 "digest",
                 "entry",
             }:
-                raise RuntimeError(
-                    f"FAIL-CLOSED: Audit-Schema Zeile {line_no}"
-                )
+                raise RuntimeError(f"FAIL-CLOSED: Audit-Schema Zeile {line_no}")
 
             if record["prev"] != previous:
-                raise RuntimeError(
-                    f"FAIL-CLOSED: Audit-Kette Zeile {line_no}"
-                )
+                raise RuntimeError(f"FAIL-CLOSED: Audit-Kette Zeile {line_no}")
 
             expected = audit_digest(
                 record["entry"],
@@ -536,18 +445,12 @@ def verify_audit_chain():
             )
 
             if record["digest"] != expected:
-                raise RuntimeError(
-                    f"FAIL-CLOSED: Audit-Hash Zeile {line_no}"
-                )
+                raise RuntimeError(f"FAIL-CLOSED: Audit-Hash Zeile {line_no}")
 
-            previous = record[
-                "digest"
-            ]
+            previous = record["digest"]
 
     if read_audit_head() != previous:
-        raise RuntimeError(
-            "FAIL-CLOSED: Audit-Head stimmt nicht."
-        )
+        raise RuntimeError("FAIL-CLOSED: Audit-Head stimmt nicht.")
 
     return True
 
@@ -556,6 +459,7 @@ def verify_audit_chain():
 # PATH SECURITY
 # =========================================================
 
+
 def ensure_runtime():
     RUNTIME.mkdir(
         parents=True,
@@ -563,24 +467,16 @@ def ensure_runtime():
     )
 
     if RUNTIME.is_symlink():
-        raise RuntimeError(
-            "FAIL-CLOSED: Runtime ist Symlink."
-        )
+        raise RuntimeError("FAIL-CLOSED: Runtime ist Symlink.")
 
 
-def reject_symlink_components(
-    target
-):
+def reject_symlink_components(target):
     ensure_runtime()
 
     try:
-        relative = target.relative_to(
-            RUNTIME
-        )
+        relative = target.relative_to(RUNTIME)
     except ValueError as exc:
-        raise PermissionError(
-            "Pfad außerhalb des Runtime-Workspace."
-        ) from exc
+        raise PermissionError("Pfad außerhalb des Runtime-Workspace.") from exc
 
     current = RUNTIME
 
@@ -592,65 +488,39 @@ def reject_symlink_components(
         except FileNotFoundError:
             continue
 
-        if stat.S_ISLNK(
-            info.st_mode
-        ):
-            raise PermissionError(
-                f"Symlink im Runtime-Pfad verboten: {current}"
-            )
+        if stat.S_ISLNK(info.st_mode):
+            raise PermissionError(f"Symlink im Runtime-Pfad verboten: {current}")
 
 
-def resolve_runtime_path(
-    path_text
-):
+def resolve_runtime_path(path_text):
     if not isinstance(
         path_text,
         str,
     ):
-        raise PermissionError(
-            "path muss String sein."
-        )
+        raise PermissionError("path muss String sein.")
 
     if not path_text.strip():
-        raise PermissionError(
-            "Leerer Pfad."
-        )
+        raise PermissionError("Leerer Pfad.")
 
     ensure_runtime()
 
     if path_text == "/workspace":
         path_text = "."
 
-    elif path_text.startswith(
-        "/workspace/"
-    ):
-        path_text = path_text[
-            len("/workspace/") :
-        ]
+    elif path_text.startswith("/workspace/"):
+        path_text = path_text[len("/workspace/") :]
 
     elif path_text.startswith("/"):
-        raise PermissionError(
-            "Absoluter Pfad außerhalb von /workspace."
-        )
+        raise PermissionError("Absoluter Pfad außerhalb von /workspace.")
 
-    candidate = (
-        RUNTIME / path_text
-    ).resolve(
-        strict=False
-    )
+    candidate = (RUNTIME / path_text).resolve(strict=False)
 
     try:
-        candidate.relative_to(
-            RUNTIME
-        )
+        candidate.relative_to(RUNTIME)
     except ValueError as exc:
-        raise PermissionError(
-            "Pfad außerhalb des Runtime-Workspace."
-        ) from exc
+        raise PermissionError("Pfad außerhalb des Runtime-Workspace.") from exc
 
-    reject_symlink_components(
-        candidate
-    )
+    reject_symlink_components(candidate)
 
     return candidate
 
@@ -658,6 +528,7 @@ def resolve_runtime_path(
 # =========================================================
 # TOOLS
 # =========================================================
+
 
 def list_files():
     ensure_runtime()
@@ -669,65 +540,39 @@ def list_files():
         if not path.is_file():
             continue
 
-        reject_symlink_components(
-            path
-        )
+        reject_symlink_components(path)
 
-        relative = path.relative_to(
-            RUNTIME
-        ).as_posix()
+        relative = path.relative_to(RUNTIME).as_posix()
 
         if len(relative) > MAX_LIST_PATH_CHARS:
-            raise PermissionError(
-                "Dateipfad überschreitet Größenlimit."
-            )
+            raise PermissionError("Dateipfad überschreitet Größenlimit.")
 
-        result.append(
-            relative
-        )
+        result.append(relative)
 
         if len(result) > MAX_LIST_FILES:
-            raise PermissionError(
-                "Zu viele Dateien im Runtime-Workspace."
-            )
+            raise PermissionError("Zu viele Dateien im Runtime-Workspace.")
 
-    return sorted(
-        result
-    )
+    return sorted(result)
 
 
 def read_file(path):
-    target = resolve_runtime_path(
-        path
-    )
+    target = resolve_runtime_path(path)
 
     if not target.exists():
-        raise FileNotFoundError(
-            f"Datei nicht gefunden: {path}"
-        )
+        raise FileNotFoundError(f"Datei nicht gefunden: {path}")
 
     if not target.is_file():
-        raise PermissionError(
-            "Kein regulärer Dateipfad."
-        )
+        raise PermissionError("Kein regulärer Dateipfad.")
 
     size = target.stat().st_size
 
     if size > MAX_CONTENT_BYTES:
-        raise PermissionError(
-            "Datei überschreitet Größenlimit."
-        )
+        raise PermissionError("Datei überschreitet Größenlimit.")
 
-    content = target.read_text(
-        encoding="utf-8"
-    )
+    content = target.read_text(encoding="utf-8")
 
-    if len(
-        content.encode("utf-8")
-    ) > MAX_CONTENT_BYTES:
-        raise PermissionError(
-            "Dateiinhalt überschreitet Größenlimit."
-        )
+    if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
+        raise PermissionError("Dateiinhalt überschreitet Größenlimit.")
 
     return content
 
@@ -737,45 +582,31 @@ def write_file(path, content):
         content,
         str,
     ):
-        raise TypeError(
-            "content muss String sein."
-        )
+        raise TypeError("content muss String sein.")
 
-    encoded = content.encode(
-        "utf-8"
-    )
+    encoded = content.encode("utf-8")
 
     if len(encoded) > MAX_CONTENT_BYTES:
-        raise PermissionError(
-            "Inhalt überschreitet Größenlimit."
-        )
+        raise PermissionError("Inhalt überschreitet Größenlimit.")
 
-    target = resolve_runtime_path(
-        path
-    )
+    target = resolve_runtime_path(path)
 
     target.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    reject_symlink_components(
-        target
-    )
+    reject_symlink_components(target)
 
     atomic_write(
         target,
         content,
     )
 
-    reject_symlink_components(
-        target
-    )
+    reject_symlink_components(target)
 
     return {
-        "path": target.relative_to(
-            RUNTIME
-        ).as_posix(),
+        "path": target.relative_to(RUNTIME).as_posix(),
         "bytes": len(encoded),
     }
 
@@ -788,14 +619,10 @@ def run_python(script, args=None):
         args,
         list,
     ):
-        raise TypeError(
-            "args muss Liste sein."
-        )
+        raise TypeError("args muss Liste sein.")
 
     if len(args) > MAX_SCRIPT_ARGS:
-        raise PermissionError(
-            "Zu viele Script-Argumente."
-        )
+        raise PermissionError("Zu viele Script-Argumente.")
 
     if not all(
         isinstance(
@@ -804,95 +631,66 @@ def run_python(script, args=None):
         )
         for item in args
     ):
-        raise TypeError(
-            "args dürfen nur Strings enthalten."
-        )
+        raise TypeError("args dürfen nur Strings enthalten.")
 
-    script_path = resolve_runtime_path(
-        script
-    )
+    script_path = resolve_runtime_path(script)
 
     if script_path.suffix != ".py":
-        raise PermissionError(
-            "Nur .py-Skripte erlaubt."
-        )
+        raise PermissionError("Nur .py-Skripte erlaubt.")
 
     if not script_path.is_file():
-        raise FileNotFoundError(
-            f"Skript nicht gefunden: {script}"
-        )
+        raise FileNotFoundError(f"Skript nicht gefunden: {script}")
 
-    relative_script = (
-        script_path
-        .relative_to(
-            RUNTIME
-        )
-        .as_posix()
-    )
+    relative_script = script_path.relative_to(RUNTIME).as_posix()
 
     command = [
         "/usr/bin/bwrap",
         "--die-with-parent",
-
         "--unshare-user",
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-net",
         "--unshare-uts",
         "--unshare-cgroup",
-
         "--cap-drop",
         "ALL",
-
         "--ro-bind",
         "/usr",
         "/usr",
-
         "--ro-bind",
         "/bin",
         "/bin",
-
         "--ro-bind",
         "/lib",
         "/lib",
-
         "--ro-bind",
         "/lib64",
         "/lib64",
-
         "--ro-bind",
         str(ROOT),
         "/agent",
-
         "--bind",
         str(RUNTIME),
         "/workspace",
-
         "--proc",
         "/proc",
-
         "--dev",
         "/dev",
-
         "--tmpfs",
         "/etc",
-
         "--tmpfs",
-        "/tmp",
-
+        "/tmp",  # nosec B108
         "--tmpfs",
         "/var",
-
         "--chdir",
         "/workspace",
-
         sys.executable,
         "/workspace/" + relative_script,
         *args,
     ]
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603
             command,
             cwd=ROOT,
             stdin=subprocess.DEVNULL,
@@ -913,18 +711,10 @@ def run_python(script, args=None):
         }
 
     return {
-        "status": (
-            "OK"
-            if result.returncode == 0
-            else "ERROR"
-        ),
+        "status": ("OK" if result.returncode == 0 else "ERROR"),
         "exit_code": result.returncode,
-        "stdout": result.stdout[
-            :MAX_OUTPUT_CHARS
-        ],
-        "stderr": result.stderr[
-            :MAX_OUTPUT_CHARS
-        ],
+        "stdout": result.stdout[:MAX_OUTPUT_CHARS],
+        "stderr": result.stderr[:MAX_OUTPUT_CHARS],
     }
 
 
@@ -940,6 +730,7 @@ TOOL_NAMES = {
 # BUDGET + POLICY LOCK
 # =========================================================
 
+
 class MissionBudget:
     def __init__(self):
         self.total = 0
@@ -949,36 +740,23 @@ class MissionBudget:
 
     def check(self, name):
         if self.total >= MAX_TOOL_CALLS:
-            raise RuntimeError(
-                "FAIL-CLOSED: Tool-Budget erschöpft."
-            )
+            raise RuntimeError("FAIL-CLOSED: Tool-Budget erschöpft.")
 
         if (
-            name in {
+            name
+            in {
                 "list_files",
                 "read_file",
             }
             and self.reads >= MAX_READ_CALLS
         ):
-            raise RuntimeError(
-                "FAIL-CLOSED: Read-Budget erschöpft."
-            )
+            raise RuntimeError("FAIL-CLOSED: Read-Budget erschöpft.")
 
-        if (
-            name == "write_file"
-            and self.writes >= MAX_WRITE_CALLS
-        ):
-            raise RuntimeError(
-                "FAIL-CLOSED: Write-Budget erschöpft."
-            )
+        if name == "write_file" and self.writes >= MAX_WRITE_CALLS:
+            raise RuntimeError("FAIL-CLOSED: Write-Budget erschöpft.")
 
-        if (
-            name == "run_python"
-            and self.execs >= MAX_EXEC_CALLS
-        ):
-            raise RuntimeError(
-                "FAIL-CLOSED: Execute-Budget erschöpft."
-            )
+        if name == "run_python" and self.execs >= MAX_EXEC_CALLS:
+            raise RuntimeError("FAIL-CLOSED: Execute-Budget erschöpft.")
 
     def consume(self, name):
         self.total += 1
@@ -998,23 +776,12 @@ class MissionBudget:
 
 class MissionPolicyLock:
     def __init__(self, policy):
-        self.snapshot = normalize_policy(
-            policy
-        )
-        self.digest = policy_digest(
-            self.snapshot
-        )
+        self.snapshot = normalize_policy(policy)
+        self.digest = policy_digest(self.snapshot)
 
     def verify(self):
-        if (
-            policy_digest(
-                self.snapshot
-            )
-            != self.digest
-        ):
-            raise RuntimeError(
-                "FAIL-CLOSED: Mission Policy verändert."
-            )
+        if policy_digest(self.snapshot) != self.digest:
+            raise RuntimeError("FAIL-CLOSED: Mission Policy verändert.")
 
         return self.snapshot
 
@@ -1028,56 +795,40 @@ def execute_tool(
     policy = policy_lock.verify()
 
     if name not in TOOL_NAMES:
-        raise PermissionError(
-            f"Tool nicht erlaubt: {name}"
-        )
+        raise PermissionError(f"Tool nicht erlaubt: {name}")
 
     if not policy.get(
         name,
         False,
     ):
-        raise PermissionError(
-            f"Tool durch Mission Policy verboten: {name}"
-        )
+        raise PermissionError(f"Tool durch Mission Policy verboten: {name}")
 
     if not isinstance(
         arguments,
         dict,
     ):
-        raise TypeError(
-            "arguments muss Objekt sein."
-        )
+        raise TypeError("arguments muss Objekt sein.")
 
     budget.check(name)
 
     if name == "list_files":
         if arguments:
-            raise PermissionError(
-                "list_files akzeptiert keine Argumente."
-            )
+            raise PermissionError("list_files akzeptiert keine Argumente.")
 
         result = list_files()
 
     elif name == "read_file":
-        if set(arguments) != {
-            "path"
-        }:
-            raise PermissionError(
-                "read_file erwartet exakt path."
-            )
+        if set(arguments) != {"path"}:
+            raise PermissionError("read_file erwartet exakt path.")
 
-        result = read_file(
-            arguments["path"]
-        )
+        result = read_file(arguments["path"])
 
     elif name == "write_file":
         if set(arguments) != {
             "path",
             "content",
         }:
-            raise PermissionError(
-                "write_file erwartet path und content."
-            )
+            raise PermissionError("write_file erwartet path und content.")
 
         result = write_file(
             arguments["path"],
@@ -1089,9 +840,7 @@ def execute_tool(
             "script",
             "args",
         }:
-            raise PermissionError(
-                "run_python enthält unerlaubte Argumente."
-            )
+            raise PermissionError("run_python enthält unerlaubte Argumente.")
 
         result = run_python(
             arguments["script"],
@@ -1102,9 +851,7 @@ def execute_tool(
         )
 
     else:
-        raise RuntimeError(
-            "Unbekanntes Tool."
-        )
+        raise RuntimeError("Unbekanntes Tool.")
 
     budget.consume(name)
 
@@ -1119,41 +866,27 @@ def execute_tool(
 def validate_model_response(content):
 
     if not isinstance(content, str):
-        raise RuntimeError(
-            "FAIL-CLOSED: Modellantwort muss Text sein."
-        )
+        raise RuntimeError("FAIL-CLOSED: Modellantwort muss Text sein.")
 
-    size = len(
-        content.encode("utf-8")
-    )
+    size = len(content.encode("utf-8"))
 
     if size > MAX_MODEL_RESPONSE_CHARS:
-        raise RuntimeError(
-            "FAIL-CLOSED: Modellantwort zu groß."
-        )
+        raise RuntimeError("FAIL-CLOSED: Modellantwort zu groß.")
 
     return content
 
 
 def ask_model(messages):
     if len(messages) > MAX_MESSAGE_COUNT:
-        raise RuntimeError(
-            "FAIL-CLOSED: Nachrichtenlimit erreicht."
-        )
+        raise RuntimeError("FAIL-CLOSED: Nachrichtenlimit erreicht.")
 
     encoded_messages = json.dumps(
         messages,
         ensure_ascii=False,
     )
 
-    if len(
-        encoded_messages.encode(
-            "utf-8"
-        )
-    ) > MAX_MESSAGE_CHARS:
-        raise RuntimeError(
-            "FAIL-CLOSED: Nachrichten zu groß."
-        )
+    if len(encoded_messages.encode("utf-8")) > MAX_MESSAGE_CHARS:
+        raise RuntimeError("FAIL-CLOSED: Nachrichten zu groß.")
 
     payload = {
         "model": MODEL,
@@ -1166,45 +899,38 @@ def ask_model(messages):
 
     request = urllib.request.Request(
         OLLAMA_URL,
-        data=json.dumps(
-            payload
-        ).encode("utf-8"),
+        data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
         },
     )
 
+    parsed = urllib.parse.urlparse(request.full_url)
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Blocked URL scheme: {parsed.scheme}")
+
     try:
-        with urllib.request.urlopen(
+        with urllib.request.urlopen(  # nosec B310
             request,
             timeout=60,
         ) as response:
 
-            declared = response.headers.get(
-                "Content-Length"
-            )
+            declared = response.headers.get("Content-Length")
 
             if declared is not None:
                 try:
                     if int(declared) > MAX_HTTP_RESPONSE_BYTES:
-                        raise RuntimeError(
-                            "FAIL-CLOSED: HTTP-Antwort zu groß."
-                        )
+                        raise RuntimeError("FAIL-CLOSED: HTTP-Antwort zu groß.")
                 except ValueError:
                     pass
 
-            raw = response.read(
-                MAX_HTTP_RESPONSE_BYTES + 1
-            )
+            raw = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
 
             if len(raw) > MAX_HTTP_RESPONSE_BYTES:
-                raise RuntimeError(
-                    "FAIL-CLOSED: HTTP-Antwort zu groß."
-                )
+                raise RuntimeError("FAIL-CLOSED: HTTP-Antwort zu groß.")
 
-            body = json.loads(
-                raw.decode("utf-8")
-            )
+            body = json.loads(raw.decode("utf-8"))
 
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(
@@ -1212,134 +938,88 @@ def ask_model(messages):
             errors="replace",
         )
 
-        raise RuntimeError(
-            f"Ollama HTTP {exc.code}: {detail}"
-        ) from exc
+        raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
 
     except Exception as exc:
-        raise RuntimeError(
-            f"Ollama nicht erreichbar: {exc}"
-        ) from exc
+        raise RuntimeError(f"Ollama nicht erreichbar: {exc}") from exc
 
-    message = body.get(
-        "message"
-    )
+    message = body.get("message")
 
     if not isinstance(
         message,
         dict,
     ):
-        raise RuntimeError(
-            "Ollama-Antwort enthält keine message."
-        )
+        raise RuntimeError("Ollama-Antwort enthält keine message.")
 
-    content = message.get(
-        "content"
-    )
+    content = message.get("content")
 
     if not isinstance(
         content,
         str,
     ):
-        raise RuntimeError(
-            "Ollama-Antwort enthält keinen Text."
-        )
+        raise RuntimeError("Ollama-Antwort enthält keinen Text.")
 
-    if len(
-        content.encode(
-            "utf-8"
-        )
-    ) > MAX_MODEL_RESPONSE_CHARS:
-        raise RuntimeError(
-            "FAIL-CLOSED: Modellantwort zu groß."
-        )
+    if len(content.encode("utf-8")) > MAX_MODEL_RESPONSE_CHARS:
+        raise RuntimeError("FAIL-CLOSED: Modellantwort zu groß.")
 
-    return validate_model_response(
-        content.strip()
-    )
+    return validate_model_response(content.strip())
 
 
 # =========================================================
 # PROTOCOL
 # =========================================================
 
+
 def normalize_model_json(text):
     if not isinstance(
         text,
         str,
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: Modellantwort muss Text sein."
-        )
+        raise RuntimeError("FAIL-CLOSED: Modellantwort muss Text sein.")
 
     value = text.strip()
 
-    if (
-        value.startswith("```")
-        and value.endswith("```")
-    ):
+    if value.startswith("```") and value.endswith("```"):
         lines = value.splitlines()
 
         if len(lines) < 3:
-            raise RuntimeError(
-                "FAIL-CLOSED: Ungültiger Markdown-Codeblock."
-            )
+            raise RuntimeError("FAIL-CLOSED: Ungültiger Markdown-Codeblock.")
 
-        opening = lines[
-            0
-        ].strip().lower()
+        opening = lines[0].strip().lower()
 
-        closing = lines[
-            -1
-        ].strip()
+        closing = lines[-1].strip()
 
         if closing != "```":
-            raise RuntimeError(
-                "FAIL-CLOSED: Codeblock nicht korrekt geschlossen."
-            )
+            raise RuntimeError("FAIL-CLOSED: Codeblock nicht korrekt geschlossen.")
 
         if opening not in {
             "```",
             "```json",
         }:
-            raise RuntimeError(
-                "FAIL-CLOSED: Nur JSON-Codeblock erlaubt."
-            )
+            raise RuntimeError("FAIL-CLOSED: Nur JSON-Codeblock erlaubt.")
 
-        value = "\n".join(
-            lines[1:-1]
-        ).strip()
+        value = "\n".join(lines[1:-1]).strip()
 
     if not value:
-        raise RuntimeError(
-            "FAIL-CLOSED: Leere Modellantwort."
-        )
+        raise RuntimeError("FAIL-CLOSED: Leere Modellantwort.")
 
     return value
 
 
 def parse_action(text):
-    value = normalize_model_json(
-        text
-    )
+    value = normalize_model_json(text)
 
     try:
-        obj = json.loads(
-            value
-        )
+        obj = json.loads(value)
 
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "FAIL-CLOSED: Antwort ist kein einzelnes JSON."
-        ) from exc
+        raise RuntimeError("FAIL-CLOSED: Antwort ist kein einzelnes JSON.") from exc
 
     if not isinstance(
         obj,
         dict,
     ):
-        raise RuntimeError(
-            "FAIL-CLOSED: JSON-Objekt erwartet."
-        )
+        raise RuntimeError("FAIL-CLOSED: JSON-Objekt erwartet.")
 
     if set(obj) == {
         "action",
@@ -1347,25 +1027,19 @@ def parse_action(text):
         "arguments",
     }:
         if obj["action"] != "tool":
-            raise RuntimeError(
-                "FAIL-CLOSED: Ungültige Tool-Aktion."
-            )
+            raise RuntimeError("FAIL-CLOSED: Ungültige Tool-Aktion.")
 
         if not isinstance(
             obj["name"],
             str,
         ):
-            raise RuntimeError(
-                "FAIL-CLOSED: Toolname ungültig."
-            )
+            raise RuntimeError("FAIL-CLOSED: Toolname ungültig.")
 
         if not isinstance(
             obj["arguments"],
             dict,
         ):
-            raise RuntimeError(
-                "FAIL-CLOSED: arguments ungültig."
-            )
+            raise RuntimeError("FAIL-CLOSED: arguments ungültig.")
 
         return obj
 
@@ -1374,17 +1048,13 @@ def parse_action(text):
         "arguments",
     }:
         if obj["action"] not in TOOL_NAMES:
-            raise RuntimeError(
-                "FAIL-CLOSED: Unbekannte Kurzformat-Aktion."
-            )
+            raise RuntimeError("FAIL-CLOSED: Unbekannte Kurzformat-Aktion.")
 
         if not isinstance(
             obj["arguments"],
             dict,
         ):
-            raise RuntimeError(
-                "FAIL-CLOSED: arguments ungültig."
-            )
+            raise RuntimeError("FAIL-CLOSED: arguments ungültig.")
 
         return {
             "action": "tool",
@@ -1397,49 +1067,36 @@ def parse_action(text):
         "result",
     }:
         if obj["action"] != "done":
-            raise RuntimeError(
-                "FAIL-CLOSED: Ungültige Abschlussaktion."
-            )
+            raise RuntimeError("FAIL-CLOSED: Ungültige Abschlussaktion.")
 
         if not isinstance(
             obj["result"],
             str,
         ):
-            raise RuntimeError(
-                "FAIL-CLOSED: result ungültig."
-            )
+            raise RuntimeError("FAIL-CLOSED: result ungültig.")
 
         return obj
 
-    raise RuntimeError(
-        "FAIL-CLOSED: Unbekanntes Antwortschema."
-    )
+    raise RuntimeError("FAIL-CLOSED: Unbekanntes Antwortschema.")
 
 
 # =========================================================
 # AGENT LOOP
 # =========================================================
 
+
 def validate_task(task):
     if not isinstance(
         task,
         str,
     ):
-        raise TypeError(
-            "Task muss String sein."
-        )
+        raise TypeError("Task muss String sein.")
 
     if not task.strip():
-        raise RuntimeError(
-            "FAIL-CLOSED: Leere Aufgabe."
-        )
+        raise RuntimeError("FAIL-CLOSED: Leere Aufgabe.")
 
-    if len(
-        task.encode("utf-8")
-    ) > MAX_TASK_CHARS:
-        raise RuntimeError(
-            "FAIL-CLOSED: Aufgabe überschreitet Größenlimit."
-        )
+    if len(task.encode("utf-8")) > MAX_TASK_CHARS:
+        raise RuntimeError("FAIL-CLOSED: Aufgabe überschreitet Größenlimit.")
 
     return task.strip()
 
@@ -1453,16 +1110,10 @@ def append_message(
         content,
         str,
     ):
-        raise TypeError(
-            "Nachrichteninhalt muss String sein."
-        )
+        raise TypeError("Nachrichteninhalt muss String sein.")
 
-    if len(
-        content.encode("utf-8")
-    ) > MAX_MESSAGE_CHARS:
-        raise RuntimeError(
-            "FAIL-CLOSED: Nachrichteninhalt zu groß."
-        )
+    if len(content.encode("utf-8")) > MAX_MESSAGE_CHARS:
+        raise RuntimeError("FAIL-CLOSED: Nachrichteninhalt zu groß.")
 
     messages.append(
         {
@@ -1472,21 +1123,15 @@ def append_message(
     )
 
     if len(messages) > MAX_MESSAGE_COUNT:
-        raise RuntimeError(
-            "FAIL-CLOSED: Nachrichtenlimit erreicht."
-        )
+        raise RuntimeError("FAIL-CLOSED: Nachrichtenlimit erreicht.")
 
 
 def run_agent(task):
-    task = validate_task(
-        task
-    )
+    task = validate_task(task)
 
     state = load_state()
 
-    policy_lock = MissionPolicyLock(
-        build_mission_policy()
-    )
+    policy_lock = MissionPolicyLock(build_mission_policy())
 
     budget = MissionBudget()
 
@@ -1548,12 +1193,7 @@ Regeln:
     append_message(
         messages,
         "user",
-        (
-            "AUFGABE:\n"
-            + task
-            + "\n"
-            + "Beginne jetzt."
-        ),
+        ("AUFGABE:\n" + task + "\n" + "Beginne jetzt."),
     )
 
     for step in range(
@@ -1563,20 +1203,14 @@ Regeln:
         policy_lock.verify()
 
         print()
-        print(
-            f"=== STEP {step}/{MAX_STEPS} ==="
-        )
+        print(f"=== STEP {step}/{MAX_STEPS} ===")
 
-        response = ask_model(
-            messages
-        )
+        response = ask_model(messages)
 
         print("MODEL:")
         print(response)
 
-        action = parse_action(
-            response
-        )
+        action = parse_action(response)
 
         append_message(
             messages,
@@ -1590,9 +1224,7 @@ Regeln:
             state["tasks_completed"] += 1
             state["last_result"] = result
 
-            save_state(
-                state
-            )
+            save_state(state)
 
             audit(
                 "MISSION_DONE",
@@ -1686,13 +1318,9 @@ Regeln:
             feedback,
         )
 
-    state["last_result"] = (
-        "FAIL-CLOSED: Schrittlimit erreicht."
-    )
+    state["last_result"] = "FAIL-CLOSED: Schrittlimit erreicht."
 
-    save_state(
-        state
-    )
+    save_state(state)
 
     audit(
         "MISSION_ABORTED",
@@ -1709,21 +1337,15 @@ Regeln:
         },
     )
 
-    raise RuntimeError(
-        "FAIL-CLOSED: Maximale Schrittzahl erreicht."
-    )
+    raise RuntimeError("FAIL-CLOSED: Maximale Schrittzahl erreicht.")
 
 
 def main():
     if len(sys.argv) < 2:
-        print(
-            'Usage: python3 safe_agent_v50.py "AUFGABE"'
-        )
+        print('Usage: python3 safe_agent_v50.py "AUFGABE"')
         raise SystemExit(2)
 
-    print(
-        "=== SAFE AGENT V50 ==="
-    )
+    print("=== SAFE AGENT V50 ===")
     print(
         "Project:",
         ROOT,
@@ -1744,9 +1366,7 @@ def main():
         ),
     )
 
-    run_agent(
-        " ".join(sys.argv[1:])
-    )
+    run_agent(" ".join(sys.argv[1:]))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,50 @@
+---
+name: SAFE AGENT Release Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-gate:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      - name: Python compile check V50
+        run: |
+          python -m compileall autonomous_agent/safe_agent_v50.py
+
+
+      - name: Install Bandit
+        run: |
+          pip install bandit
+
+
+      - name: Bandit security scan
+        run: |
+          bandit -r autonomous_agent/safe_agent_v50.py
+
+
+      - name: Verify V50 release files
+        run: |
+          test -f autonomous_agent/BUILD_INFO_V50.txt
+          test -f autonomous_agent/release/V50_COMMIT.txt
+          test -f autonomous_agent/release/V50_BUILD_TIME.txt
+
+
+      - name: Check unsafe shell execution
+        run: |
+          ! grep -R "shell=True" autonomous_agent/safe_agent_v50.py
