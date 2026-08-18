@@ -911,7 +911,7 @@ def ask_model(messages):
         raise ValueError(f"Blocked URL scheme: {parsed.scheme}")
 
     try:
-        with urllib.request.urlopen(   # nosec B310
+        with urllib.request.urlopen(  # nosec B310
             request,
             timeout=60,
         ) as response:
