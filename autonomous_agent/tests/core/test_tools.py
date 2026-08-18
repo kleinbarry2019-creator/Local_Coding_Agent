@@ -60,6 +60,32 @@ class ExampleInput:
 
 
 @dataclass(frozen=True)
+class ExplodingInput:
+    value: str
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "value":
+            raise RuntimeError("credential=input-secret")
+        return super().__getattribute__(name)
+
+
+@dataclass(frozen=True)
+class WideningStringInput:
+    value: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "value", self.value * 32)
+
+
+@dataclass(frozen=True)
+class WideningItemsInput:
+    values: list[str]
+
+    def __post_init__(self) -> None:
+        self.values.extend(["one", "two"])
+
+
+@dataclass(frozen=True)
 class ExampleOutput:
     value: str
 
@@ -503,6 +529,55 @@ def test_expired_deadline_does_not_call_handler(tmp_path: Path) -> None:
     assert called is False
 
 
+def test_effective_deadline_expiry_immediately_before_handler_does_not_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy_called = False
+    handler_called = False
+    ticks = iter((100.0, 100.0, 100.2, 100.2))
+
+    def monotonic() -> float:
+        return next(ticks)
+
+    def policy(
+        request: PolicyRequest, context: PolicyContext
+    ) -> PolicyDecision:
+        nonlocal policy_called
+        del request, context
+        policy_called = True
+        return PolicyDecision(
+            kind=DecisionKind.ALLOW,
+            code="test_allow",
+            explanation="Allowed by the test policy boundary.",
+            timeout_s=0.1,
+            max_output_bytes=1_024,
+        )
+
+    def handler(
+        request: ExampleInput, context: ExecutionContext
+    ) -> ExampleOutput:
+        nonlocal handler_called
+        del request, context
+        handler_called = True
+        return ExampleOutput(value="unsafe")
+
+    monkeypatch.setattr("autonomous_agent.core.tools.time.monotonic", monotonic)
+    monkeypatch.setattr("autonomous_agent.core.tools.evaluate_policy", policy)
+    registry = ToolRegistry()
+    registry.register(replace(_spec(handler), default_timeout_s=0.1))
+
+    result = registry.execute(
+        "example",
+        {"value": "safe"},
+        _execution_context(tmp_path, deadline=200.0),
+    )
+
+    assert result.status is ToolStatus.TIMED_OUT
+    assert result.diagnostic_code == "deadline_expired"
+    assert policy_called is True
+    assert handler_called is False
+
+
 def test_invalid_input_is_rejected_before_policy_and_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -539,6 +614,158 @@ def test_invalid_input_is_rejected_before_policy_and_handler(
 
     assert result.status is ToolStatus.INVALID_INPUT
     assert called is False
+
+
+def test_input_accessor_exception_is_redacted_before_policy_and_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy_called = False
+    handler_called = False
+
+    def policy(
+        request: PolicyRequest, context: PolicyContext
+    ) -> PolicyDecision:
+        nonlocal policy_called
+        del request, context
+        policy_called = True
+        return PolicyDecision(
+            kind=DecisionKind.ALLOW,
+            code="test_allow",
+            explanation="Allowed by the test policy boundary.",
+            timeout_s=2.0,
+            max_output_bytes=1_024,
+        )
+
+    def handler(
+        request: ExplodingInput, context: ExecutionContext
+    ) -> ExampleOutput:
+        nonlocal handler_called
+        del request, context
+        handler_called = True
+        return ExampleOutput(value="unsafe")
+
+    monkeypatch.setattr("autonomous_agent.core.tools.evaluate_policy", policy)
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="exploding-input",
+            version="1.0.0",
+            description="Exercise the input accessor boundary.",
+            input_type=ExplodingInput,
+            output_type=ExampleOutput,
+            capabilities=frozenset({"doctor.read"}),
+            side_effect=SideEffect.READ_ONLY,
+            network=NetworkKind.NONE,
+            requires_elevation=False,
+            requires_recovery=False,
+            default_timeout_s=5.0,
+            max_output_bytes=4_096,
+            handler=handler,
+        )
+    )
+
+    result = registry.execute(
+        "exploding-input",
+        {"value": "safe"},
+        _execution_context(
+            tmp_path,
+            limits=SchemaLimits(max_string_bytes=48),
+        ),
+    )
+
+    assert result.status is ToolStatus.ERROR
+    assert result.diagnostic_code == "internal_error"
+    assert result.data is None
+    assert result.diagnostic is not None
+    assert "incident" in result.diagnostic.lower()
+    assert "input-secret" not in result.diagnostic
+    assert "RuntimeError" not in result.diagnostic
+    assert "credential" not in result.diagnostic
+    assert len(result.diagnostic.encode("utf-8")) <= 48
+    assert policy_called is False
+    assert handler_called is False
+
+
+@pytest.mark.parametrize(
+    ("input_type", "raw_input", "limits"),
+    [
+        pytest.param(
+            WideningStringInput,
+            {"value": "x"},
+            SchemaLimits(max_string_bytes=8),
+            id="string-bytes",
+        ),
+        pytest.param(
+            WideningItemsInput,
+            {"values": []},
+            SchemaLimits(max_items=2),
+            id="cumulative-items",
+        ),
+    ],
+)
+def test_post_init_cannot_widen_input_after_raw_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    input_type: type[object],
+    raw_input: dict[str, object],
+    limits: SchemaLimits,
+) -> None:
+    policy_called = False
+    handler_called = False
+
+    def policy(
+        request: PolicyRequest, context: PolicyContext
+    ) -> PolicyDecision:
+        nonlocal policy_called
+        del request, context
+        policy_called = True
+        return PolicyDecision(
+            kind=DecisionKind.ALLOW,
+            code="test_allow",
+            explanation="Allowed by the test policy boundary.",
+            timeout_s=2.0,
+            max_output_bytes=1_024,
+        )
+
+    def handler(
+        request: object, context: ExecutionContext
+    ) -> ExampleOutput:
+        nonlocal handler_called
+        del request, context
+        handler_called = True
+        return ExampleOutput(value="unsafe")
+
+    monkeypatch.setattr("autonomous_agent.core.tools.evaluate_policy", policy)
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="post-init-widening",
+            version="1.0.0",
+            description="Exercise constructed input bounds.",
+            input_type=input_type,
+            output_type=ExampleOutput,
+            capabilities=frozenset({"doctor.read"}),
+            side_effect=SideEffect.READ_ONLY,
+            network=NetworkKind.NONE,
+            requires_elevation=False,
+            requires_recovery=False,
+            default_timeout_s=5.0,
+            max_output_bytes=4_096,
+            handler=handler,
+        )
+    )
+
+    result = registry.execute(
+        "post-init-widening",
+        raw_input,
+        _execution_context(tmp_path, limits=limits),
+    )
+
+    assert result.status is ToolStatus.INVALID_INPUT
+    assert result.diagnostic_code == "invalid_input"
+    assert result.data is None
+    assert policy_called is False
+    assert handler_called is False
 
 
 def test_policy_request_uses_only_trusted_spec_classification(

@@ -129,6 +129,17 @@ def decode_dataclass[InputT](
     limits: SchemaLimits,
 ) -> InputT:
     """Decode an exact JSON-compatible mapping into a declared dataclass."""
+    decoded, _payload = _decode_dataclass_with_payload(
+        raw, expected_type, limits
+    )
+    return decoded
+
+
+def _decode_dataclass_with_payload[InputT](
+    raw: Mapping[str, object],
+    expected_type: type[InputT],
+    limits: SchemaLimits,
+) -> tuple[InputT, bytes]:
     _require_limits(limits)
     annotations = _validate_dataclass_type(expected_type)
     if not isinstance(raw, Mapping):
@@ -139,7 +150,13 @@ def decode_dataclass[InputT](
         raise _SchemaError("invalid_value", "input mapping is unreadable") from error
     _validate_document(document, limits, limits.max_input_bytes, "input")
     decoded = _decode_dataclass_document(document, expected_type, annotations)
-    return cast(InputT, decoded)
+    canonical_input = _encode_dataclass_value(
+        decoded, expected_type, annotations
+    )
+    payload = _validate_document(
+        canonical_input, limits, limits.max_input_bytes, "input"
+    )
+    return cast(InputT, decoded), payload
 
 
 def encode_dataclass[OutputT](
@@ -197,15 +214,21 @@ class ToolRegistry:
             )
 
         try:
-            decoded = decode_dataclass(raw_input, spec.input_type, limits)
-            request = _policy_request(spec, decoded, limits)
-        except (TypeError, ValueError):
+            decoded, payload = _decode_dataclass_with_payload(
+                raw_input, spec.input_type, limits
+            )
+            request = _policy_request(spec, payload)
+        except _SchemaError:
             return _result(
                 started,
                 limits,
                 ToolStatus.INVALID_INPUT,
                 "invalid_input",
                 "The tool input does not match its bounded schema.",
+            )
+        except Exception:  # noqa: BLE001 - redact input programmer errors
+            return _incident_result(
+                started, limits, ToolStatus.ERROR, "internal_error"
             )
 
         try:
@@ -266,6 +289,14 @@ class ToolRegistry:
             deadline_monotonic=effective_deadline,
             schema_limits=replace(limits, max_output_bytes=output_cap),
         )
+        if time.monotonic() >= effective_deadline:
+            return _result(
+                started,
+                limits,
+                ToolStatus.TIMED_OUT,
+                "deadline_expired",
+                "The tool deadline expired before invocation.",
+            )
         try:
             output = spec.handler(decoded, handler_context)
         except Exception:  # noqa: BLE001 - redact handler programmer errors
@@ -641,10 +672,10 @@ def _validate_document(
     limits: SchemaLimits,
     byte_limit: int,
     direction: str,
-) -> None:
+) -> bytes:
     counter = _ItemCounter()
     _validate_json_value(value, limits, counter, 0)
-    _bounded_serialized_bytes(value, byte_limit, direction)
+    return _bounded_serialized_bytes(value, byte_limit, direction)
 
 
 def _validate_json_value(
@@ -724,13 +755,8 @@ def _bounded_serialized_bytes(
 
 def _policy_request(
     spec: ToolSpec[object, object],
-    decoded: object,
-    limits: SchemaLimits,
+    payload: bytes,
 ) -> PolicyRequest:
-    canonical_input = _encode_dataclass_value(decoded, spec.input_type)
-    payload = _bounded_serialized_bytes(
-        canonical_input, limits.max_input_bytes, "input"
-    )
     digest = hashlib.sha256(
         spec.name.encode("utf-8")
         + b"\x00"
