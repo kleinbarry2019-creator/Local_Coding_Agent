@@ -24,11 +24,11 @@ class StateManager:
 
     def serialize(self, obj, seen=None):
 
-        if obj is self:
-            return "<state_manager>"
-
         if seen is None:
             seen = set()
+
+        if obj is self:
+            return "<state_manager>"
 
         if isinstance(obj, (str, int, float, bool)) or obj is None:
             return obj
@@ -44,27 +44,36 @@ class StateManager:
             return [
                 self.serialize(x, seen)
                 for x in obj
+                if x is not self
             ]
 
         if isinstance(obj, dict):
             return {
                 str(k): self.serialize(v, seen)
                 for k, v in obj.items()
+                if v is not self
             }
 
         if hasattr(obj, "__dict__"):
 
-            data = {}
+            result = {}
 
             for key, value in obj.__dict__.items():
-                if value is self:
-                    data[key] = "<state_manager>"
-                else:
-                    data[key] = self.serialize(value, seen)
 
-            return data
+                if key == "state":
+                    continue
+
+                if value is self:
+                    result[key] = "<state_manager>"
+                else:
+                    result[key] = self.serialize(value, seen)
+
+            return result
 
         return str(obj)
+
+    def __getitem__(self, key):
+        return self.state.get(key)
 
 
     def save(self, data=None):
@@ -72,33 +81,18 @@ class StateManager:
         if data is not None:
             if isinstance(data, dict):
                 self.state.update(data)
-            elif hasattr(data, "__dict__"):
-                self.state.update(data.__dict__)
             else:
                 self.state["result"] = data
 
         self.state["updated"] = datetime.now().isoformat()
 
-        with open(self.path, "w") as f:
+        with open(self.path, "w", encoding="utf-8") as f:
             json.dump(
                 self.serialize(self.state),
                 f,
-                indent=4
+                indent=2,
+                ensure_ascii=False
             )
-
-
-    def set(self, key, value):
-        self.state[key] = value
-        self.save()
-
-
-    def get(self, key, default=None):
-        return self.state.get(key, default)
-
-
-    def __getitem__(self, key):
-        return self.state.get(key)
-
 
     def __setitem__(self, key, value):
         self.state[key] = value
