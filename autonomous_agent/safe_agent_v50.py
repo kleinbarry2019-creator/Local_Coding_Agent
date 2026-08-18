@@ -11,6 +11,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
 
 
@@ -1172,6 +1173,13 @@ def ask_model(messages):
         headers={
             "Content-Type": "application/json",
         },
+    )
+
+	parsed = urllib.parse.urlparse(request.full_url)
+
+	if parsed.scheme.lower() not in ("http", "https"):
+   	 raise ValueError(
+        f"Blocked URL scheme: {parsed.scheme}"
     )
 
     try:
