@@ -1,3 +1,4 @@
+from autonomous_agent.validator import AgentValidator
 from autonomous_agent.orchestrator import Orchestrator
 from autonomous_agent.memory_manager import MemoryManager
 from autonomous_agent.self_monitor import SelfMonitor
@@ -9,6 +10,12 @@ from autonomous_agent.execution_engine import ExecutionEngine
 def main():
 
     print("=== Autonomous Agent V50.6.2 ===")
+    validator = AgentValidator()
+
+    validation = validator.validate()
+
+    print("Validation Check:")
+    print(validation)
 
     monitor = SelfMonitor()
     print("System Check:")
