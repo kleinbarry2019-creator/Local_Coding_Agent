@@ -24,6 +24,9 @@ class StateManager:
 
     def serialize(self, obj, seen=None):
 
+        if obj is self:
+            return "<state_manager>"
+
         if seen is None:
             seen = set()
 
