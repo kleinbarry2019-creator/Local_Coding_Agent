@@ -1174,13 +1174,13 @@ def ask_model(messages):
             "Content-Type": "application/json",
         },
     )
+ 
+    parsed = urllib.parse.urlparse(request.full_url)
 
-	parsed = urllib.parse.urlparse(request.full_url)
-
-	if parsed.scheme.lower() not in ("http", "https"):
-   	 raise ValueError(
-        f"Blocked URL scheme: {parsed.scheme}"
-    )
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(
+            f"Blocked URL scheme: {parsed.scheme}"
+        )
 
     try:
         with urllib.request.urlopen(
