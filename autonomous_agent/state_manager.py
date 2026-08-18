@@ -5,17 +5,32 @@ from datetime import datetime
 
 class StateManager:
 
+    SCHEMA_VERSION = 1
+
     def __init__(self, path="agent_state.json"):
         self.path = path
         self.state = {}
         self.load()
 
 
+    def migrate_state(self, state):
+
+        if not isinstance(state, dict):
+            return {}
+
+        version = state.get("schema_version", 0)
+
+        if version < 1:
+            state["schema_version"] = 1
+
+        return state
+
+
     def load(self):
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r") as f:
-                    self.state = json.load(f)
+                    self.state = self.migrate_state(json.load(f))
             except Exception:
                 self.state = {}
         else:
@@ -86,6 +101,7 @@ class StateManager:
             else:
                 self.state["result"] = data
 
+        self.state["schema_version"] = self.SCHEMA_VERSION
         self.state["updated"] = datetime.now().isoformat()
 
         with open(self.path, "w", encoding="utf-8") as f:
