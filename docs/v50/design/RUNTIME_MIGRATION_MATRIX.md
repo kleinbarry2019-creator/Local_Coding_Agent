@@ -33,6 +33,7 @@ Pending:
 - [x] Locate snapshot writers
 - [x] Add V50 path abstraction
 - [x] Redirect the active V50 state, integrity, and audit writers
+- [x] Redirect modular recovery state, snapshot, and audit writers
 - [x] Preserve V49 and legacy-file compatibility
 
-Snapshot-writer migration remains a separate recovery subsystem milestone.
+Snapshot-writer migration is complete for the modular recovery subsystem.

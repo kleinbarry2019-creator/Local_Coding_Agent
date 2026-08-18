@@ -3,26 +3,42 @@ import hashlib
 import uuid
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from autonomous_agent.recovery_schema import StateSchemaValidator
+from autonomous_agent.runtime_paths import (
+    build_runtime_paths,
+    migrate_legacy_recovery_files,
+)
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
 class StateManager:
 
     SCHEMA_VERSION = 1
 
-    def __init__(self, path="agent_state.json", history_path=None, audit_path=None):
-        self.path = path
+    def __init__(self, path=None, history_path=None, audit_path=None):
+        if path is None:
+            runtime_paths = build_runtime_paths(PACKAGE_ROOT)
+            migrate_legacy_recovery_files(
+                runtime_paths,
+                legacy_root=Path.cwd(),
+            )
+            path = runtime_paths.recovery_state_file
+            history_path = history_path or runtime_paths.recovery_history_file
+            audit_path = audit_path or runtime_paths.recovery_audit_file
+        else:
+            path = Path(path)
+            state_directory = path.parent
+            history_path = history_path or state_directory / "agent_history.json"
+            audit_path = audit_path or state_directory / "agent_audit.json"
+
+        self.path = str(path)
         self.state = {}
-        state_directory = os.path.dirname(path)
-        self.history_path = history_path or os.path.join(
-            state_directory,
-            "agent_history.json"
-        )
-        self.audit_path = audit_path or os.path.join(
-            state_directory,
-            "agent_audit.json"
-        )
+        self.history_path = str(history_path)
+        self.audit_path = str(audit_path)
         self.recovery_audit_enabled = True
         self.recovered = False
         self.load_error = None

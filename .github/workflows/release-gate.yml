@@ -27,12 +27,16 @@ jobs:
         run: |
           python -m compileall \
             autonomous_agent/safe_agent_v50.py \
-            autonomous_agent/runtime_paths.py
+            autonomous_agent/runtime_paths.py \
+            autonomous_agent/state_manager.py
 
 
-      - name: Runtime path isolation tests
+      - name: Runtime and recovery storage tests
         run: |
-          python -m unittest autonomous_agent.tests.test_runtime_paths
+          python -m unittest \
+            autonomous_agent.tests.test_runtime_paths \
+            autonomous_agent.tests.test_recovery_storage \
+            autonomous_agent.tests.test_recovery_schema
 
 
       - name: Install Bandit

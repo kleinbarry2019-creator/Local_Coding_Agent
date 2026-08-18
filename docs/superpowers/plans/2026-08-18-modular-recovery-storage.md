@@ -1031,7 +1031,7 @@ Expected: both commands exit `0`.
 Run:
 
 ```bash
-flake8 --ignore=E303 \
+flake8 --ignore=E303,W503,W504 \
   autonomous_agent/runtime_paths.py \
   autonomous_agent/state_manager.py \
   autonomous_agent/tests/test_runtime_paths.py \
@@ -1043,23 +1043,28 @@ bandit -r \
   autonomous_agent/safe_agent_v50.py
 ```
 
-Expected: both commands exit `0` with no reportable issues. `E303` is ignored because `state_manager.py` already contains that pre-existing blank-line style; all other Flake8 rules remain active.
+Expected: both commands exit `0` with no reportable issues. `E303`, `W503`, and `W504` are ignored because `state_manager.py` already contains those pre-existing whitespace styles; all other Flake8 rules remain active. Run the commands separately so a later command cannot mask an earlier nonzero exit.
 
 - [ ] **Step 6: Verify generator compilation**
 
-Run the generator in a disposable directory so tracked source files cannot be replaced:
+Run the generator against a disposable copy of the package so tracked source files cannot be replaced and the generated V50 regression tests receive their normal package fixture:
 
 ```bash
-generator_dir="$(mktemp -d)"
-cp autonomous_agent/build_agent_v50.sh "$generator_dir/"
+generator_root="$(mktemp -d)"
+cp -a autonomous_agent "$generator_root/"
 (
-  cd "$generator_dir"
-  bash build_agent_v50.sh
-  python -m py_compile safe_agent_v50.py tests/test_v50.py
+  set -e
+  cd "$generator_root/autonomous_agent"
+  bash build_agent_v50.sh > build.log 2>&1
+  if rg -n 'Traceback|ModuleNotFoundError|AssertionError|FAILED' build.log; then
+    exit 1
+  fi
+  rg -n 'SAFE AGENT V50 READY' build.log
+  python -m py_compile safe_agent_v50.py runtime_paths.py tests/test_v50.py
 )
 ```
 
-Expected: generation and both compile checks exit `0`. The temporary directory is outside the repository and may be left for the operating system's temporary-file cleanup.
+Expected: the build log has no failure markers, contains `SAFE AGENT V50 READY`, and all three compile checks exit `0`. The temporary directory is outside the repository and may be left for the operating system's temporary-file cleanup.
 
 - [ ] **Step 7: Confirm validation did not dirty tracked files**
 
@@ -1097,6 +1102,7 @@ Run:
 
 ```bash
 git add \
+  docs/superpowers/plans/2026-08-18-modular-recovery-storage.md \
   autonomous_agent/runtime_paths.py \
   autonomous_agent/state_manager.py \
   autonomous_agent/tests/test_runtime_paths.py \
