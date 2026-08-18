@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
@@ -222,12 +222,20 @@ def test_required_policy_matrix(
         "autonomous_symlink",
         "autonomous_mount",
     }:
-        invalid_target = tmp_path / scenario
-        request = _request(root, targets=(invalid_target,))
+        if scenario == "autonomous_outside":
+            requested_target = tmp_path / "outside" / "target"
+            resolved_target = requested_target
+        elif scenario == "autonomous_symlink":
+            requested_target = root / "linked" / "target"
+            resolved_target = tmp_path / "symlink-destination" / "target"
+        else:
+            requested_target = root / "mounted" / "target"
+            resolved_target = requested_target
+        request = _request(root, targets=(requested_target,))
         context = _context(
             root,
             ExecutionMode.AUTONOMOUS,
-            scope=_scope(root, (invalid_target,), valid=False),
+            scope=_scope(root, (resolved_target,), valid=False),
         )
     elif scenario == "autonomous_elevation":
         request = replace(request, privilege_elevation=True)
@@ -305,6 +313,166 @@ def test_doctor_context_has_only_fixed_diagnostic_capabilities(
         ),
     )
     assert all(item.startswith("doctor.") for item in context.doctor_capabilities)
+
+
+@pytest.mark.parametrize("mode", list(ExecutionMode))
+@pytest.mark.parametrize(
+    ("capability", "network", "expected_code"),
+    [
+        ("doctor.read", NetworkKind.NONE, "doctor_read"),
+        (
+            "doctor.ollama.loopback",
+            NetworkKind.LOOPBACK_DIAGNOSTIC,
+            "doctor_loopback",
+        ),
+    ],
+)
+def test_exact_doctor_actions_allow_in_every_mode(
+    tmp_path: Path,
+    mode: ExecutionMode,
+    capability: str,
+    network: NetworkKind,
+    expected_code: str,
+) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({capability}),
+        side_effect=SideEffect.READ_ONLY,
+        targets=(),
+        network=network,
+    )
+
+    decision = evaluate_policy(request, build_doctor_context(_config(root, mode)))
+
+    assert decision.kind is DecisionKind.ALLOW
+    assert decision.code == expected_code
+
+
+@pytest.mark.parametrize("mode", list(ExecutionMode))
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "loopback_without_network",
+        "read_with_loopback_network",
+        "process_side_effect",
+        "requested_target",
+        "elevation",
+        "destructive",
+        "unknown_doctor_capability",
+        "mixed_doctor_capabilities",
+    ],
+)
+def test_misclassified_doctor_claims_are_incomplete_in_every_mode(
+    tmp_path: Path,
+    mode: ExecutionMode,
+    mismatch: str,
+) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"doctor.read"}),
+        side_effect=SideEffect.READ_ONLY,
+        targets=(),
+    )
+    if mismatch == "loopback_without_network":
+        request = replace(
+            request,
+            capabilities=frozenset({"doctor.ollama.loopback"}),
+        )
+    elif mismatch == "read_with_loopback_network":
+        request = replace(request, network=NetworkKind.LOOPBACK_DIAGNOSTIC)
+    elif mismatch == "process_side_effect":
+        request = replace(request, side_effect=SideEffect.PROCESS)
+    elif mismatch == "requested_target":
+        request = replace(request, requested_targets=(root / "target",))
+    elif mismatch == "elevation":
+        request = replace(request, privilege_elevation=True)
+    elif mismatch == "destructive":
+        request = replace(
+            request,
+            side_effect=SideEffect.SYSTEM,
+            requested_targets=(root / "target",),
+            destructive=True,
+        )
+    elif mismatch == "unknown_doctor_capability":
+        request = replace(
+            request,
+            capabilities=frozenset({"doctor.shell"}),
+            side_effect=SideEffect.PROCESS,
+        )
+    elif mismatch == "mixed_doctor_capabilities":
+        request = replace(
+            request,
+            capabilities=frozenset({"doctor.read", "process.run"}),
+            side_effect=SideEffect.PROCESS,
+        )
+
+    decision = evaluate_policy(request, build_doctor_context(_config(root, mode)))
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "incomplete_request"
+
+
+def test_root_mode_doctor_allowance_remains_subject_to_hard_budget(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"doctor.read"}),
+        side_effect=SideEffect.READ_ONLY,
+        targets=(),
+        output_bytes=ResourceLimits().hard_max_output_bytes + 1,
+    )
+
+    decision = evaluate_policy(
+        request,
+        build_doctor_context(_config(root, ExecutionMode.UNRESTRICTED_ROOT)),
+    )
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "budget_exceeded"
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "network", "targets"),
+    [
+        (SideEffect.READ_ONLY, NetworkKind.NONE, "target"),
+        (SideEffect.WRITE_PROJECT, NetworkKind.NONE, "target"),
+        (SideEffect.PROCESS, NetworkKind.NONE, "none"),
+        (SideEffect.PROCESS, NetworkKind.OUTBOUND, "none"),
+    ],
+)
+def test_no_non_doctor_root_action_can_pass(
+    tmp_path: Path,
+    side_effect: SideEffect,
+    network: NetworkKind,
+    targets: str,
+) -> None:
+    root = tmp_path / "project"
+    requested_targets = () if targets == "none" else (root / "target",)
+    request = _request(
+        root,
+        capabilities=frozenset({"project.action"}),
+        side_effect=side_effect,
+        targets=requested_targets,
+        network=network,
+    )
+    context = _context(
+        root,
+        ExecutionMode.UNRESTRICTED_ROOT,
+        scope=(
+            None
+            if not requested_targets
+            else _scope(root, request.requested_targets)
+        ),
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "authority_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -630,3 +798,190 @@ def test_empty_scope_cannot_authorize_an_autonomous_process(tmp_path: Path) -> N
 
     assert decision.kind is DecisionKind.DENY
     assert decision.code == "invalid_scope"
+
+
+def test_lexical_traversal_cannot_pass_project_scope(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    traversal_target = root / ".." / "outside"
+    request = _request(root, targets=(traversal_target,))
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, request.requested_targets),
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "invalid_scope"
+
+
+def test_resolved_target_must_exactly_match_the_requested_target(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    request = _request(root, targets=(root / "requested",))
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, (root / "different-resolved-target",)),
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "invalid_scope"
+
+
+@pytest.mark.parametrize(
+    ("timestamp_case", "expected_code"),
+    [
+        ("naive_authority", "incomplete_request"),
+        ("future_authority", "authority_unavailable"),
+        ("reversed_authority", "authority_unavailable"),
+        ("naive_recovery", "incomplete_request"),
+        ("future_recovery", "recovery_required"),
+        ("reversed_recovery", "recovery_required"),
+    ],
+)
+def test_evidence_timestamp_boundaries_fail_closed(
+    tmp_path: Path,
+    timestamp_case: str,
+    expected_code: str,
+) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"system.destroy"}),
+        side_effect=SideEffect.SYSTEM,
+        destructive=True,
+    )
+    authority = _authority(request)
+    recovery = _recovery(request)
+    if timestamp_case == "naive_authority":
+        authority = replace(
+            authority,
+            issued_at=_RECENT_PAST.replace(tzinfo=None),
+            expires_at=_FUTURE.replace(tzinfo=None),
+        )
+    elif timestamp_case == "future_authority":
+        authority = replace(
+            authority,
+            issued_at=datetime(2099, 1, 1, tzinfo=UTC),
+        )
+    elif timestamp_case == "reversed_authority":
+        authority = replace(
+            authority,
+            issued_at=datetime(2025, 1, 2, tzinfo=UTC),
+            expires_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+    elif timestamp_case == "naive_recovery":
+        recovery = replace(
+            recovery,
+            verified_at=_RECENT_PAST.replace(tzinfo=None),
+            expires_at=_FUTURE.replace(tzinfo=None),
+        )
+    elif timestamp_case == "future_recovery":
+        recovery = replace(
+            recovery,
+            verified_at=datetime(2099, 1, 1, tzinfo=UTC),
+        )
+    elif timestamp_case == "reversed_recovery":
+        recovery = replace(
+            recovery,
+            verified_at=datetime(2025, 1, 2, tzinfo=UTC),
+            expires_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, request.requested_targets),
+        authority=authority,
+        recovery=recovery,
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == expected_code
+
+
+def test_non_utc_aware_evidence_is_compared_by_instant(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"system.destroy"}),
+        side_effect=SideEffect.SYSTEM,
+        destructive=True,
+    )
+    plus_five = timezone(timedelta(hours=5))
+    authority = _authority(
+        request,
+        issued_at=datetime(2025, 1, 1, tzinfo=plus_five),
+        expires_at=datetime(2100, 1, 1, tzinfo=plus_five),
+    )
+    recovery = _recovery(
+        request,
+        verified_at=datetime(2025, 1, 1, tzinfo=plus_five),
+        expires_at=datetime(2100, 1, 1, tzinfo=plus_five),
+    )
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, request.requested_targets),
+        authority=authority,
+        recovery=recovery,
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "authority_unavailable"
+
+
+def test_authority_must_cover_every_requested_capability(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"system.destroy"}),
+        side_effect=SideEffect.SYSTEM,
+        destructive=True,
+    )
+    authority = replace(
+        _authority(request),
+        capabilities=frozenset({"system.inspect"}),
+    )
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, request.requested_targets),
+        authority=authority,
+        recovery=_recovery(request),
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "authority_unavailable"
+
+
+def test_recovery_valid_flag_must_be_true(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    request = _request(
+        root,
+        capabilities=frozenset({"system.destroy"}),
+        side_effect=SideEffect.SYSTEM,
+        destructive=True,
+    )
+    context = _context(
+        root,
+        ExecutionMode.AUTONOMOUS,
+        scope=_scope(root, request.requested_targets),
+        authority=_authority(request),
+        recovery=_recovery(request, valid=False),
+    )
+
+    decision = evaluate_policy(request, context)
+
+    assert decision.kind is DecisionKind.DENY
+    assert decision.code == "recovery_required"

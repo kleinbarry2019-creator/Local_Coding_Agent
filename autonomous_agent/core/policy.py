@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -146,6 +147,24 @@ def evaluate_policy(
             context,
         )
 
+    if doctor_read:
+        return _decision(
+            DecisionKind.ALLOW,
+            "doctor_read",
+            "The fixed read-only doctor diagnostic is allowed.",
+            request,
+            context,
+        )
+
+    if doctor_loopback:
+        return _decision(
+            DecisionKind.ALLOW,
+            "doctor_loopback",
+            "The fixed bounded doctor loopback diagnostic is allowed.",
+            request,
+            context,
+        )
+
     if context.mode is ExecutionMode.UNRESTRICTED_ROOT:
         return _decision(
             DecisionKind.DENY,
@@ -168,14 +187,6 @@ def evaluate_policy(
         network_confirmation = "Outbound network access requires confirmation."
 
     if request.network is NetworkKind.LOOPBACK_DIAGNOSTIC:
-        if doctor_loopback:
-            return _decision(
-                DecisionKind.ALLOW,
-                "doctor_loopback",
-                "The fixed bounded doctor loopback diagnostic is allowed.",
-                request,
-                context,
-            )
         if context.mode is ExecutionMode.AUTONOMOUS:
             return _decision(
                 DecisionKind.DENY,
@@ -185,15 +196,6 @@ def evaluate_policy(
                 context,
             )
         network_confirmation = "Unregistered network access requires confirmation."
-
-    if doctor_read:
-        return _decision(
-            DecisionKind.ALLOW,
-            "doctor_read",
-            "The fixed read-only doctor diagnostic is allowed.",
-            request,
-            context,
-        )
 
     if request.privilege_elevation:
         return _decision(
@@ -304,7 +306,7 @@ def _metadata_complete(request: object, context: object) -> bool:
         return False
     if not isinstance(context.canonical_project_root, Path):
         return False
-    if not context.canonical_project_root.is_absolute():
+    if not _normalized_absolute_path(context.canonical_project_root):
         return False
     if type(context.hard_limits) is not ResourceLimits:
         return False
@@ -344,14 +346,11 @@ def _positive_number(value: object) -> bool:
 
 
 def _request_classification_complete(request: PolicyRequest) -> bool:
-    targetless_doctor_capabilities = {
-        frozenset({_DOCTOR_READ_CAPABILITY}),
-        frozenset({_DOCTOR_LOOPBACK_CAPABILITY}),
-    }
+    if any(item.startswith("doctor.") for item in request.capabilities):
+        return _doctor_classification_complete(request)
     if (
         request.side_effect is SideEffect.READ_ONLY
         and not request.requested_targets
-        and request.capabilities not in targetless_doctor_capabilities
     ):
         return False
     if request.side_effect in {
@@ -369,6 +368,24 @@ def _request_classification_complete(request: PolicyRequest) -> bool:
     )
 
 
+def _doctor_classification_complete(request: PolicyRequest) -> bool:
+    fixed_read = (
+        request.capabilities == frozenset({_DOCTOR_READ_CAPABILITY})
+        and request.network is NetworkKind.NONE
+    )
+    fixed_loopback = (
+        request.capabilities == frozenset({_DOCTOR_LOOPBACK_CAPABILITY})
+        and request.network is NetworkKind.LOOPBACK_DIAGNOSTIC
+    )
+    return (
+        (fixed_read or fixed_loopback)
+        and request.side_effect is SideEffect.READ_ONLY
+        and not request.requested_targets
+        and not request.privilege_elevation
+        and not request.destructive
+    )
+
+
 def _limits_complete(limits: ResourceLimits) -> bool:
     return _positive_number(limits.hard_command_timeout_s) and (
         type(limits.hard_max_output_bytes) is int
@@ -380,7 +397,7 @@ def _scope_complete(scope: object) -> bool:
     return (
         type(scope) is ScopeEvidence
         and isinstance(scope.project_root, Path)
-        and scope.project_root.is_absolute()
+        and _normalized_absolute_path(scope.project_root)
         and _path_tuple(scope.resolved_targets)
         and _identifier(scope.resolver_id)
         and type(scope.valid) is bool
@@ -474,10 +491,14 @@ def _scope_matches(request: PolicyRequest, context: PolicyContext) -> bool:
     if scope.resolved_targets != request.requested_targets:
         return False
     return all(
-        target.is_absolute()
+        _normalized_absolute_path(target)
         and target.is_relative_to(context.canonical_project_root)
         for target in scope.resolved_targets
     )
+
+
+def _normalized_absolute_path(path: Path) -> bool:
+    return path.is_absolute() and path == Path(os.path.normpath(path))
 
 
 def _authority_matches(
