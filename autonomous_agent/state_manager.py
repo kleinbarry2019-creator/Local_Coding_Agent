@@ -21,6 +21,8 @@ class StateManager:
         else:
             self.state = {}
 
+        return self.state
+
 
     def serialize(self, obj, seen=None):
 
