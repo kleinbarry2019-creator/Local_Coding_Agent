@@ -7,6 +7,7 @@ runtime/
 !docs/v50/baseline/
 !docs/v50/baseline/*.log
 .aider.*
+.worktrees/
 Modelfile-*
 autonomous_agent/agent_state.json
 autonomous_agent/agent_state.json.bak
