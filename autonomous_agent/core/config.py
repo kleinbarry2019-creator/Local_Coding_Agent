@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tomllib
 from collections.abc import Mapping
@@ -136,7 +137,7 @@ _FIELD_AUTHORITY: Mapping[str, frozenset[ConfigSource]] = MappingProxyType(
         "project_root": frozenset({ConfigSource.CLI}),
         "state_dir": frozenset({ConfigSource.GLOBAL, ConfigSource.CLI}),
         "free_only": frozenset(
-            {ConfigSource.GLOBAL, ConfigSource.PROJECT, ConfigSource.ENVIRONMENT}
+            {ConfigSource.GLOBAL, ConfigSource.ENVIRONMENT}
         ),
         "audit_required": frozenset(
             {ConfigSource.GLOBAL, ConfigSource.PROJECT, ConfigSource.ENVIRONMENT}
@@ -218,10 +219,14 @@ def load_config(
             sensitive_values=sensitive_values,
         )
     except ConfigError as error:
-        safe_message = _redact_string(error.message, sensitive_values)
-        if safe_message == error.message:
-            raise
-        raise ConfigError(error.code, error.field, safe_message) from error
+        safe_error = ConfigError(
+            error.code,
+            error.field,
+            _redact_string(error.message, sensitive_values),
+        )
+    # Raise outside the handler so parser/conversion/path exceptions cannot
+    # survive as context or cause in user-visible traceback chains.
+    raise safe_error
 
 
 def _load_config(
@@ -232,6 +237,7 @@ def _load_config(
     cli: CliOverrides,
     sensitive_values: tuple[str, ...],
 ) -> AgentConfig:
+    _validate_cli_path_types(cli)
     canonical_home = _validated_absolute_path(home, "home")
     config_file = _global_config_file(canonical_home, environ)
     _validate_global_config(config_file)
@@ -366,7 +372,7 @@ def _read_toml(
     require_owner_control: bool,
 ) -> Mapping[str, object]:
     try:
-        flags = os.O_RDONLY | os.O_NOFOLLOW
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
     except AttributeError as error:
         raise ConfigError(
             "unsupported_platform", "config_file", "requires no-follow file access"
@@ -458,6 +464,13 @@ def _cli_entries(cli: CliOverrides) -> dict[str, object]:
     return entries
 
 
+def _validate_cli_path_types(cli: CliOverrides) -> None:
+    if cli.project_root is not None and not isinstance(cli.project_root, Path):
+        raise ConfigError("invalid_type", "project_root", "must be a path")
+    if cli.state_root is not None and not isinstance(cli.state_root, Path):
+        raise ConfigError("invalid_type", "state_root", "must be a path")
+
+
 def _validate_authority(entries: Mapping[str, object], source: ConfigSource) -> None:
     for field_name in entries:
         if source not in _FIELD_AUTHORITY[field_name]:
@@ -529,25 +542,25 @@ def _coerce_value(
 
 
 def _parse_environment_int(field_name: str, raw_value: object) -> int:
-    try:
-        if type(raw_value) is not str or not raw_value or raw_value.strip() != raw_value:
-            raise ValueError
-        return int(raw_value, 10)
-    except ValueError as error:
-        raise ConfigError(
-            "invalid_type", field_name, "environment value must be an integer"
-        ) from error
+    if type(raw_value) is str and raw_value and raw_value.strip() == raw_value:
+        try:
+            return int(raw_value, 10)
+        except ValueError:
+            pass
+    raise ConfigError(
+        "invalid_type", field_name, "environment value must be an integer"
+    )
 
 
 def _parse_environment_float(field_name: str, raw_value: object) -> float:
-    try:
-        if type(raw_value) is not str or not raw_value or raw_value.strip() != raw_value:
-            raise ValueError
-        return float(raw_value)
-    except ValueError as error:
-        raise ConfigError(
-            "invalid_type", field_name, "environment value must be a number"
-        ) from error
+    if type(raw_value) is str and raw_value and raw_value.strip() == raw_value:
+        try:
+            return float(raw_value)
+        except ValueError:
+            pass
+    raise ConfigError(
+        "invalid_type", field_name, "environment value must be a number"
+    )
 
 
 def _parse_environment_bool(field_name: str, raw_value: object) -> bool:
@@ -682,11 +695,15 @@ def _collect_sensitive_values(environ: Mapping[str, str]) -> tuple[str, ...]:
 
 
 def _sensitive_key(name: object) -> bool:
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(name))
+    separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", separated)
     normalized = "_".join(
-        part for part in "".join(
-            character.lower() if str(character).isalnum() else "_"
-            for character in str(name)
-        ).split("_") if part
+        part
+        for part in "".join(
+            character.lower() if character.isalnum() else "_"
+            for character in separated
+        ).split("_")
+        if part
     )
     return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
 

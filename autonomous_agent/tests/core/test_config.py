@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+import signal
+import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+import autonomous_agent.core.config as config_module
 from autonomous_agent.core.config import (
     AgentConfig,
     CliOverrides,
@@ -170,6 +174,20 @@ def test_project_security_widening_is_rejected(
         load_config(cwd=project, home=project.parent, environ={})
 
 
+def test_project_cannot_select_free_only_even_when_value_is_true(
+    project: Path,
+) -> None:
+    (project / ".local-agent.toml").write_text(
+        "[core]\nfree_only = true\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.code == "unauthorized_override"
+    assert raised.value.field == "free_only"
+
+
 @pytest.mark.parametrize(
     ("document", "field"),
     [
@@ -261,6 +279,28 @@ def test_cli_cannot_activate_unrestricted_root_mode(project: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("field", ["project_root", "state_root"])
+def test_type_confused_cli_paths_raise_field_specific_config_error(
+    project: Path, field: str
+) -> None:
+    confused_path = cast(Path, "not-a-path-object")
+    cli = (
+        CliOverrides(project_root=confused_path)
+        if field == "project_root"
+        else CliOverrides(state_root=confused_path)
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(
+            cwd=project,
+            home=project.parent,
+            environ={},
+            cli=cli,
+        )
+
+    assert raised.value.field == field
+
+
 @pytest.mark.parametrize(
     "document",
     [
@@ -284,6 +324,136 @@ def test_unknown_local_agent_environment_field_is_rejected(project: Path) -> Non
             home=project.parent,
             environ={"LOCAL_AGENT_MODE": "autonomous"},
         )
+
+
+def test_local_agent_state_dir_environment_override_is_rejected(
+    project: Path,
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(
+            cwd=project,
+            home=project.parent,
+            environ={"LOCAL_AGENT_STATE_DIR": str(project.parent / "state")},
+        )
+
+    assert raised.value.code == "unknown_field"
+    assert raised.value.field == "LOCAL_AGENT_STATE_DIR"
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo") or not hasattr(os, "fork"),
+    reason="requires POSIX FIFO and process primitives",
+)
+def test_project_fifo_is_rejected_without_blocking(project: Path) -> None:
+    os.mkfifo(project / ".local-agent.toml")
+    child_pid = os.fork()
+    if child_pid == 0:
+        try:
+            load_config(cwd=project, home=project.parent, environ={})
+        except ConfigError:
+            os._exit(0)
+        os._exit(3)
+
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        waited_pid, status = os.waitpid(child_pid, os.WNOHANG)
+        if waited_pid == child_pid:
+            assert os.waitstatus_to_exitcode(status) == 0
+            return
+        time.sleep(0.01)
+
+    os.kill(child_pid, signal.SIGKILL)
+    os.waitpid(child_pid, 0)
+    pytest.fail("load_config blocked while opening a project FIFO")
+
+
+def test_project_config_symlink_is_rejected(project: Path) -> None:
+    target = project.parent / "untrusted-project-config.toml"
+    target.write_text("", encoding="utf-8")
+    (project / ".local-agent.toml").symlink_to(target)
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.field == "project_file"
+
+
+def test_load_config_rejects_group_writable_global_file(project: Path) -> None:
+    config_file = _write_global(project.parent, "")
+    config_file.chmod(0o620)
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.field == "config_file"
+
+
+def test_load_config_rejects_global_config_symlink(project: Path) -> None:
+    target = project.parent / "global-target.toml"
+    target.write_text("", encoding="utf-8")
+    config_file = project.parent / ".config/local-coding-agent/config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.symlink_to(target)
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.field == "config_file"
+
+
+def test_load_config_rejects_global_file_not_owned_by_current_user(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_global(project.parent, "")
+    recorded_uid = os.getuid()
+    monkeypatch.setattr(config_module.os, "getuid", lambda: recorded_uid + 1)
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.field == "config_file"
+
+
+@pytest.mark.parametrize(
+    ("source", "value"),
+    [
+        ("global", "nan"),
+        ("global", "inf"),
+        ("global", "-inf"),
+        ("environment", "nan"),
+        ("environment", "inf"),
+        ("environment", "-inf"),
+        ("cli", float("nan")),
+        ("cli", float("inf")),
+        ("cli", float("-inf")),
+    ],
+)
+def test_non_finite_limits_are_rejected(
+    project: Path, source: str, value: str | float
+) -> None:
+    environ: dict[str, str] = {}
+    cli = CliOverrides()
+    if source == "global":
+        _write_global(
+            project.parent,
+            f"[limits]\ncommand_timeout_s = {value}\n",
+        )
+    elif source == "environment":
+        assert isinstance(value, str)
+        environ["LOCAL_AGENT_COMMAND_TIMEOUT_S"] = value
+    else:
+        assert isinstance(value, float)
+        cli = CliOverrides(command_timeout_s=value)
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(
+            cwd=project,
+            home=project.parent,
+            environ=environ,
+            cli=cli,
+        )
+
+    assert raised.value.field == "command_timeout_s"
 
 
 def test_boolean_is_not_accepted_as_an_integer(project: Path) -> None:
@@ -358,6 +528,8 @@ def test_malformed_toml_error_does_not_echo_document_contents(project: Path) -> 
         load_config(cwd=project, home=project.parent, environ={})
 
     assert secret not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
 
 
 def test_invalid_environment_value_is_not_exposed_in_error(project: Path) -> None:
@@ -371,6 +543,28 @@ def test_invalid_environment_value_is_not_exposed_in_error(project: Path) -> Non
         )
 
     assert secret not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "raw_value"),
+    [
+        ("LOCAL_AGENT_MAX_OUTPUT_BYTES", "integer-secret-value"),
+        ("LOCAL_AGENT_COMMAND_TIMEOUT_S", "float-secret-value"),
+    ],
+)
+def test_invalid_environment_conversion_leaves_no_raw_exception_chain(
+    project: Path, environment_name: str, raw_value: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(
+            cwd=project,
+            home=project.parent,
+            environ={environment_name: raw_value},
+        )
+
+    assert raw_value not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
 
 
 def test_redacted_output_has_only_declared_fields_and_hides_sensitive_values(
@@ -402,6 +596,19 @@ def test_redacted_output_has_only_declared_fields_and_hides_sensitive_values(
     }
     assert set(output["limits"]) == set(ResourceLimits.__dataclass_fields__)
     assert secret not in repr(output)
+
+
+def test_redaction_normalizes_camel_case_sensitive_environment_keys(
+    project: Path,
+) -> None:
+    secret = str(project.resolve())
+    config = load_config(
+        cwd=project,
+        home=project.parent,
+        environ={"SERVICE_APIKey": secret},
+    )
+
+    assert secret not in repr(config.redacted_dict())
 
 
 def test_provenance_is_deeply_immutable(project: Path) -> None:
