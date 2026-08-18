@@ -53,7 +53,16 @@ class StateManager:
             }
 
         if hasattr(obj, "__dict__"):
-            return self.serialize(obj.__dict__, seen)
+
+            data = {}
+
+            for key, value in obj.__dict__.items():
+                if value is self:
+                    data[key] = "<state_manager>"
+                else:
+                    data[key] = self.serialize(value, seen)
+
+            return data
 
         return str(obj)
 
