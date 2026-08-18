@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
+import inspect
 import json
 import multiprocessing
 import os
@@ -9,7 +11,6 @@ import queue
 import sqlite3
 import stat
 import threading
-import time
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -216,11 +217,24 @@ def _competing_writer(
     path_values: tuple[str, str, str],
     phase: str,
     start: _Barrier,
+    retry: Any,
     result_queue: _Queue,
 ) -> None:
     store = CoreStateStore(*(Path(value) for value in path_values))
     start.wait(timeout=10)
-    result_queue.put(("writer", "attempt", phase))
+    try:
+        AuditLog(store, lock_timeout_s=0.1).append(
+            _event(event_id=f"contended-writer-{phase}")
+        )
+    except EventError as error:
+        result_queue.put(("writer", "contended", error.code, error.message))
+    except Exception as error:  # noqa: BLE001 - report child failures to parent
+        result_queue.put(("writer", "error", type(error).__name__))
+        return
+    else:
+        result_queue.put(("writer", "unexpected-acquisition", phase))
+        return
+    retry.wait(timeout=10)
     try:
         record = AuditLog(store).append(_event(event_id=f"competing-{phase}"))
         result_queue.put(("writer", "ok", record.sequence))
@@ -232,11 +246,22 @@ def _competing_verifier(
     path_values: tuple[str, str, str],
     phase: str,
     start: _Barrier,
+    retry: Any,
     result_queue: _Queue,
 ) -> None:
     store = CoreStateStore(*(Path(value) for value in path_values))
     start.wait(timeout=10)
-    result_queue.put(("verifier", "attempt", phase))
+    try:
+        AuditLog(store, lock_timeout_s=0.1).verify()
+    except EventError as error:
+        result_queue.put(("verifier", "contended", error.code, error.message))
+    except Exception as error:  # noqa: BLE001 - report child failures to parent
+        result_queue.put(("verifier", "error", type(error).__name__))
+        return
+    else:
+        result_queue.put(("verifier", "unexpected-acquisition", phase))
+        return
+    retry.wait(timeout=10)
     try:
         verification = AuditLog(store).verify()
         result_queue.put(("verifier", verification.code, verification.sequence))
@@ -252,6 +277,32 @@ def _hold_lock(path: str, ready: _Barrier, release: _Barrier) -> None:
         release.wait(timeout=10)
     finally:
         os.close(descriptor)
+
+
+def _fork_child_lock_probe(
+    path_values: tuple[str, str, str], result_queue: _Queue
+) -> None:
+    lock_path = Path(path_values[2])
+    mutex = events_module._mutex_for(lock_path)
+    mutex_was_reset = mutex.acquire(blocking=False)
+    if mutex_was_reset:
+        mutex.release()
+    active_descriptors = len(getattr(events_module, "_ACTIVE_LOCK_FDS", {-1}))
+    try:
+        AuditLog(
+            CoreStateStore(*(Path(value) for value in path_values)),
+            lock_timeout_s=0.1,
+        ).verify()
+    except EventError as error:
+        result_queue.put(
+            (mutex_was_reset, active_descriptors, error.code, error.message)
+        )
+    except Exception as error:  # noqa: BLE001 - report child failure to parent
+        result_queue.put(
+            (mutex_was_reset, active_descriptors, type(error).__name__, "unexpected")
+        )
+    else:
+        result_queue.put((mutex_was_reset, active_descriptors, "acquired", "lock"))
 
 
 def _join(process: multiprocessing.Process) -> None:
@@ -347,16 +398,16 @@ def test_hash_uses_exact_canonical_utf8_event_document(tmp_path: Path) -> None:
     _start(AuditLog(store), tmp_path)
     payload = {
         "status": "error",
-        "tool_name": "döctor",
+        "tool_name": "doctor.git",
         "duration_ms": 3,
-        "diagnostic_code": "échec",
+        "diagnostic_code": "probe_failed",
     }
 
-    record = AuditLog(store).append(_event(payload=payload))
+    record = AuditLog(store).append(_event(event_id="événement-2", payload=payload))
 
     assert record.current_hash == _canonical_hash(
         2,
-        "event-2",
+        "événement-2",
         "session-1",
         "tool.failed",
         payload,
@@ -548,6 +599,66 @@ def test_config_collected_exact_secrets_redact_later_events(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
+    "sensitive_key",
+    [
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "api-key",
+        "APIKEY",
+        "auth",
+        "Authorization",
+        "credential",
+        "clientCredentialValue",
+    ],
+)
+def test_dropped_sensitive_keys_are_collected_before_event_allowlisting(
+    tmp_path: Path, sensitive_key: str
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    secret = f"ordinary-{sensitive_key.lower()}-value-9482"
+
+    record = AuditLog(store).append(
+        _event(
+            payload={
+                "tool_name": secret,
+                "status": "error",
+                "dropped_metadata": {sensitive_key: secret},
+            }
+        )
+    )
+
+    assert record.payload["tool_name"] == "[REDACTED]"
+    assert secret not in str(_rows(store)[1][4])
+
+
+@pytest.mark.parametrize(
+    "credential_uri",
+    [
+        "ftp://build:ftp-secret@example.invalid/archive",
+        "ssh://git:ssh-secret@example.invalid/repository",
+        "postgresql://agent:database-secret@example.invalid/state",
+        "custom+audit://client:custom-secret@example.invalid/resource",
+    ],
+)
+def test_credential_userinfo_is_redacted_for_generic_uri_schemes(
+    tmp_path: Path, credential_uri: str
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+
+    record = AuditLog(store).append(
+        _event(payload={"tool_name": credential_uri, "status": "error"})
+    )
+
+    persisted = str(_rows(store)[1][4])
+    assert credential_uri not in persisted
+    assert "[REDACTED]" in str(record.payload["tool_name"])
+
+
+@pytest.mark.parametrize(
     "unsafe_value",
     [
         "Bearer abcdefghijklmnopqrstuvwxyz012345",
@@ -590,6 +701,125 @@ def test_non_json_allowed_payload_fails_before_pending_anchor(
         "sequence": 1,
         "hash": first.current_hash,
     }
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "tool.failed",
+            {"tool_name": {"output": "raw output"}, "status": "error"},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": ["raw model text"], "status": "error"},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": "doctor.git", "diagnostic_code": {"exception": "raw"}},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": {"arbitrary": {"nested": True}}, "status": "error"},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": "RuntimeError('raw-exception')", "status": "error"},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": "raw model completion", "status": "error"},
+        ),
+        (
+            "tool.failed",
+            {"tool_name": "stdout:\nraw output", "status": "error"},
+        ),
+        ("tool.failed", {"tool_name": "doctor.git", "status": "success"}),
+        ("config.snapshot", {"schema_version": {"model_text": "raw"}}),
+        ("config.snapshot", {"free_only": {"output": "raw"}}),
+        ("config.snapshot", {"paths": {"state_root": {"value": "/safe"}}}),
+        ("config.snapshot", {"limits": {"max_output_bytes": {"value": 1}}}),
+        (
+            "config.snapshot",
+            {
+                "provenance": {
+                    "mode": {
+                        "field": {"exception": "raw"},
+                        "source": "cli",
+                        "source_path": None,
+                    }
+                }
+            },
+        ),
+    ],
+)
+def test_event_payload_leaf_schemas_reject_nested_or_invalid_allowed_values(
+    tmp_path: Path, event_type: str, payload: Mapping[str, object]
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).append(_event(event_type=event_type, payload=payload))
+
+    assert raised.value.code == "redaction_failed"
+    assert len(_rows(store)) == 1
+    assert _anchor(store)["committed"] == {
+        "sequence": 1,
+        "hash": first.current_hash,
+    }
+
+
+def test_verification_independently_rejects_noncanonical_payload_leaf_shapes(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    malformed_payload = {
+        "status": "error",
+        "tool_name": {"output": "raw output", "exception": "raw exception"},
+    }
+    malformed_hash = _canonical_hash(
+        2,
+        "malformed-persisted-payload",
+        "session-1",
+        "tool.failed",
+        malformed_payload,
+        first.current_hash,
+        SECOND_AT,
+    )
+    with store.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO events(
+                sequence, event_id, session_id, event_type, payload_json,
+                previous_hash, current_hash, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2,
+                "malformed-persisted-payload",
+                "session-1",
+                "tool.failed",
+                json.dumps(malformed_payload, sort_keys=True, separators=(",", ":")),
+                first.current_hash,
+                malformed_hash,
+                SECOND_AT,
+            ),
+        )
+    _write_anchor(
+        store,
+        {
+            "version": 1,
+            "committed": {"sequence": 2, "hash": malformed_hash},
+            "pending": None,
+        },
+    )
+
+    verification = AuditLog(store).verify()
+
+    assert not verification.ok
+    assert verification.code == "hash_mismatch"
 
 
 def test_event_and_state_mutation_commit_in_one_sqlite_transaction(
@@ -663,6 +893,92 @@ def test_state_mutation_cannot_silently_end_the_shared_transaction(
         "committed": {"sequence": 1, "hash": first.current_hash},
         "pending": None,
     }
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "disable-authorizer",
+        "commit",
+        "rollback",
+        "cursor-connection",
+        "alter-audit-schema",
+        "update-prior-event",
+        "delete-prior-event",
+        "replace-pending-anchor",
+    ],
+)
+def test_state_mutation_facade_blocks_connection_and_audit_escape_hatches(
+    tmp_path: Path,
+    attack: str,
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    before_anchor = store.anchor_path.read_bytes()
+    received_raw_connection = False
+
+    def attack_boundary(transaction: object) -> None:
+        nonlocal received_raw_connection
+        received_raw_connection = isinstance(transaction, sqlite3.Connection)
+        dynamic_transaction: Any = transaction
+        if attack == "disable-authorizer":
+            dynamic_transaction.set_authorizer(None)
+        elif attack == "commit":
+            dynamic_transaction.commit()
+        elif attack == "rollback":
+            dynamic_transaction.rollback()
+        elif attack == "cursor-connection":
+            result: Any = dynamic_transaction.execute(
+                "UPDATE sessions SET status = status WHERE session_id = ?",
+                ("session-1",),
+            )
+            result.connection.set_authorizer(None)
+        elif attack == "alter-audit-schema":
+            dynamic_transaction.execute("ALTER TABLE events ADD COLUMN injected TEXT")
+        elif attack == "update-prior-event":
+            dynamic_transaction.execute(
+                "UPDATE events SET event_type = 'config.snapshot' WHERE sequence = 1"
+            )
+        elif attack == "delete-prior-event":
+            dynamic_transaction.execute("DELETE FROM events WHERE sequence = 1")
+        else:
+            pending_anchor = _anchor(store)
+            pending_anchor["pending"] = {"sequence": 2, "hash": "f" * 64}
+            _write_anchor(store, pending_anchor)
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).append(_event(), attack_boundary)
+
+    assert raised.value.code == "transaction_failed"
+    assert not received_raw_connection
+    assert _rows(store) == before_rows
+    assert store.anchor_path.read_bytes() == before_anchor
+    assert AuditLog(store).verify().ok
+
+
+def test_append_revalidates_the_entire_chain_before_sqlite_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    original = events_module._verify_committed_prefix
+    verification_calls = 0
+
+    def count_full_verification(
+        rows: Any, committed: AuditAnchor
+    ) -> tuple[AuditVerification, int]:
+        nonlocal verification_calls
+        verification_calls += 1
+        return original(rows, committed)
+
+    monkeypatch.setattr(
+        events_module, "_verify_committed_prefix", count_full_verification
+    )
+
+    AuditLog(store).append(_event())
+
+    assert verification_calls >= 2
 
 
 @pytest.mark.parametrize(
@@ -939,6 +1255,7 @@ def test_two_writers_and_verifier_serialize_at_every_transition(
     entered = context.Barrier(2)
     release = context.Barrier(2)
     start = context.Barrier(3)
+    retry = context.Event()
     results = context.Queue()
     paused = context.Process(
         target=_paused_writer,
@@ -946,11 +1263,11 @@ def test_two_writers_and_verifier_serialize_at_every_transition(
     )
     writer = context.Process(
         target=_competing_writer,
-        args=(path_values, phase, start, results),
+        args=(path_values, phase, start, retry, results),
     )
     verifier = context.Process(
         target=_competing_verifier,
-        args=(path_values, phase, start, results),
+        args=(path_values, phase, start, retry, results),
     )
 
     paused.start()
@@ -958,16 +1275,25 @@ def test_two_writers_and_verifier_serialize_at_every_transition(
     writer.start()
     verifier.start()
     start.wait(timeout=10)
-    attempts = {results.get(timeout=10)[:2], results.get(timeout=10)[:2]}
-    assert attempts == {("writer", "attempt"), ("verifier", "attempt")}
-    time.sleep(0.1)
-    assert writer.is_alive()
-    assert verifier.is_alive()
-    with pytest.raises(queue.Empty):
-        results.get_nowait()
+    contention = {results.get(timeout=10), results.get(timeout=10)}
+    assert contention == {
+        (
+            "writer",
+            "contended",
+            "lock_timeout",
+            "the cross-process audit lock timed out",
+        ),
+        (
+            "verifier",
+            "contended",
+            "lock_timeout",
+            "the cross-process audit lock timed out",
+        ),
+    }
     release.wait(timeout=10)
 
     _join(paused)
+    retry.set()
     _join(writer)
     _join(verifier)
     assert paused.exitcode == writer.exitcode == verifier.exitcode == 0
@@ -1018,6 +1344,74 @@ def test_lock_file_wrong_owner_is_rejected(
     assert raised.value.code == "unsafe_lock_file"
 
 
+@pytest.mark.parametrize(
+    ("boundary", "expected_code"),
+    [
+        ("lock-fchmod", "unsafe_lock_file"),
+        ("lock-fsync", "unsafe_lock_file"),
+        ("lock-fstat", "unsafe_lock_file"),
+        ("lock-flock", "lock_failed"),
+        ("anchor-read", "unsafe_anchor_file"),
+        ("anchor-fsync", "anchor_write_failed"),
+        ("anchor-close", "unsafe_anchor_file"),
+    ],
+)
+def test_filesystem_failures_have_stable_redacted_event_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    expected_code: str,
+) -> None:
+    store = _store(tmp_path)
+    if boundary.startswith("anchor") or boundary == "lock-flock":
+        _start(AuditLog(store), tmp_path)
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EIO, "raw filesystem detail /private/secret")
+
+    if boundary == "lock-fchmod":
+        monkeypatch.setattr(events_module.os, "fchmod", fail)
+        operation = lambda: _start(AuditLog(store), tmp_path)
+    elif boundary == "lock-fsync":
+        monkeypatch.setattr(events_module.os, "fsync", fail)
+        operation = lambda: _start(AuditLog(store), tmp_path)
+    elif boundary == "lock-fstat":
+        monkeypatch.setattr(events_module.os, "fstat", fail)
+        operation = lambda: _start(AuditLog(store), tmp_path)
+    elif boundary == "lock-flock":
+        monkeypatch.setattr(events_module.fcntl, "flock", fail)
+        operation = lambda: AuditLog(store).verify()
+    elif boundary == "anchor-read":
+        monkeypatch.setattr(events_module.os, "read", fail)
+        operation = lambda: AuditLog(store).verify()
+    elif boundary == "anchor-fsync":
+        monkeypatch.setattr(events_module.os, "fsync", fail)
+        operation = lambda: AuditLog(store).append(_event())
+    else:
+        original_close = os.close
+        failed_once = False
+
+        def close_then_fail(descriptor: int) -> None:
+            nonlocal failed_once
+            target = os.readlink(f"/proc/self/fd/{descriptor}")
+            original_close(descriptor)
+            if not failed_once and target == str(store.anchor_path):
+                failed_once = True
+                fail()
+
+        monkeypatch.setattr(events_module.os, "close", close_then_fail)
+        operation = lambda: AuditLog(store).verify()
+
+    with pytest.raises(EventError) as raised:
+        operation()
+
+    assert raised.value.code == expected_code
+    assert "raw filesystem detail" not in str(raised.value)
+    assert "/private/secret" not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+
+
 def test_cross_process_lock_timeout_has_stable_code(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _start(AuditLog(store), tmp_path)
@@ -1038,6 +1432,53 @@ def test_cross_process_lock_timeout_has_stable_code(tmp_path: Path) -> None:
         release.wait(timeout=10)
         _join(holder)
     assert holder.exitcode == 0
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="the platform has no fork start method",
+)
+def test_fork_child_resets_mutex_registry_and_closes_inherited_lock_fds(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    entered = threading.Barrier(2)
+    release = threading.Barrier(2)
+
+    def pause(phase: str) -> None:
+        if phase == "after_pending":
+            entered.wait(timeout=10)
+            release.wait(timeout=10)
+
+    writer = threading.Thread(
+        target=lambda: AuditLog(store, transition_hook=pause).append(
+            _event(event_id="fork-parent-writer")
+        )
+    )
+    writer.start()
+    entered.wait(timeout=10)
+    context = multiprocessing.get_context("fork")
+    results = context.Queue()
+    child = context.Process(
+        target=_fork_child_lock_probe,
+        args=(
+            tuple(str(path) for path in _paths(store.database_path.parent)),
+            results,
+        ),
+    )
+
+    child.start()
+    outcome = results.get(timeout=10)
+    release.wait(timeout=10)
+    writer.join(timeout=10)
+    _join(child)
+
+    assert not writer.is_alive()
+    assert child.exitcode == 0
+    assert outcome[:3] == (True, 0, "lock_timeout")
+    assert outcome[3] == "the cross-process audit lock timed out"
+    assert AuditLog(store).verify().ok
 
 
 @pytest.mark.parametrize("unsafe_kind", ["symlink", "mode"])
@@ -1096,8 +1537,8 @@ def test_in_process_mutex_serializes_distinct_log_instances(tmp_path: Path) -> N
     _start(AuditLog(store), tmp_path)
     entered = threading.Barrier(2)
     release = threading.Barrier(2)
-    attempted = threading.Event()
-    results: queue.Queue[tuple[str, int]] = queue.Queue()
+    retry = threading.Event()
+    results: queue.Queue[tuple[str, object]] = queue.Queue()
 
     def pause(phase: str) -> None:
         if phase == "after_pending":
@@ -1111,7 +1552,16 @@ def test_in_process_mutex_serializes_distinct_log_instances(tmp_path: Path) -> N
         results.put(("first", record.sequence))
 
     def second_writer() -> None:
-        attempted.set()
+        try:
+            AuditLog(store, lock_timeout_s=0.05).append(
+                _event(event_id="thread-contended")
+            )
+        except EventError as error:
+            results.put(("contended", error.code))
+        else:
+            results.put(("unexpected-acquisition", 0))
+            return
+        retry.wait(timeout=10)
         record = AuditLog(store).append(_event(event_id="thread-seam-2"))
         results.put(("second", record.sequence))
 
@@ -1120,12 +1570,10 @@ def test_in_process_mutex_serializes_distinct_log_instances(tmp_path: Path) -> N
     first.start()
     entered.wait(timeout=10)
     second.start()
-    assert attempted.wait(timeout=10)
-    time.sleep(0.05)
-    assert second.is_alive()
-    assert results.empty()
+    assert results.get(timeout=10) == ("contended", "lock_timeout")
     release.wait(timeout=10)
     first.join(timeout=10)
+    retry.set()
     second.join(timeout=10)
 
     assert not first.is_alive()
@@ -1135,6 +1583,21 @@ def test_in_process_mutex_serializes_distinct_log_instances(tmp_path: Path) -> N
         ("second", 3),
     }
     assert AuditLog(store).verify().sequence == 3
+
+
+def test_concurrency_regressions_do_not_use_timed_sleeps_as_correctness_signals() -> (
+    None
+):
+    source = "\n".join(
+        (
+            inspect.getsource(
+                test_two_writers_and_verifier_serialize_at_every_transition
+            ),
+            inspect.getsource(test_in_process_mutex_serializes_distinct_log_instances),
+        )
+    )
+
+    assert "time.sleep(" not in source
 
 
 def test_append_rejects_invalid_utc_timestamp_before_any_transition(

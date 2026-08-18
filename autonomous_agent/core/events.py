@@ -19,9 +19,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from autonomous_agent.core.config import AgentConfig, ExecutionMode, ResourceLimits
+from autonomous_agent.core.config import (
+    AgentConfig,
+    ConfigSource,
+    ExecutionMode,
+    ResourceLimits,
+)
 from autonomous_agent.core.state import CoreStateStore, StateError
 
 _ANCHOR_VERSION = 1
@@ -32,32 +37,38 @@ _MAX_LOCK_TIMEOUT_S = 60.0
 _MAX_ANCHOR_BYTES = 4096
 _MAX_CONTAINER_ITEMS = 256
 _MAX_DEPTH = 16
+_MAX_EVENT_TEXT_BYTES = 1024
+_MAX_IDENTIFIER_BYTES = 256
+_MAX_PATH_BYTES = 4096
 _MAX_STRING_BYTES = 65_536
 _MAX_CANONICAL_BYTES = 1_048_576
+_MAX_DURATION_MS = 86_400_000
+_MAX_CONFIG_INTEGER = 2**63 - 1
+_MAX_CONFIG_TIMEOUT_S = 86_400.0
 _REDACTED = "[REDACTED]"
 
-_SENSITIVE_KEY_PARTS = (
-    "api_key",
-    "authorization",
-    "credential",
+_SENSITIVE_KEY_MARKERS = (
     "password",
-    "secret",
+    "passwd",
     "token",
+    "secret",
+    "apikey",
+    "authorization",
+    "auth",
+    "credential",
 )
-_SIMPLE_EVENT_FIELDS: Mapping[str, frozenset[str]] = {
-    "session.created": frozenset({"mode", "status"}),
-    "tool.failed": frozenset(
-        {
-            "tool_name",
-            "status",
-            "diagnostic_code",
-            "incident_id",
-            "duration_ms",
-            "truncated",
-        }
-    ),
-    "audit.recovered": frozenset({"action", "code", "recovered_sequence"}),
-}
+_SESSION_EVENT_FIELDS = frozenset({"mode", "status"})
+_TOOL_FAILED_EVENT_FIELDS = frozenset(
+    {
+        "tool_name",
+        "status",
+        "diagnostic_code",
+        "incident_id",
+        "duration_ms",
+        "truncated",
+    }
+)
+_AUDIT_RECOVERED_EVENT_FIELDS = frozenset({"action", "code", "recovered_sequence"})
 _CONFIG_TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
@@ -85,13 +96,31 @@ _CONFIG_PROVENANCE_KEYS = frozenset(
     }
 )
 _CONFIG_PROVENANCE_FIELDS = frozenset({"field", "source", "source_path"})
+_CONFIG_INTEGER_LIMIT_FIELDS = frozenset(
+    {
+        "max_output_bytes",
+        "hard_max_output_bytes",
+        "min_free_ram_mib",
+        "min_free_disk_mib",
+    }
+)
+_CONFIG_TIMEOUT_FIELDS = frozenset(
+    {"command_timeout_s", "hard_command_timeout_s", "doctor_probe_timeout_s"}
+)
+_CONFIG_PERCENT_FIELDS = frozenset({"max_cpu_percent", "max_vram_percent"})
+_EXECUTION_MODE_VALUES = frozenset(mode.value for mode in ExecutionMode)
+_CONFIG_SOURCE_VALUES = frozenset(source.value for source in ConfigSource)
+_AUDIT_RECOVERY_ACTIONS = frozenset({"pending_cleared", "pending_finalized"})
+_AUDIT_RECOVERY_CODES = frozenset({"ok", "pending_cleared", "pending_finalized"})
+_PERSISTED_IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 
 _PATTERN_SAFEGUARDS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b"),
-    re.compile(r"(?i)https?://[^/\s:@]+:[^@/\s]+@"),
+    re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^/\s@]+@"),
     re.compile(
-        r"(?i)\b(?:password|passwd|token|secret|api[_-]?key|authorization)"
+        r"(?i)\b(?:password|passwd|token|secret|api[_-]?key|apikey|auth|"
+        r"authorization|credential)"
         r"\s*[:=]\s*[^\s,;]+"
     ),
     re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\b"),
@@ -104,12 +133,16 @@ _PATTERN_SAFEGUARDS = (
 
 _MUTEXES_GUARD = threading.Lock()
 _MUTEXES: dict[str, threading.Lock] = {}
+_ACTIVE_LOCK_FDS_GUARD = threading.Lock()
+_ACTIVE_LOCK_FDS: set[int] = set()
+_MUTATION_CONTEXT = threading.local()
 
 type _JsonValue = (
     str | int | float | bool | None | dict[str, "_JsonValue"] | list["_JsonValue"]
 )
 type _DatabaseRow = tuple[int, str, str, str, str, str, str, str]
 type _TransitionHook = Callable[[str], None]
+type _SqlParameters = Sequence[Any] | Mapping[str, Any]
 
 
 @dataclass
@@ -121,6 +154,29 @@ class EventError(Exception):
 
     def __str__(self) -> str:
         return f"{self.code}: {self.message}"
+
+
+@dataclass(frozen=True)
+class StateMutationResult:
+    """Non-escaping metadata returned by a restricted state DML operation."""
+
+    rowcount: int
+    lastrowid: int | None
+
+
+class StateTransaction:
+    """Restricted audited transaction capability exposing state DML only."""
+
+    __slots__ = ()
+
+    def execute(
+        self, statement: str, parameters: _SqlParameters = (), /
+    ) -> StateMutationResult:
+        """Execute one INSERT, UPDATE, or DELETE against an allowed state table."""
+        connection = getattr(_MUTATION_CONTEXT, "connection", None)
+        if not isinstance(connection, sqlite3.Connection):
+            raise sqlite3.ProgrammingError("the audited transaction is not active")
+        return _execute_state_dml(connection, statement, parameters)
 
 
 @dataclass(frozen=True)
@@ -228,8 +284,8 @@ class AuditLog:
         sanitized_config = _sanitize_config_document(raw_config, self._sensitive_values)
         config_json = _canonical_json(sanitized_config)
 
-        def create_state(connection: sqlite3.Connection) -> None:
-            connection.execute(
+        def create_state(transaction: StateTransaction) -> None:
+            transaction.execute(
                 """
                 INSERT INTO sessions(
                     session_id, mode, status, created_at, updated_at
@@ -237,7 +293,7 @@ class AuditLog:
                 """,
                 (session_id, mode.value, "active", created_at, created_at),
             )
-            connection.execute(
+            transaction.execute(
                 """
                 INSERT INTO config_snapshots(session_id, config_json, created_at)
                 VALUES (?, ?, ?)
@@ -259,9 +315,25 @@ class AuditLog:
     def append(
         self,
         event: EventInput,
-        state_mutation: Callable[[sqlite3.Connection], None] | None = None,
+        state_mutation: Callable[[StateTransaction], None] | None = None,
     ) -> EventRecord:
         """Append one event and optional state mutation in the same transaction."""
+        clean_error: EventError | None = None
+        try:
+            return self._append(event, state_mutation)
+        except EventError as error:
+            clean_error = EventError(error.code, error.message)
+        except OSError:
+            clean_error = EventError(
+                "filesystem_failed", "the audit filesystem operation failed"
+            )
+        raise clean_error
+
+    def _append(
+        self,
+        event: EventInput,
+        state_mutation: Callable[[StateTransaction], None] | None,
+    ) -> EventRecord:
         _validate_event(event)
         payload = _sanitize_event_payload(
             event.event_type, event.payload, self._sensitive_values
@@ -341,12 +413,31 @@ class AuditLog:
                     if state_mutation is not None:
                         connection.set_authorizer(_state_mutation_authorizer)
                         try:
-                            state_mutation(connection)
+                            _MUTATION_CONTEXT.connection = connection
+                            state_mutation(StateTransaction())
                         finally:
+                            try:
+                                del _MUTATION_CONTEXT.connection
+                            except AttributeError:
+                                pass
                             connection.set_authorizer(None)
                     if not connection.in_transaction:
                         raise sqlite3.OperationalError(
                             "the audited transaction ended inside its mutation"
+                        )
+                    expected_transition = _AnchorState(
+                        _ANCHOR_VERSION, anchor.committed, pending
+                    )
+                    if self._read_required_anchor_locked() != expected_transition:
+                        raise sqlite3.IntegrityError(
+                            "the pending audit anchor changed inside its mutation"
+                        )
+                    transaction_check = _verify_exact_pending_transaction(
+                        _database_rows(connection), anchor.committed, pending
+                    )
+                    if not transaction_check.ok:
+                        raise sqlite3.IntegrityError(
+                            "the audit chain changed inside its mutation"
                         )
                     stored_event = connection.execute(
                         """
@@ -394,6 +485,18 @@ class AuditLog:
 
     def verify(self) -> AuditVerification:
         """Verify the database chain and external anchor from genesis."""
+        clean_error: EventError | None = None
+        try:
+            return self._verify()
+        except EventError as error:
+            clean_error = EventError(error.code, error.message)
+        except OSError:
+            clean_error = EventError(
+                "filesystem_failed", "the audit filesystem operation failed"
+            )
+        raise clean_error
+
+    def _verify(self) -> AuditVerification:
         with self._locked():
             try:
                 anchor = _read_anchor(self._store.anchor_path)
@@ -407,6 +510,18 @@ class AuditLog:
 
     def recover_pending(self) -> AuditVerification:
         """Resolve only a valid pending transition; never infer another repair."""
+        clean_error: EventError | None = None
+        try:
+            return self._recover_pending()
+        except EventError as error:
+            clean_error = EventError(error.code, error.message)
+        except OSError:
+            clean_error = EventError(
+                "filesystem_failed", "the audit filesystem operation failed"
+            )
+        raise clean_error
+
+    def _recover_pending(self) -> AuditVerification:
         with self._locked():
             try:
                 anchor = _read_anchor(self._store.anchor_path)
@@ -523,19 +638,7 @@ class AuditLog:
             raise EventError(
                 "transaction_failed", "the audit database could not be read"
             )
-        return [
-            (
-                int(row[0]),
-                str(row[1]),
-                str(row[2]),
-                str(row[3]),
-                str(row[4]),
-                str(row[5]),
-                str(row[6]),
-                str(row[7]),
-            )
-            for row in rows
-        ]
+        return _normalize_database_rows(rows)
 
     def _transition(self, phase: str) -> None:
         if self._transition_hook is not None:
@@ -553,15 +656,104 @@ def _state_mutation_authorizer(
         sqlite3.SQLITE_TRANSACTION,
         sqlite3.SQLITE_ATTACH,
         sqlite3.SQLITE_DETACH,
+        sqlite3.SQLITE_ALTER_TABLE,
+        sqlite3.SQLITE_ANALYZE,
+        sqlite3.SQLITE_CREATE_INDEX,
+        sqlite3.SQLITE_CREATE_TABLE,
+        sqlite3.SQLITE_CREATE_TEMP_INDEX,
+        sqlite3.SQLITE_CREATE_TEMP_TABLE,
+        sqlite3.SQLITE_CREATE_TEMP_TRIGGER,
+        sqlite3.SQLITE_CREATE_TEMP_VIEW,
+        sqlite3.SQLITE_CREATE_TRIGGER,
+        sqlite3.SQLITE_CREATE_VIEW,
+        sqlite3.SQLITE_CREATE_VTABLE,
+        sqlite3.SQLITE_DROP_INDEX,
+        sqlite3.SQLITE_DROP_TABLE,
+        sqlite3.SQLITE_DROP_TEMP_INDEX,
+        sqlite3.SQLITE_DROP_TEMP_TABLE,
+        sqlite3.SQLITE_DROP_TEMP_TRIGGER,
+        sqlite3.SQLITE_DROP_TEMP_VIEW,
+        sqlite3.SQLITE_DROP_TRIGGER,
+        sqlite3.SQLITE_DROP_VIEW,
+        sqlite3.SQLITE_DROP_VTABLE,
+        sqlite3.SQLITE_PRAGMA,
+        sqlite3.SQLITE_REINDEX,
+        sqlite3.SQLITE_SAVEPOINT,
     }:
         return sqlite3.SQLITE_DENY
     if action_code in {
         sqlite3.SQLITE_INSERT,
         sqlite3.SQLITE_UPDATE,
         sqlite3.SQLITE_DELETE,
-    } and argument_one in {"events", "schema_migrations"}:
+    } and argument_one not in {"sessions", "config_snapshots"}:
         return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_OK
+
+
+def _execute_state_dml(
+    connection: sqlite3.Connection,
+    statement: str,
+    parameters: _SqlParameters,
+) -> StateMutationResult:
+    if (
+        type(statement) is not str
+        or len(statement.encode("utf-8")) > _MAX_CANONICAL_BYTES
+        or re.match(r"\A\s*(?:INSERT|UPDATE|DELETE)\b", statement, re.IGNORECASE)
+        is None
+    ):
+        raise sqlite3.ProgrammingError("only state DML is permitted")
+    cursor = connection.execute(statement, parameters)
+    try:
+        lastrowid = cursor.lastrowid
+        return StateMutationResult(
+            rowcount=cursor.rowcount,
+            lastrowid=lastrowid if type(lastrowid) is int else None,
+        )
+    finally:
+        cursor.close()
+
+
+def _database_rows(connection: sqlite3.Connection) -> list[_DatabaseRow]:
+    rows = connection.execute(
+        """
+        SELECT sequence, event_id, session_id, event_type, payload_json,
+               previous_hash, current_hash, created_at
+        FROM events ORDER BY sequence
+        """
+    ).fetchall()
+    return _normalize_database_rows(rows)
+
+
+def _normalize_database_rows(rows: Sequence[Sequence[object]]) -> list[_DatabaseRow]:
+    normalized: list[_DatabaseRow] = []
+    for row in rows:
+        if (
+            len(row) != 8
+            or type(row[0]) is not int
+            or any(type(value) is not str for value in row[1:])
+        ):
+            raise EventError(
+                "transaction_failed", "the audit database contains an invalid row"
+            )
+        normalized.append(cast(_DatabaseRow, tuple(row)))
+    return normalized
+
+
+def _verify_exact_pending_transaction(
+    rows: Sequence[_DatabaseRow], committed: AuditAnchor, pending: AuditAnchor
+) -> AuditVerification:
+    prefix, next_index = _verify_committed_prefix(rows, committed)
+    if not prefix.ok:
+        return prefix
+    remaining = rows[next_index:]
+    if len(remaining) != 1:
+        return AuditVerification(
+            False, "tail_mismatch", committed.sequence, committed.hash
+        )
+    checked = _verify_pending_row(remaining, committed, pending)
+    if not checked.ok or checked.head_hash != pending.hash:
+        return checked
+    return checked
 
 
 def _validated_lock_timeout(value: object) -> float:
@@ -641,13 +833,82 @@ def _sanitize_event_payload(
     )
     if event_type == "config.snapshot":
         return _sanitize_config_document(payload, sensitive_values)
-    allowed = _SIMPLE_EVENT_FIELDS.get(event_type)
-    if allowed is None:
-        raise EventError(
-            "redaction_failed", "the event type has no persistence allowlist"
-        )
-    selected = {name: payload[name] for name in sorted(allowed) if name in payload}
-    return _redact_mapping(selected, sensitive_values)
+    if event_type == "session.created":
+        return _sanitize_session_created(payload, sensitive_values)
+    if event_type == "tool.failed":
+        return _sanitize_tool_failed(payload, sensitive_values)
+    if event_type == "audit.recovered":
+        return _sanitize_audit_recovered(payload, sensitive_values)
+    raise EventError("redaction_failed", "the event type has no persistence allowlist")
+
+
+def _sanitize_session_created(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _SESSION_EVENT_FIELDS)
+    if set(selected) != _SESSION_EVENT_FIELDS:
+        raise EventError("redaction_failed", "the session event payload is incomplete")
+    mode = _enum_text(selected["mode"], _EXECUTION_MODE_VALUES, "session mode")
+    status = _enum_text(selected["status"], frozenset({"active"}), "session status")
+    return {
+        "mode": _redact_string(mode, sensitive_values),
+        "status": _redact_string(status, sensitive_values),
+    }
+
+
+def _sanitize_tool_failed(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _TOOL_FAILED_EVENT_FIELDS)
+    if "tool_name" not in selected or "status" not in selected:
+        raise EventError("redaction_failed", "the tool failure payload is incomplete")
+    result: dict[str, _JsonValue] = {
+        "tool_name": _tool_name_text(
+            selected["tool_name"],
+            sensitive_values,
+            "tool name",
+            _MAX_EVENT_TEXT_BYTES,
+        ),
+        "status": _enum_text(selected["status"], frozenset({"error"}), "tool status"),
+    }
+    for name in ("diagnostic_code", "incident_id"):
+        if name in selected:
+            result[name] = _identifier_text(
+                selected[name], sensitive_values, name, _MAX_IDENTIFIER_BYTES
+            )
+    if "duration_ms" in selected:
+        duration_ms = selected["duration_ms"]
+        if (
+            type(duration_ms) is not int
+            or duration_ms < 0
+            or duration_ms > _MAX_DURATION_MS
+        ):
+            raise EventError("redaction_failed", "tool duration is invalid")
+        result["duration_ms"] = duration_ms
+    if "truncated" in selected:
+        truncated = selected["truncated"]
+        if type(truncated) is not bool:
+            raise EventError("redaction_failed", "tool truncation flag is invalid")
+        result["truncated"] = truncated
+    return {name: result[name] for name in sorted(result)}
+
+
+def _sanitize_audit_recovered(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _AUDIT_RECOVERED_EVENT_FIELDS)
+    if set(selected) != _AUDIT_RECOVERED_EVENT_FIELDS:
+        raise EventError("redaction_failed", "the recovery event payload is incomplete")
+    recovered_sequence = selected["recovered_sequence"]
+    if type(recovered_sequence) is not int or recovered_sequence < 0:
+        raise EventError("redaction_failed", "the recovered sequence is invalid")
+    action = _enum_text(selected["action"], _AUDIT_RECOVERY_ACTIONS, "recovery action")
+    code = _enum_text(selected["code"], _AUDIT_RECOVERY_CODES, "recovery code")
+    return {
+        "action": _redact_string(action, sensitive_values),
+        "code": _redact_string(code, sensitive_values),
+        "recovered_sequence": recovered_sequence,
+    }
 
 
 def _sanitize_config_document(
@@ -664,17 +925,46 @@ def _sanitize_config_document(
             reverse=True,
         )
     )
-    selected: dict[str, object] = {
-        name: value[name]
-        for name in sorted(_CONFIG_TOP_LEVEL_FIELDS)
-        if name in value and name not in {"paths", "limits", "provenance"}
-    }
-    if "paths" in value:
-        selected["paths"] = _select_mapping_fields(value["paths"], _CONFIG_PATH_FIELDS)
-    if "limits" in value:
-        selected["limits"] = _select_mapping_fields(
-            value["limits"], _CONFIG_LIMIT_FIELDS
+    selected = _select_known_fields(value, _CONFIG_TOP_LEVEL_FIELDS)
+    result: dict[str, _JsonValue] = {}
+    if "schema_version" in selected:
+        schema_version = selected["schema_version"]
+        if (
+            type(schema_version) is not int
+            or schema_version < 1
+            or schema_version > 2**31 - 1
+        ):
+            raise EventError(
+                "redaction_failed", "configuration schema version is invalid"
+            )
+        result["schema_version"] = schema_version
+    if "mode" in selected:
+        result["mode"] = _enum_text(
+            selected["mode"], _EXECUTION_MODE_VALUES, "configuration mode"
         )
+    for name in ("free_only", "audit_required"):
+        if name in selected:
+            flag = selected[name]
+            if type(flag) is not bool:
+                raise EventError("redaction_failed", f"configuration {name} is invalid")
+            result[name] = flag
+    if "paths" in value:
+        paths = _select_mapping_fields(value["paths"], _CONFIG_PATH_FIELDS)
+        result["paths"] = {
+            name: _bounded_text(
+                path_value,
+                sensitive_values,
+                f"configuration path {name}",
+                _MAX_PATH_BYTES,
+            )
+            for name, path_value in sorted(paths.items())
+        }
+    if "limits" in value:
+        limits = _select_mapping_fields(value["limits"], _CONFIG_LIMIT_FIELDS)
+        result["limits"] = {
+            name: _config_limit(name, limit_value)
+            for name, limit_value in sorted(limits.items())
+        }
     if "provenance" in value:
         provenance = value["provenance"]
         if not isinstance(provenance, Mapping):
@@ -685,14 +975,52 @@ def _sanitize_config_document(
             raise EventError(
                 "redaction_failed", "configuration provenance is too large"
             )
-        selected_provenance: dict[str, object] = {}
+        selected_provenance: dict[str, _JsonValue] = {}
         for name in sorted(_CONFIG_PROVENANCE_KEYS):
             if name in provenance:
-                selected_provenance[name] = _select_mapping_fields(
+                fields = _select_mapping_fields(
                     provenance[name], _CONFIG_PROVENANCE_FIELDS
                 )
-        selected["provenance"] = selected_provenance
-    return _redact_mapping(selected, sensitive_values)
+                if set(fields) != _CONFIG_PROVENANCE_FIELDS:
+                    raise EventError(
+                        "redaction_failed",
+                        "configuration provenance is incomplete",
+                    )
+                field_name = _bounded_text(
+                    fields["field"],
+                    sensitive_values,
+                    "configuration provenance field",
+                    _MAX_IDENTIFIER_BYTES,
+                )
+                if field_name != name:
+                    raise EventError(
+                        "redaction_failed",
+                        "configuration provenance field does not match its key",
+                    )
+                source = _enum_text(
+                    fields["source"],
+                    _CONFIG_SOURCE_VALUES,
+                    "configuration provenance source",
+                )
+                source_path_value = fields["source_path"]
+                source_path: str | None
+                if source_path_value is None:
+                    source_path = None
+                else:
+                    source_path = _bounded_text(
+                        source_path_value,
+                        sensitive_values,
+                        "configuration provenance source path",
+                        _MAX_PATH_BYTES,
+                    )
+                selected_provenance[name] = {
+                    "field": field_name,
+                    "source": source,
+                    "source_path": source_path,
+                }
+        result["provenance"] = selected_provenance
+    _canonical_json(result)
+    return {name: result[name] for name in sorted(result)}
 
 
 def _select_mapping_fields(value: object, allowed: frozenset[str]) -> dict[str, object]:
@@ -701,6 +1029,90 @@ def _select_mapping_fields(value: object, allowed: frozenset[str]) -> dict[str, 
     if len(value) > _MAX_CONTAINER_ITEMS:
         raise EventError("redaction_failed", "an allowlisted mapping is too large")
     return {name: value[name] for name in sorted(allowed) if name in value}
+
+
+def _select_known_fields(
+    value: Mapping[str, object], allowed: frozenset[str]
+) -> dict[str, object]:
+    return {name: value[name] for name in sorted(allowed) if name in value}
+
+
+def _bounded_text(
+    value: object,
+    sensitive_values: Sequence[str],
+    field_name: str,
+    maximum_bytes: int,
+) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or "\x00" in value
+        or len(value.encode("utf-8")) > maximum_bytes
+    ):
+        raise EventError("redaction_failed", f"{field_name} is invalid")
+    return _redact_string(value, sensitive_values)
+
+
+def _identifier_text(
+    value: object,
+    sensitive_values: Sequence[str],
+    field_name: str,
+    maximum_bytes: int,
+) -> str:
+    redacted = _bounded_text(value, sensitive_values, field_name, maximum_bytes)
+    if (
+        _REDACTED not in redacted
+        and _PERSISTED_IDENTIFIER_PATTERN.fullmatch(redacted) is None
+    ):
+        raise EventError("redaction_failed", f"{field_name} shape is invalid")
+    return redacted
+
+
+def _tool_name_text(
+    value: object,
+    sensitive_values: Sequence[str],
+    field_name: str,
+    maximum_bytes: int,
+) -> str:
+    return _identifier_text(value, sensitive_values, field_name, maximum_bytes)
+
+
+def _enum_text(value: object, allowed: frozenset[str], field_name: str) -> str:
+    if type(value) is not str or value not in allowed:
+        raise EventError("redaction_failed", f"{field_name} is invalid")
+    return value
+
+
+def _config_limit(name: str, value: object) -> int | float:
+    if name in _CONFIG_INTEGER_LIMIT_FIELDS:
+        if type(value) is not int or value < 0 or value > _MAX_CONFIG_INTEGER:
+            raise EventError(
+                "redaction_failed", f"configuration limit {name} is invalid"
+            )
+        return value
+    if name in _CONFIG_TIMEOUT_FIELDS:
+        if (
+            type(value) is not float
+            or not math.isfinite(value)
+            or value <= 0.0
+            or value > _MAX_CONFIG_TIMEOUT_S
+        ):
+            raise EventError(
+                "redaction_failed", f"configuration limit {name} is invalid"
+            )
+        return value
+    if name in _CONFIG_PERCENT_FIELDS:
+        if (
+            type(value) is not float
+            or not math.isfinite(value)
+            or value < 0.0
+            or value > 100.0
+        ):
+            raise EventError(
+                "redaction_failed", f"configuration limit {name} is invalid"
+            )
+        return value
+    raise EventError("redaction_failed", "configuration limit is not allowlisted")
 
 
 def _collect_sensitive_values(value: object, *, depth: int = 0) -> set[str]:
@@ -745,68 +1157,8 @@ def _strings_below(value: object, *, depth: int) -> set[str]:
 
 
 def _sensitive_key(name: str) -> bool:
-    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
-    separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", separated)
-    normalized = "_".join(
-        part
-        for part in "".join(
-            character.lower() if character.isalnum() else "_" for character in separated
-        ).split("_")
-        if part
-    )
-    return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
-
-
-def _redact_mapping(
-    value: Mapping[str, object], sensitive_values: Sequence[str]
-) -> dict[str, _JsonValue]:
-    redacted = _redact_json(value, sensitive_values, depth=0)
-    if not isinstance(redacted, dict):
-        raise EventError("redaction_failed", "the redacted payload is invalid")
-    _canonical_json(redacted)
-    return redacted
-
-
-def _redact_json(
-    value: object,
-    sensitive_values: Sequence[str],
-    *,
-    depth: int,
-) -> _JsonValue:
-    if depth > _MAX_DEPTH:
-        raise EventError("redaction_failed", "the payload nesting is too deep")
-    if isinstance(value, Mapping):
-        if len(value) > _MAX_CONTAINER_ITEMS:
-            raise EventError("redaction_failed", "a payload mapping is too large")
-        result: dict[str, _JsonValue] = {}
-        for key, item in value.items():
-            if type(key) is not str:
-                raise EventError("redaction_failed", "payload keys must be strings")
-            result[key] = (
-                _REDACTED
-                if _sensitive_key(key)
-                else _redact_json(item, sensitive_values, depth=depth + 1)
-            )
-        return result
-    if isinstance(value, (list, tuple)):
-        if len(value) > _MAX_CONTAINER_ITEMS:
-            raise EventError("redaction_failed", "a payload sequence is too large")
-        return [_redact_json(item, sensitive_values, depth=depth + 1) for item in value]
-    if isinstance(value, str):
-        if len(value.encode("utf-8")) > _MAX_STRING_BYTES:
-            raise EventError("redaction_failed", "a payload string is too large")
-        return _redact_string(value, sensitive_values)
-    if value is None:
-        return None
-    if type(value) is bool:
-        return bool(value)
-    if type(value) is int:
-        return int(value)
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise EventError("redaction_failed", "payload numbers must be finite")
-        return float(value)
-    raise EventError("redaction_failed", "the payload contains a non-JSON value")
+    normalized = "".join(character.lower() for character in name if character.isalnum())
+    return any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
 
 
 def _redact_string(value: str, sensitive_values: Sequence[str]) -> str:
@@ -985,10 +1337,10 @@ def _exclusive_audit_lock(path: Path, timeout_s: float) -> Iterator[None]:
         try:
             yield
         finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            _release_flock(descriptor)
     finally:
         if descriptor is not None:
-            os.close(descriptor)
+            _close_tracked_lock_descriptor(descriptor)
         mutex.release()
 
 
@@ -1002,43 +1354,76 @@ def _mutex_for(path: Path) -> threading.Lock:
         return mutex
 
 
+def _before_fork() -> None:
+    _ACTIVE_LOCK_FDS_GUARD.acquire()
+
+
+def _after_fork_in_parent() -> None:
+    _ACTIVE_LOCK_FDS_GUARD.release()
+
+
+def _after_fork_in_child() -> None:
+    global _ACTIVE_LOCK_FDS, _ACTIVE_LOCK_FDS_GUARD
+    global _MUTATION_CONTEXT, _MUTEXES, _MUTEXES_GUARD
+    for descriptor in tuple(_ACTIVE_LOCK_FDS):
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    _ACTIVE_LOCK_FDS = set()
+    _ACTIVE_LOCK_FDS_GUARD = threading.Lock()
+    _MUTEXES = {}
+    _MUTEXES_GUARD = threading.Lock()
+    _MUTATION_CONTEXT = threading.local()
+
+
 def _open_lock_file(path: Path) -> int:
     _validate_lock_parent(path.parent)
     try:
         base_flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
     except AttributeError:
         raise EventError("lock_unsupported", "secure audit locking is unavailable")
-    created = False
+    descriptor: int | None = None
+    _ACTIVE_LOCK_FDS_GUARD.acquire()
     try:
-        descriptor = os.open(path, base_flags | os.O_CREAT | os.O_EXCL, _FILE_MODE)
-        created = True
-    except FileExistsError:
+        created = False
         try:
-            descriptor = os.open(path, base_flags)
+            descriptor = os.open(path, base_flags | os.O_CREAT | os.O_EXCL, _FILE_MODE)
+            created = True
+        except FileExistsError:
+            try:
+                descriptor = os.open(path, base_flags)
+            except OSError:
+                raise EventError(
+                    "unsafe_lock_file",
+                    "the audit lock file could not be opened safely",
+                )
         except OSError:
-            open_failed = True
-        else:
-            open_failed = False
-        if open_failed:
             raise EventError(
-                "unsafe_lock_file", "the audit lock file could not be opened safely"
+                "unsafe_lock_file", "the audit lock file could not be created safely"
             )
-    except OSError:
-        raise EventError(
-            "unsafe_lock_file", "the audit lock file could not be created safely"
-        )
-    try:
-        if created:
-            os.fchmod(descriptor, _FILE_MODE)
-            os.fsync(descriptor)
-            _fsync_directory(path.parent, "unsafe_lock_file")
-        metadata = os.fstat(descriptor)
-        _validate_owner_file_metadata(metadata, "unsafe_lock_file")
-        _revalidate_open_path(path, metadata, "unsafe_lock_file")
-    except BaseException:
-        os.close(descriptor)
-        raise
-    return descriptor
+        try:
+            if created:
+                os.fchmod(descriptor, _FILE_MODE)
+                os.fsync(descriptor)
+                _fsync_directory(path.parent, "unsafe_lock_file")
+            metadata = os.fstat(descriptor)
+            _validate_owner_file_metadata(metadata, "unsafe_lock_file")
+            _revalidate_open_path(path, metadata, "unsafe_lock_file")
+        except OSError:
+            _best_effort_close(descriptor)
+            descriptor = None
+            raise EventError(
+                "unsafe_lock_file", "the audit lock file could not be validated safely"
+            )
+        except BaseException:
+            _best_effort_close(descriptor)
+            descriptor = None
+            raise
+        _ACTIVE_LOCK_FDS.add(descriptor)
+        return descriptor
+    finally:
+        _ACTIVE_LOCK_FDS_GUARD.release()
 
 
 def _validate_lock_parent(path: Path) -> None:
@@ -1077,6 +1462,32 @@ def _acquire_flock(descriptor: int, timeout_s: float) -> None:
         time.sleep(min(0.01, remaining))
 
 
+def _release_flock(descriptor: int) -> None:
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError:
+        raise EventError("lock_failed", "the audit lock could not be released")
+
+
+def _close_tracked_lock_descriptor(descriptor: int) -> None:
+    _ACTIVE_LOCK_FDS_GUARD.acquire()
+    try:
+        _ACTIVE_LOCK_FDS.discard(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            raise EventError("lock_failed", "the audit lock could not be closed")
+    finally:
+        _ACTIVE_LOCK_FDS_GUARD.release()
+
+
+def _best_effort_close(descriptor: int) -> None:
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+
+
 def _read_anchor(path: Path) -> _AnchorState | None:
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
@@ -1092,13 +1503,28 @@ def _read_anchor(path: Path) -> _AnchorState | None:
         raise EventError(
             "unsafe_anchor_file", "the audit anchor could not be opened safely"
         )
+    data = b""
+    failure: EventError | None = None
     try:
         metadata = os.fstat(descriptor)
         _validate_owner_file_metadata(metadata, "unsafe_anchor_file")
         _revalidate_open_path(path, metadata, "unsafe_anchor_file")
         data = _read_bounded(descriptor, _MAX_ANCHOR_BYTES)
-    finally:
+    except EventError as error:
+        failure = error
+    except OSError:
+        failure = EventError(
+            "unsafe_anchor_file", "the audit anchor could not be read safely"
+        )
+    try:
         os.close(descriptor)
+    except OSError:
+        if failure is None:
+            failure = EventError(
+                "unsafe_anchor_file", "the audit anchor could not be closed safely"
+            )
+    if failure is not None:
+        raise failure
     try:
         document = json.loads(data.decode("utf-8"))
         return _parse_anchor(document)
@@ -1150,7 +1576,12 @@ def _read_bounded(descriptor: int, limit: int) -> bytes:
     chunks: list[bytes] = []
     size = 0
     while True:
-        chunk = os.read(descriptor, min(4096, limit + 1 - size))
+        try:
+            chunk = os.read(descriptor, min(4096, limit + 1 - size))
+        except OSError:
+            raise EventError(
+                "unsafe_anchor_file", "the audit anchor could not be read safely"
+            )
         if not chunk:
             return b"".join(chunks)
         chunks.append(chunk)
@@ -1198,7 +1629,14 @@ def _write_anchor(path: Path, anchor: _AnchorState) -> None:
         )
     finally:
         if descriptor is not None:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                if temporary_path is None:
+                    raise EventError(
+                        "anchor_write_failed",
+                        "the audit anchor temporary file could not be closed",
+                    )
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
@@ -1240,7 +1678,7 @@ def _create_anchor_temp(path: Path) -> tuple[Path, int]:
         try:
             os.fchmod(descriptor, _FILE_MODE)
         except OSError:
-            os.close(descriptor)
+            _best_effort_close(descriptor)
             try:
                 candidate.unlink()
             except OSError:
@@ -1274,7 +1712,10 @@ def _fsync_directory(path: Path, code: str) -> None:
     except OSError:
         raise EventError(code, "the audit directory could not be synchronized")
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            raise EventError(code, "the audit directory could not be closed safely")
 
 
 def _validate_owner_file_metadata(metadata: os.stat_result, code: str) -> None:
@@ -1301,3 +1742,11 @@ def _revalidate_open_path(
         opened_metadata.st_ino,
     ):
         raise EventError(code, "an audit file changed identity while opening")
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(
+        before=_before_fork,
+        after_in_parent=_after_fork_in_parent,
+        after_in_child=_after_fork_in_child,
+    )
