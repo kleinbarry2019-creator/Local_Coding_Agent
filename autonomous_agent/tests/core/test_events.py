@@ -175,6 +175,52 @@ def _rows(store: CoreStateStore) -> list[tuple[object, ...]]:
         ).fetchall()
 
 
+def _insert_committed_second_event(
+    store: CoreStateStore,
+    first: EventRecord,
+    *,
+    event_id: str,
+    event_type: str,
+    payload: Mapping[str, object],
+) -> None:
+    current_hash = _canonical_hash(
+        2,
+        event_id,
+        "session-1",
+        event_type,
+        payload,
+        first.current_hash,
+        SECOND_AT,
+    )
+    with store.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO events(
+                sequence, event_id, session_id, event_type, payload_json,
+                previous_hash, current_hash, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2,
+                event_id,
+                "session-1",
+                event_type,
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                first.current_hash,
+                current_hash,
+                SECOND_AT,
+            ),
+        )
+    _write_anchor(
+        store,
+        {
+            "version": 1,
+            "committed": {"sequence": 2, "hash": current_hash},
+            "pending": None,
+        },
+    )
+
+
 def _crash_append(
     path_values: tuple[str, str, str],
     phase: str,
@@ -591,10 +637,13 @@ def test_config_collected_exact_secrets_redact_later_events(tmp_path: Path) -> N
     log.start_session("session-1", ExecutionMode.MONITORED, config, CREATED_AT)
 
     record = log.append(
-        _event(payload={"tool_name": f"doctor {secret}", "status": "error"})
+        _event(
+            event_type="config.snapshot",
+            payload={"paths": {"state_root": f"/safe/{secret}"}},
+        )
     )
 
-    assert record.payload["tool_name"] == "doctor [REDACTED]"
+    assert record.payload["paths"] == {"state_root": "/safe/[REDACTED]"}
     assert secret not in str(_rows(store)[1][4])
 
 
@@ -622,15 +671,15 @@ def test_dropped_sensitive_keys_are_collected_before_event_allowlisting(
 
     record = AuditLog(store).append(
         _event(
+            event_type="config.snapshot",
             payload={
-                "tool_name": secret,
-                "status": "error",
+                "paths": {"state_root": secret},
                 "dropped_metadata": {sensitive_key: secret},
-            }
+            },
         )
     )
 
-    assert record.payload["tool_name"] == "[REDACTED]"
+    assert record.payload["paths"] == {"state_root": "[REDACTED]"}
     assert secret not in str(_rows(store)[1][4])
 
 
@@ -650,12 +699,15 @@ def test_credential_userinfo_is_redacted_for_generic_uri_schemes(
     _start(AuditLog(store), tmp_path)
 
     record = AuditLog(store).append(
-        _event(payload={"tool_name": credential_uri, "status": "error"})
+        _event(
+            event_type="config.snapshot",
+            payload={"paths": {"state_root": credential_uri}},
+        )
     )
 
     persisted = str(_rows(store)[1][4])
     assert credential_uri not in persisted
-    assert "[REDACTED]" in str(record.payload["tool_name"])
+    assert "[REDACTED]" in str(record.payload["paths"])
 
 
 @pytest.mark.parametrize(
@@ -675,11 +727,14 @@ def test_value_patterns_are_redacted_before_persistence(
     _start(AuditLog(store), tmp_path)
 
     record = AuditLog(store).append(
-        _event(payload={"tool_name": unsafe_value, "status": "error"})
+        _event(
+            event_type="config.snapshot",
+            payload={"paths": {"state_root": unsafe_value}},
+        )
     )
 
     assert unsafe_value not in json.dumps(record.payload)
-    assert "[REDACTED]" in str(record.payload["tool_name"])
+    assert "[REDACTED]" in str(record.payload["paths"])
 
 
 @pytest.mark.parametrize("unsafe_value", [object(), {"nested": object()}, float("nan")])
@@ -820,6 +875,237 @@ def test_verification_independently_rejects_noncanonical_payload_leaf_shapes(
 
     assert not verification.ok
     assert verification.code == "hash_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("identifier_field", "unsafe_value"),
+    [
+        ("tool_name", "raw model completion password=hunter2"),
+        ("diagnostic_code", "stdout raw-output token=abcdefghijk"),
+        ("incident_id", "RuntimeError exception secret=hunter2"),
+    ],
+)
+def test_identifier_redaction_never_bypasses_structural_leaf_grammar(
+    tmp_path: Path, identifier_field: str, unsafe_value: str
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    payload = {
+        "tool_name": "doctor.git",
+        "status": "error",
+        identifier_field: unsafe_value,
+    }
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).append(_event(payload=payload))
+
+    assert raised.value.code == "redaction_failed"
+    assert _rows(store) == before_rows
+    assert _anchor(store)["committed"] == {
+        "sequence": 1,
+        "hash": first.current_hash,
+    }
+    assert unsafe_value.encode() not in store.database_path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("identifier_field", "persisted_value"),
+    [
+        ("tool_name", "raw model completion [REDACTED]"),
+        ("diagnostic_code", "stdout raw-output [REDACTED]"),
+        ("incident_id", "RuntimeError exception [REDACTED]"),
+    ],
+)
+def test_verification_rejects_redacted_free_text_in_identifier_leaves(
+    tmp_path: Path, identifier_field: str, persisted_value: str
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    payload = {
+        "tool_name": "doctor.git",
+        "status": "error",
+        identifier_field: persisted_value,
+    }
+    _insert_committed_second_event(
+        store,
+        first,
+        event_id=f"redacted-free-text-{identifier_field}",
+        event_type="tool.failed",
+        payload=payload,
+    )
+
+    verification = AuditLog(store).verify()
+
+    assert not verification.ok
+    assert verification.code == "hash_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "tool.failed",
+            {"tool_name": "doctor.git", "status": "error", "passwd": "error"},
+        ),
+        (
+            "tool.failed",
+            {
+                "tool_name": "doctor.git",
+                "status": "error",
+                "passwd": "doctor.git",
+            },
+        ),
+        (
+            "audit.recovered",
+            {
+                "action": "pending_finalized",
+                "code": "ok",
+                "recovered_sequence": 1,
+                "passwd": "pending_finalized",
+            },
+        ),
+        (
+            "audit.recovered",
+            {
+                "action": "pending_finalized",
+                "code": "ok",
+                "recovered_sequence": 1,
+                "passwd": "ok",
+            },
+        ),
+        (
+            "config.snapshot",
+            {"mode": "monitored", "passwd": "monitored"},
+        ),
+        (
+            "config.snapshot",
+            {
+                "provenance": {
+                    "mode": {
+                        "field": "mode",
+                        "source": "cli",
+                        "source_path": None,
+                    }
+                },
+                "passwd": "cli",
+            },
+        ),
+    ],
+)
+def test_structural_leaves_reject_exact_collected_secret_values(
+    tmp_path: Path, event_type: str, payload: Mapping[str, object]
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    before_anchor = store.anchor_path.read_bytes()
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).append(_event(event_type=event_type, payload=payload))
+
+    assert raised.value.code == "redaction_failed"
+    assert _rows(store) == before_rows
+    assert store.anchor_path.read_bytes() == before_anchor
+    assert AuditLog(store).verify() == AuditVerification(
+        True, "ok", 1, first.current_hash
+    )
+
+
+@pytest.mark.parametrize("secret", ["monitored", "active"])
+def test_start_session_rejects_secret_equal_to_structural_mode_or_status(
+    tmp_path: Path, secret: str
+) -> None:
+    store = _store(tmp_path)
+    config = _config(tmp_path)
+    object.__setattr__(config, "_sensitive_values", (secret,))
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).start_session(
+            "session-1", ExecutionMode.MONITORED, config, CREATED_AT
+        )
+
+    assert raised.value.code == "redaction_failed"
+    assert _rows(store) == []
+    assert store.load_session("session-1") is None
+    assert not store.anchor_path.exists()
+
+
+def test_structural_identifier_rejects_known_sensitive_value(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store, sensitive_values=("doctor.git",)).append(_event())
+
+    assert raised.value.code == "redaction_failed"
+    assert len(_rows(store)) == 1
+    assert AuditLog(store).verify() == AuditVerification(
+        True, "ok", 1, first.current_hash
+    )
+
+
+def test_free_text_redaction_preserves_the_persisted_leaf_bound(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    before_anchor = store.anchor_path.read_bytes()
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store, sensitive_values=("x",)).append(
+            _event(
+                event_type="config.snapshot",
+                payload={"paths": {"state_root": "x" * 500}},
+            )
+        )
+
+    assert raised.value.code == "redaction_failed"
+    assert _rows(store) == before_rows
+    assert store.anchor_path.read_bytes() == before_anchor
+    assert AuditLog(store).verify() == AuditVerification(
+        True, "ok", 1, first.current_hash
+    )
+
+
+def test_safe_structural_leaf_records_remain_verifiable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    log = AuditLog(store)
+
+    log.append(_event())
+    log.append(
+        _event(
+            event_id="safe-config",
+            event_type="config.snapshot",
+            payload={
+                "mode": "monitored",
+                "provenance": {
+                    "mode": {
+                        "field": "mode",
+                        "source": "cli",
+                        "source_path": None,
+                    }
+                },
+            },
+            created_at="2026-08-18T10:00:02Z",
+        )
+    )
+    final = log.append(
+        _event(
+            event_id="safe-recovery",
+            event_type="audit.recovered",
+            payload={
+                "action": "pending_finalized",
+                "code": "ok",
+                "recovered_sequence": 2,
+            },
+            created_at="2026-08-18T10:00:03Z",
+        )
+    )
+
+    assert log.verify() == AuditVerification(True, "ok", 4, final.current_hash)
 
 
 def test_event_and_state_mutation_commit_in_one_sqlite_transaction(

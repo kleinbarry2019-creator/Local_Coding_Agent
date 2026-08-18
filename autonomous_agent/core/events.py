@@ -848,11 +848,15 @@ def _sanitize_session_created(
     selected = _select_known_fields(payload, _SESSION_EVENT_FIELDS)
     if set(selected) != _SESSION_EVENT_FIELDS:
         raise EventError("redaction_failed", "the session event payload is incomplete")
-    mode = _enum_text(selected["mode"], _EXECUTION_MODE_VALUES, "session mode")
-    status = _enum_text(selected["status"], frozenset({"active"}), "session status")
+    mode = _enum_text(
+        selected["mode"], _EXECUTION_MODE_VALUES, sensitive_values, "session mode"
+    )
+    status = _enum_text(
+        selected["status"], frozenset({"active"}), sensitive_values, "session status"
+    )
     return {
-        "mode": _redact_string(mode, sensitive_values),
-        "status": _redact_string(status, sensitive_values),
+        "mode": mode,
+        "status": status,
     }
 
 
@@ -869,7 +873,12 @@ def _sanitize_tool_failed(
             "tool name",
             _MAX_EVENT_TEXT_BYTES,
         ),
-        "status": _enum_text(selected["status"], frozenset({"error"}), "tool status"),
+        "status": _enum_text(
+            selected["status"],
+            frozenset({"error"}),
+            sensitive_values,
+            "tool status",
+        ),
     }
     for name in ("diagnostic_code", "incident_id"):
         if name in selected:
@@ -902,11 +911,21 @@ def _sanitize_audit_recovered(
     recovered_sequence = selected["recovered_sequence"]
     if type(recovered_sequence) is not int or recovered_sequence < 0:
         raise EventError("redaction_failed", "the recovered sequence is invalid")
-    action = _enum_text(selected["action"], _AUDIT_RECOVERY_ACTIONS, "recovery action")
-    code = _enum_text(selected["code"], _AUDIT_RECOVERY_CODES, "recovery code")
+    action = _enum_text(
+        selected["action"],
+        _AUDIT_RECOVERY_ACTIONS,
+        sensitive_values,
+        "recovery action",
+    )
+    code = _enum_text(
+        selected["code"],
+        _AUDIT_RECOVERY_CODES,
+        sensitive_values,
+        "recovery code",
+    )
     return {
-        "action": _redact_string(action, sensitive_values),
-        "code": _redact_string(code, sensitive_values),
+        "action": action,
+        "code": code,
         "recovered_sequence": recovered_sequence,
     }
 
@@ -940,7 +959,10 @@ def _sanitize_config_document(
         result["schema_version"] = schema_version
     if "mode" in selected:
         result["mode"] = _enum_text(
-            selected["mode"], _EXECUTION_MODE_VALUES, "configuration mode"
+            selected["mode"],
+            _EXECUTION_MODE_VALUES,
+            sensitive_values,
+            "configuration mode",
         )
     for name in ("free_only", "audit_required"):
         if name in selected:
@@ -986,7 +1008,7 @@ def _sanitize_config_document(
                         "redaction_failed",
                         "configuration provenance is incomplete",
                     )
-                field_name = _bounded_text(
+                field_name = _identifier_text(
                     fields["field"],
                     sensitive_values,
                     "configuration provenance field",
@@ -1000,6 +1022,7 @@ def _sanitize_config_document(
                 source = _enum_text(
                     fields["source"],
                     _CONFIG_SOURCE_VALUES,
+                    sensitive_values,
                     "configuration provenance source",
                 )
                 source_path_value = fields["source_path"]
@@ -1043,6 +1066,16 @@ def _bounded_text(
     field_name: str,
     maximum_bytes: int,
 ) -> str:
+    validated = _validated_text(value, field_name, maximum_bytes)
+    redacted = _redact_string(validated, sensitive_values)
+    return _validated_text(redacted, field_name, maximum_bytes)
+
+
+def _validated_text(
+    value: object,
+    field_name: str,
+    maximum_bytes: int,
+) -> str:
     if (
         type(value) is not str
         or not value
@@ -1050,7 +1083,21 @@ def _bounded_text(
         or len(value.encode("utf-8")) > maximum_bytes
     ):
         raise EventError("redaction_failed", f"{field_name} is invalid")
-    return _redact_string(value, sensitive_values)
+    return value
+
+
+def _structural_text(
+    value: object,
+    sensitive_values: Sequence[str],
+    field_name: str,
+    maximum_bytes: int,
+) -> str:
+    validated = _validated_text(value, field_name, maximum_bytes)
+    if _redact_string(validated, sensitive_values) != validated:
+        raise EventError(
+            "redaction_failed", f"{field_name} conflicts with sensitive data"
+        )
+    return validated
 
 
 def _identifier_text(
@@ -1059,13 +1106,10 @@ def _identifier_text(
     field_name: str,
     maximum_bytes: int,
 ) -> str:
-    redacted = _bounded_text(value, sensitive_values, field_name, maximum_bytes)
-    if (
-        _REDACTED not in redacted
-        and _PERSISTED_IDENTIFIER_PATTERN.fullmatch(redacted) is None
-    ):
+    validated = _structural_text(value, sensitive_values, field_name, maximum_bytes)
+    if _PERSISTED_IDENTIFIER_PATTERN.fullmatch(validated) is None:
         raise EventError("redaction_failed", f"{field_name} shape is invalid")
-    return redacted
+    return validated
 
 
 def _tool_name_text(
@@ -1077,10 +1121,18 @@ def _tool_name_text(
     return _identifier_text(value, sensitive_values, field_name, maximum_bytes)
 
 
-def _enum_text(value: object, allowed: frozenset[str], field_name: str) -> str:
-    if type(value) is not str or value not in allowed:
+def _enum_text(
+    value: object,
+    allowed: frozenset[str],
+    sensitive_values: Sequence[str],
+    field_name: str,
+) -> str:
+    validated = _structural_text(
+        value, sensitive_values, field_name, _MAX_IDENTIFIER_BYTES
+    )
+    if validated not in allowed:
         raise EventError("redaction_failed", f"{field_name} is invalid")
-    return value
+    return validated
 
 
 def _config_limit(name: str, value: object) -> int | float:
