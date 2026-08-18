@@ -28,10 +28,11 @@ Each runtime write operation must be assigned:
 
 Pending:
 
-- [ ] Locate current state writers
-- [ ] Locate audit writers
-- [ ] Locate snapshot writers
-- [ ] Add V50 path abstraction
-- [ ] Redirect writers
-- [ ] Validate V49 compatibility
+- [x] Locate current state writers
+- [x] Locate audit writers
+- [x] Locate snapshot writers
+- [x] Add V50 path abstraction
+- [x] Redirect the active V50 state, integrity, and audit writers
+- [x] Preserve V49 and legacy-file compatibility
 
+Snapshot-writer migration remains a separate recovery subsystem milestone.

@@ -25,7 +25,14 @@ jobs:
 
       - name: Python compile check V50
         run: |
-          python -m compileall autonomous_agent/safe_agent_v50.py
+          python -m compileall \
+            autonomous_agent/safe_agent_v50.py \
+            autonomous_agent/runtime_paths.py
+
+
+      - name: Runtime path isolation tests
+        run: |
+          python -m unittest autonomous_agent.tests.test_runtime_paths
 
 
       - name: Install Bandit
@@ -35,12 +42,15 @@ jobs:
 
       - name: Bandit security scan
         run: |
-          bandit -r autonomous_agent/safe_agent_v50.py
+          bandit -r \
+            autonomous_agent/safe_agent_v50.py \
+            autonomous_agent/runtime_paths.py
 
 
       - name: Verify V50 release files
         run: |
           test -f autonomous_agent/BUILD_INFO_V50.txt
+          test -f autonomous_agent/runtime_paths.py
           test -f autonomous_agent/release/V50_COMMIT.txt
           test -f autonomous_agent/release/V50_BUILD_TIME.txt
 

@@ -24,3 +24,6 @@ agent_audit.json
 agent_history.json
 agent_state_backup.json
 agent_state.before_*.json
+autonomous_agent/state/*
+!autonomous_agent/state/README.md
+autonomous_agent/runtime/

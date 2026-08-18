@@ -7,6 +7,12 @@ Release cleanup:
 - bounded file enumeration
 - bounded path handling
 
+Runtime isolation:
+- centralized V50 path ownership
+- isolated state, audit, snapshot, and cache directories
+- non-destructive legacy state migration
+- fail-closed symlink protection for runtime storage
+
 V48 release:
 - bounded model responses
 - bounded HTTP response bodies
