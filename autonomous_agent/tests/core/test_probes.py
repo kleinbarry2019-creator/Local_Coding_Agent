@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import http.server
 import json
 import os
+import selectors
+import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -75,10 +79,26 @@ def _assert_pid_gone(pid: int, identity: str) -> None:
     assert not _pid_exists(pid, identity)
 
 
+def _process_with_marker_exists(marker: str) -> bool:
+    encoded = marker.encode()
+    for command_line in Path("/proc").glob("[0-9]*/cmdline"):
+        with contextlib.suppress(OSError):
+            if encoded in command_line.read_bytes():
+                return True
+    return False
+
+
 def _metadata_with_uid(metadata: os.stat_result, uid: int) -> os.stat_result:
     values = list(metadata)
     values[4] = uid
     return os.stat_result(values)
+
+
+def _assert_clean_error(error: ProbeError, secret: str) -> None:
+    assert secret not in str(error)
+    assert secret not in repr(error)
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 class _HostileFloat(float):
@@ -105,12 +125,125 @@ def test_resolver_rejects_non_names(name: str) -> None:
         TrustedExecutableResolver().resolve(name)
 
 
-def test_resolver_returns_canonical_trusted_system_executable() -> None:
+def test_resolver_returns_trusted_system_alias_with_canonical_target() -> None:
     resolved = TrustedExecutableResolver().resolve("python3")
 
     assert resolved.is_absolute()
-    assert resolved == resolved.resolve(strict=True)
-    assert resolved.is_file()
+    assert resolved.name == "python3"
+    assert resolved.resolve(strict=True).is_file()
+
+
+def test_resolver_preserves_git_alias_identity_and_runner_hardens_target(
+    resolver_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = resolver_root / "prefix"
+    bin_root = prefix / "bin"
+    bin_root.mkdir(parents=True)
+    real_git = TrustedExecutableResolver().resolve("git").resolve(strict=True)
+    git_target = bin_root / "git-real"
+    _write_executable(git_target, f'#!/bin/sh\nexec {real_git} "$@"\n')
+    git_alias = bin_root / "git"
+    git_alias.symlink_to(git_target.name)
+    resolver = _resolver_for(monkeypatch, bin_root)
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    fsmonitor_marker = tmp_path / "fsmonitor-ran"
+    hook_marker = tmp_path / "hook-ran"
+    alias_marker = tmp_path / "alias-ran"
+    hostile = tmp_path / "hostile-fsmonitor.sh"
+    _write_executable(hostile, f"#!/bin/sh\ntouch {fsmonitor_marker}\n")
+    subprocess.run(
+        [real_git, "-C", repository, "init", "-q"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    hooks = tmp_path / "hostile-hooks"
+    hooks.mkdir()
+    _write_executable(hooks / "post-index-change", f"#!/bin/sh\ntouch {hook_marker}\n")
+    with (repository / ".git/config").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"\n[core]\n\tfsmonitor = {hostile}\n\thooksPath = {hooks}\n"
+            f"[alias]\n\thostile-alias = !touch {alias_marker}\n"
+        )
+
+    resolved = resolver.resolve("git")
+    result = run_bounded_process(
+        resolved,
+        ("-C", str(repository), "status", "--porcelain=v1"),
+        {},
+        time.monotonic() + 3.0,
+        8_192,
+    )
+
+    assert result.returncode == 0
+    with pytest.raises(ProbeError, match=r"^unsafe_git_arguments:"):
+        run_bounded_process(
+            resolved,
+            ("-C", str(repository), "hostile-alias"),
+            {},
+            time.monotonic() + 3.0,
+            8_192,
+        )
+    assert not fsmonitor_marker.exists()
+    assert not hook_marker.exists()
+    assert not alias_marker.exists()
+    assert resolved == git_alias
+    assert resolved.resolve(strict=True) == git_target
+
+
+def test_direct_path_cannot_forge_resolver_evidence() -> None:
+    resolved = TrustedExecutableResolver().resolve("git")
+
+    with pytest.raises(ProbeError, match=r"^untrusted_executable:"):
+        run_bounded_process(
+            Path(os.fspath(resolved)),
+            ("--version",),
+            {},
+            time.monotonic() + 2.0,
+            4_096,
+        )
+
+
+def test_homebrew_bin_link_may_target_validated_cellar(
+    resolver_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix = resolver_root / "prefix"
+    bin_root = prefix / "bin"
+    cellar_bin = prefix / "Cellar/node/1.0/bin"
+    bin_root.mkdir(parents=True)
+    cellar_bin.mkdir(parents=True)
+    target = cellar_bin / "node-real"
+    shutil.copy2(TrustedExecutableResolver().resolve("true").resolve(), target)
+    target.chmod(0o755)
+    alias = bin_root / "node"
+    alias.symlink_to(Path("../Cellar/node/1.0/bin/node-real"))
+    resolver = _resolver_for(monkeypatch, bin_root)
+
+    resolved = resolver.resolve("node")
+
+    assert resolved == alias
+    assert resolved.resolve(strict=True) == target
+
+
+def test_installed_homebrew_links_resolve_when_present() -> None:
+    resolver = TrustedExecutableResolver()
+    checked = 0
+    for name in ("gh", "node", "npm", "uv"):
+        candidate = Path("/home/linuxbrew/.linuxbrew/bin") / name
+        if not os.path.lexists(candidate):
+            continue
+        checked += 1
+        resolved = resolver.resolve(name)
+        assert resolved.name == name
+        assert resolved.parent == Path("/home/linuxbrew/.linuxbrew").resolve() / "bin"
+        assert resolved.resolve(strict=True) == candidate.resolve(strict=True)
+        assert resolved.resolve(strict=True).is_file()
+    if checked == 0:
+        pytest.skip("no selected Homebrew executable is installed")
 
 
 def test_resolver_rejects_symlink_escape(
@@ -223,6 +356,52 @@ def test_resolver_rejects_wrong_owner_executable_ancestor(
 
     with pytest.raises(ProbeError, match=r"^untrusted_executable:"):
         resolver.resolve("probe")
+
+
+def test_resolver_open_failure_has_no_raw_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_open(*_args: object, **_kwargs: object) -> int:
+        raise OSError(errno.EIO, "secret-open-path")
+
+    monkeypatch.setattr(probes_module.os, "open", fail_open)
+    with pytest.raises(ProbeError) as captured:
+        TrustedExecutableResolver().resolve("python3")
+
+    _assert_clean_error(captured.value, "secret-open-path")
+
+
+def test_resolver_stat_failure_has_no_raw_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_lstat = Path.lstat
+
+    def fail_candidate_lstat(path: Path) -> os.stat_result:
+        if path.name == "python3":
+            raise OSError(errno.EIO, "secret-stat-path")
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_candidate_lstat)
+    with pytest.raises(ProbeError) as captured:
+        TrustedExecutableResolver().resolve("python3")
+
+    _assert_clean_error(captured.value, "secret-stat-path")
+
+
+def test_resolver_descriptor_close_failure_is_stable_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_close = os.close
+
+    def fail_close(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError(errno.EIO, "secret-descriptor-path")
+
+    monkeypatch.setattr(probes_module.os, "close", fail_close)
+    with pytest.raises(ProbeError, match=r"^untrusted_executable:") as captured:
+        TrustedExecutableResolver().resolve("python3")
+
+    _assert_clean_error(captured.value, "secret-descriptor-path")
 
 
 def test_probe_environment_is_minimal_and_strips_injection(tmp_path: Path) -> None:
@@ -430,6 +609,19 @@ def test_process_rejects_invalid_deadline(deadline: object) -> None:
         )
 
 
+def test_process_converts_finite_deadline_overflow_to_stable_error() -> None:
+    with pytest.raises(ProbeError, match=r"^invalid_deadline:") as captured:
+        run_bounded_process(
+            _system_executable("python3"),
+            ("-c", "import time; time.sleep(1)"),
+            {},
+            1e308,
+            128,
+        )
+
+    _assert_clean_error(captured.value, "secret")
+
+
 def test_process_uses_sanitized_environment() -> None:
     python = _system_executable("python3")
     code = (
@@ -546,6 +738,145 @@ def test_timeout_terminates_entire_process_group(tmp_path: Path) -> None:
     _assert_pid_gone(
         int(child_pid_file.read_text(encoding="utf-8")), str(child_pid_file)
     )
+
+
+def _stubborn_group_code(identity: Path) -> str:
+    return "\n".join(
+        [
+            "import os, pathlib, signal, time",
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+            "child = os.fork()",
+            "if child == 0:",
+            "    while True: time.sleep(1)",
+            f"pathlib.Path({str(identity)!r}).write_text(f'{{os.getpid()}}:{{child}}')",
+            "while True: time.sleep(1)",
+        ]
+    )
+
+
+def _cleanup_injected_group(identity: Path, real_killpg: object) -> None:
+    if not identity.exists():
+        return
+    group_text, child_text = identity.read_text(encoding="utf-8").split(":")
+    group_id = int(group_text)
+    child_id = int(child_text)
+    with contextlib.suppress(ProcessLookupError):
+        real_killpg(group_id, signal.SIGKILL)  # type: ignore[operator]
+    with contextlib.suppress(ChildProcessError):
+        os.waitpid(group_id, 0)
+    _assert_pid_gone(child_id, str(identity))
+
+
+def test_termination_surfaces_non_benign_term_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "term-failure.pid"
+    real_killpg = os.killpg
+
+    def fail_term(group_id: int, requested_signal: int) -> None:
+        if requested_signal == signal.SIGTERM:
+            raise PermissionError(errno.EPERM, "secret-term-path")
+        real_killpg(group_id, requested_signal)
+
+    monkeypatch.setattr(probes_module.os, "killpg", fail_term)
+    try:
+        with pytest.raises(ProbeError, match=r"^termination_failed:") as captured:
+            run_bounded_process(
+                _system_executable("python3"),
+                ("-c", _stubborn_group_code(identity)),
+                {},
+                time.monotonic() + 0.25,
+                1_024,
+            )
+        _assert_clean_error(captured.value, "secret-term-path")
+    finally:
+        _cleanup_injected_group(identity, real_killpg)
+
+
+def test_termination_surfaces_kill_failure_and_test_cleans_survivor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "kill-failure.pid"
+    real_killpg = os.killpg
+
+    def fail_kill(group_id: int, requested_signal: int) -> None:
+        if requested_signal == signal.SIGKILL:
+            raise PermissionError(errno.EPERM, "secret-kill-path")
+        real_killpg(group_id, requested_signal)
+
+    monkeypatch.setattr(probes_module.os, "killpg", fail_kill)
+    try:
+        with pytest.raises(ProbeError, match=r"^termination_failed:") as captured:
+            run_bounded_process(
+                _system_executable("python3"),
+                ("-c", _stubborn_group_code(identity)),
+                {},
+                time.monotonic() + 0.25,
+                1_024,
+            )
+        _assert_clean_error(captured.value, "secret-kill-path")
+    finally:
+        _cleanup_injected_group(identity, real_killpg)
+
+
+def test_termination_surfaces_wait_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "wait-failure.pid"
+    real_wait = subprocess.Popen.wait
+    failed = False
+
+    def fail_wait(
+        process: subprocess.Popen[bytes], timeout: float | None = None
+    ) -> int:
+        nonlocal failed
+        if str(identity) in " ".join(str(item) for item in process.args) and not failed:
+            failed = True
+            raise OSError(errno.EIO, "secret-wait-path")
+        return real_wait(process, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "wait", fail_wait)
+    with pytest.raises(ProbeError, match=r"^termination_failed:") as captured:
+        run_bounded_process(
+            _system_executable("python3"),
+            ("-c", _stubborn_group_code(identity)),
+            {},
+            time.monotonic() + 0.25,
+            1_024,
+        )
+
+    _assert_clean_error(captured.value, "secret-wait-path")
+
+
+def test_selector_close_failure_is_stable_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_factory = selectors.DefaultSelector
+
+    class CloseFailingSelector:
+        def __init__(self) -> None:
+            self._wrapped = real_factory()
+
+        def close(self) -> None:
+            self._wrapped.close()
+            raise OSError(errno.EIO, "secret-selector-path")
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._wrapped, name)
+
+    monkeypatch.setattr(
+        probes_module.selectors, "DefaultSelector", CloseFailingSelector
+    )
+    with pytest.raises(ProbeError, match=r"^process_cleanup_failed:") as captured:
+        run_bounded_process(
+            _system_executable("python3"),
+            ("-c", "pass"),
+            {},
+            time.monotonic() + 2.0,
+            1_024,
+        )
+
+    _assert_clean_error(captured.value, "secret-selector-path")
 
 
 def test_git_probe_disables_repository_fsmonitor_and_aliases(tmp_path: Path) -> None:
@@ -707,14 +1038,40 @@ def test_loopback_http_rejects_non_loopback_schemes_and_credentials(
         get_loopback_json(endpoint, "/", time.monotonic() + 1.0, 1_024)
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://127.0.0.1:",
+        "http://127.0.0.1:0",
+        "http://127.0.0.1:-1",
+        "http://127.0.0.1:65536",
+        "http://127.0.0.1:not-a-port",
+        "http://[::1]:",
+        "http://[::1]:0",
+        "http://[::1]:-1",
+        "http://[::1]:65536",
+        "http://[::1]:not-a-port",
+        "http://localhost:",
+        "http://localhost:0",
+        "http://localhost:-1",
+        "http://localhost:65536",
+        "http://localhost:not-a-port",
+    ],
+)
+def test_loopback_http_rejects_explicit_invalid_ports(endpoint: str) -> None:
+    with pytest.raises(ProbeError, match=r"^invalid_endpoint:"):
+        get_loopback_json(endpoint, "/", time.monotonic() + 1.0, 1_024)
+
+
 def test_loopback_http_rejects_mixed_dns_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    answers = [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80)),
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80)),
-    ]
-    monkeypatch.setattr(probes_module.socket, "getaddrinfo", lambda *args: answers)
+    monkeypatch.setattr(
+        probes_module,
+        "_RESOLVER_HELPER_CODE",
+        "import sys; sys.stdout.write("
+        '\'[[2,1,6,["127.0.0.1",80]],[2,1,6,["8.8.8.8",80]]]\')',
+    )
 
     with pytest.raises(ProbeError, match=r"^non_loopback_endpoint:"):
         get_loopback_json("http://localhost:80", "/", time.monotonic() + 1.0, 1_024)
@@ -741,25 +1098,35 @@ def test_loopback_http_bounds_name_resolution_by_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     release = threading.Event()
+    resolver_marker = "local-agent-blocked-resolver-marker"
 
     def delayed_resolution(*_args: object) -> list[object]:
         release.wait(2.0)
         return []
 
     monkeypatch.setattr(probes_module.socket, "getaddrinfo", delayed_resolution)
-    started = time.monotonic()
+    monkeypatch.setattr(
+        probes_module,
+        "_RESOLVER_HELPER_CODE",
+        f"import time\n# {resolver_marker}\ntime.sleep(60)",
+        raising=False,
+    )
     try:
-        with pytest.raises(ProbeError, match=r"^probe_timeout:"):
-            get_loopback_json(
-                "http://localhost:80",
-                "/",
-                time.monotonic() + 0.1,
-                1_024,
+        for _run in range(3):
+            with pytest.raises(ProbeError, match=r"^probe_timeout:"):
+                get_loopback_json(
+                    "http://localhost:80",
+                    "/",
+                    time.monotonic() + 0.1,
+                    1_024,
+                )
+            assert not any(
+                thread.name == "local-agent-loopback-resolver"
+                for thread in threading.enumerate()
             )
+            assert not _process_with_marker_exists(resolver_marker)
     finally:
         release.set()
-
-    assert time.monotonic() - started < 0.5
 
 
 def test_loopback_http_does_not_use_proxy_environment(
@@ -773,6 +1140,27 @@ def test_loopback_http_does_not_use_proxy_environment(
         response = get_loopback_json(endpoint, "/health", time.monotonic() + 3.0, 4_096)
 
     assert response.status_code == 200
+
+
+def test_loopback_socket_close_failure_is_stable_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_close(_socket: object) -> None:
+        raise OSError(errno.EIO, "secret-socket-path")
+
+    monkeypatch.setattr(
+        probes_module._HeaderBoundedSocket,
+        "close",
+        fail_close,
+        raising=False,
+    )
+    with (
+        _http_server("127.0.0.1") as (_server, endpoint),
+        pytest.raises(ProbeError, match=r"^loopback_cleanup_failed:") as captured,
+    ):
+        get_loopback_json(endpoint, "/health", time.monotonic() + 3.0, 4_096)
+
+    _assert_clean_error(captured.value, "secret-socket-path")
 
 
 def test_loopback_http_rejects_redirects() -> None:
@@ -808,6 +1196,24 @@ def test_loopback_http_enforces_one_deadline_across_streamed_body() -> None:
         get_loopback_json(endpoint, "/slow", time.monotonic() + 0.15, 4_096)
 
     assert time.monotonic() - started < 0.6
+
+
+def test_loopback_json_decode_cannot_overrun_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_loads = json.loads
+
+    def delayed_loads(*args: object, **kwargs: object) -> object:
+        result = real_loads(*args, **kwargs)
+        time.sleep(0.12)
+        return result
+
+    monkeypatch.setattr(probes_module.json, "loads", delayed_loads)
+    with (
+        _http_server("127.0.0.1") as (_server, endpoint),
+        pytest.raises(ProbeError, match=r"^probe_timeout:"),
+    ):
+        get_loopback_json(endpoint, "/health", time.monotonic() + 0.08, 4_096)
 
 
 @contextlib.contextmanager

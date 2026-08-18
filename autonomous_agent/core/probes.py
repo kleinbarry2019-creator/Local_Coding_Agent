@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import http.client
 import ipaddress
 import json
 import math
 import os
-import queue
 import re
 import selectors
 import signal
@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final, cast
+from typing import Any, Final, Self, cast
 
 from autonomous_agent.core.config import ConfigError
 
@@ -38,6 +38,25 @@ _MAX_ARGUMENTS: Final = 128
 _MAX_ARGUMENT_BYTES: Final = 16_384
 _TERMINATION_GRACE_SECONDS: Final = 0.2
 _REAP_GRACE_SECONDS: Final = 0.5
+_MAX_DEADLINE_HORIZON_SECONDS: Final = 86_400.0
+_RESOLVER_OUTPUT_BYTES: Final = 65_536
+_RESOLVER_HELPER_CODE = """
+import json
+import socket
+import sys
+
+try:
+    answers = socket.getaddrinfo(
+        sys.argv[1], int(sys.argv[2]), socket.AF_UNSPEC, socket.SOCK_STREAM
+    )
+    encoded = [
+        [family, socktype, protocol, list(sockaddr)]
+        for family, socktype, protocol, _canonical, sockaddr in answers
+    ]
+    sys.stdout.write(json.dumps(encoded, separators=(",", ":")))
+except BaseException:
+    raise SystemExit(2)
+""".strip()
 _RUNTIME_ENVIRONMENT_TOOLS = frozenset({"podman", "systemctl", "systemd-run"})
 _GIT_ENVIRONMENT = MappingProxyType(
     {
@@ -117,15 +136,62 @@ class LoopbackResponse:
 
 @dataclass(frozen=True)
 class _ApprovedRoot:
-    canonical: Path
+    search_root: Path
+    containment_root: Path
     validation_start: Path
     allowed_owners: frozenset[int]
+
+
+@dataclass(frozen=True)
+class _ExecutableEvidence:
+    identity: str
+    canonical_target: Path
+    alias_fingerprint: tuple[int, int, int]
+    target_fingerprint: tuple[int, int]
+    issuer: object
+
+
+@dataclass(frozen=True)
+class _ValidatedExecutable:
+    lexical_path: Path
+    canonical_target: Path
+    identity: str
+
+
+_TRUSTED_PATH_ISSUER = object()
+_ConcretePath = type(Path())
+
+
+class _TrustedExecutablePath(_ConcretePath):  # type: ignore[misc,valid-type]
+    """A lexical executable alias carrying unforgeable in-process evidence."""
+
+    __slots__ = ("_probe_evidence",)
+
+    def __new__(cls, path: Path, *, evidence: _ExecutableEvidence) -> Self:
+        return cast(Self, super().__new__(cls, path))
+
+    def __init__(self, path: Path, *, evidence: _ExecutableEvidence) -> None:
+        super().__init__(path)
+        self._probe_evidence = evidence
+
+    def with_segments(self, *pathsegments: str | os.PathLike[str]) -> Path:
+        return Path(*pathsegments)
 
 
 class TrustedExecutableResolver:
     """Resolve command names only below fixed, ownership-validated roots."""
 
     def resolve(self, name: str) -> Path:
+        failure = ("probe_failed", "executable resolution failed")
+        try:
+            return self._resolve(name)
+        except ProbeError as error:
+            failure = (error.code, error.message)
+        except Exception:  # noqa: BLE001 - redacted public trust boundary
+            failure = ("probe_failed", "executable resolution failed")
+        raise ProbeError(*failure)
+
+    def _resolve(self, name: str) -> Path:
         if (
             type(name) is not str
             or not _EXECUTABLE_NAME.fullmatch(name)
@@ -135,24 +201,50 @@ class TrustedExecutableResolver:
 
         roots = _approved_executable_roots()
         for approved in roots:
-            candidate = approved.canonical / name
+            candidate = approved.search_root / name
             try:
-                candidate.lstat()
+                alias_metadata = candidate.lstat()
             except FileNotFoundError:
                 continue
             except OSError:
                 raise ProbeError(
                     "untrusted_executable", "executable metadata is unavailable"
                 ) from None
+            if alias_metadata.st_uid not in approved.allowed_owners:
+                raise ProbeError(
+                    "untrusted_executable", "executable alias ownership is unsafe"
+                )
             resolved = _resolve_candidate(candidate, approved)
-            _validate_executable(resolved, approved)
-            return resolved
+            target_metadata = _validate_executable(resolved, approved)
+            evidence = _ExecutableEvidence(
+                identity=name,
+                canonical_target=resolved,
+                alias_fingerprint=(
+                    alias_metadata.st_dev,
+                    alias_metadata.st_ino,
+                    alias_metadata.st_mode,
+                ),
+                target_fingerprint=(target_metadata.st_dev, target_metadata.st_ino),
+                issuer=_TRUSTED_PATH_ISSUER,
+            )
+            return _TrustedExecutablePath(candidate, evidence=evidence)
 
         raise ProbeError("executable_not_found", "trusted executable is unavailable")
 
 
 def build_probe_environment(tool: str, source: Mapping[str, str]) -> Mapping[str, str]:
     """Construct a new per-tool environment; never mutate or inherit ``source``."""
+    failure = ("unsafe_environment", "environment is unreadable")
+    try:
+        return _build_probe_environment(tool, source)
+    except ProbeError as error:
+        failure = (error.code, error.message)
+    except Exception:  # noqa: BLE001 - redacted public trust boundary
+        failure = ("unsafe_environment", "environment is unreadable")
+    raise ProbeError(*failure)
+
+
+def _build_probe_environment(tool: str, source: Mapping[str, str]) -> Mapping[str, str]:
     if type(tool) is not str or not _EXECUTABLE_NAME.fullmatch(tool):
         raise ProbeError("invalid_tool", "probe tool name is invalid")
     try:
@@ -193,14 +285,39 @@ def run_bounded_process(
     max_bytes: int,
 ) -> ProcessResult:
     """Run a trusted executable with a hard deadline and combined output cap."""
+    failure = ("probe_failed", "probe process failed")
+    try:
+        return _run_bounded_process(
+            executable,
+            arguments,
+            environment,
+            deadline_monotonic,
+            max_bytes,
+        )
+    except ProbeError as error:
+        failure = (error.code, error.message)
+    except Exception:  # noqa: BLE001 - redacted public trust boundary
+        failure = ("probe_failed", "probe process failed")
+    raise ProbeError(*failure)
+
+
+def _run_bounded_process(
+    executable: Path,
+    arguments: tuple[str, ...],
+    environment: Mapping[str, str],
+    deadline_monotonic: float,
+    max_bytes: int,
+) -> ProcessResult:
     _validate_max_bytes(max_bytes)
     deadline = _validated_deadline(deadline_monotonic)
     if time.monotonic() >= deadline:
         raise ProbeError("deadline_expired", "probe deadline has expired")
     trusted_executable = _validated_explicit_executable(executable)
     safe_arguments = _validated_arguments(arguments)
-    safe_environment = build_probe_environment(trusted_executable.name, environment)
-    if trusted_executable.name == "git":
+    safe_environment = _build_probe_environment(
+        trusted_executable.identity, environment
+    )
+    if trusted_executable.identity == "git":
         safe_arguments = _harden_git_arguments(safe_arguments)
     if time.monotonic() >= deadline:
         raise ProbeError("deadline_expired", "probe deadline has expired")
@@ -209,7 +326,7 @@ def run_bounded_process(
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(  # nosec B603
-            (str(trusted_executable), *safe_arguments),
+            (str(trusted_executable.canonical_target), *safe_arguments),
             shell=False,
             start_new_session=True,
             stdout=subprocess.PIPE,
@@ -223,13 +340,9 @@ def run_bounded_process(
             "process_start_failed", "probe process could not start"
         ) from None
 
-    try:
-        stdout, stderr, timed_out, truncated = _capture_process(
-            process, deadline, max_bytes
-        )
-    except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-        _terminate_process_group(process)
-        raise ProbeError("process_io_failed", "probe process I/O failed") from None
+    stdout, stderr, timed_out, truncated = _capture_process(
+        process, deadline, max_bytes
+    )
 
     duration_ms = max(0, int((time.monotonic() - started) * 1_000))
     returncode = process.returncode
@@ -255,6 +368,22 @@ def get_loopback_json(
     max_bytes: int,
 ) -> LoopbackResponse:
     """Fetch bounded JSON from a pinned loopback address or trusted Unix socket."""
+    failure = ("loopback_failed", "loopback probe failed")
+    try:
+        return _get_loopback_json(endpoint, request_path, deadline_monotonic, max_bytes)
+    except ProbeError as error:
+        failure = (error.code, error.message)
+    except Exception:  # noqa: BLE001 - redacted public trust boundary
+        failure = ("loopback_failed", "loopback probe failed")
+    raise ProbeError(*failure)
+
+
+def _get_loopback_json(
+    endpoint: str | Path,
+    request_path: str,
+    deadline_monotonic: float,
+    max_bytes: int,
+) -> LoopbackResponse:
     _validate_max_bytes(max_bytes)
     deadline = _validated_deadline(deadline_monotonic)
     if time.monotonic() >= deadline:
@@ -308,6 +437,10 @@ def get_loopback_json(
             raise ProbeError(
                 "invalid_json", "loopback response is not valid JSON"
             ) from None
+        _remaining(deadline)
+        if deadline_guard.expired:
+            raise ProbeError("probe_timeout", "loopback probe timed out")
+        _remaining(deadline)
         return LoopbackResponse(
             status_code=response.status,
             data=data,
@@ -326,14 +459,24 @@ def get_loopback_json(
             raise ProbeError("probe_timeout", "loopback probe timed out") from None
         raise ProbeError("loopback_failed", "loopback probe failed") from None
     finally:
+        cleanup_failed = False
         if deadline_guard is not None:
-            deadline_guard.close()
+            try:
+                deadline_guard.close()
+            except Exception:  # noqa: BLE001 - hostile socket cleanup boundary
+                cleanup_failed = True
         if connection is not None:
-            with _suppress_all():
+            try:
                 connection.close()
+            except Exception:  # noqa: BLE001 - hostile socket cleanup boundary
+                cleanup_failed = True
         elif raw_socket is not None:
-            with _suppress_all():
+            try:
                 raw_socket.close()
+            except Exception:  # noqa: BLE001 - hostile socket cleanup boundary
+                cleanup_failed = True
+        if cleanup_failed:
+            raise ProbeError("loopback_cleanup_failed", "loopback probe cleanup failed")
 
 
 def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
@@ -350,7 +493,7 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
             ) from None
         if canonical in seen:
             continue
-        root = _ApprovedRoot(canonical, Path("/"), frozenset({0}))
+        root = _ApprovedRoot(canonical, canonical, Path("/"), frozenset({0}))
         _validate_directory_chain(
             root.validation_start,
             canonical,
@@ -374,7 +517,12 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
             ) from None
         if canonical_bin is not None and canonical_bin not in seen:
             owners = frozenset({0, os.getuid()})
-            root = _ApprovedRoot(canonical_bin, canonical_prefix, owners)
+            root = _ApprovedRoot(
+                canonical_bin,
+                canonical_prefix,
+                canonical_prefix,
+                owners,
+            )
             _validate_directory_chain(
                 canonical_prefix,
                 canonical_bin,
@@ -417,7 +565,7 @@ def _validated_homebrew_prefix(prefix: Path) -> Path:
 def _resolve_candidate(candidate: Path, approved: _ApprovedRoot) -> Path:
     try:
         resolved = candidate.resolve(strict=True)
-        resolved.relative_to(approved.canonical)
+        resolved.relative_to(approved.containment_root)
     except (OSError, ValueError):
         raise ProbeError(
             "untrusted_executable", "executable escapes its approved root"
@@ -425,7 +573,7 @@ def _resolve_candidate(candidate: Path, approved: _ApprovedRoot) -> Path:
     return resolved
 
 
-def _validate_executable(path: Path, approved: _ApprovedRoot) -> None:
+def _validate_executable(path: Path, approved: _ApprovedRoot) -> os.stat_result:
     _validate_directory_chain(
         approved.validation_start,
         path.parent,
@@ -441,15 +589,23 @@ def _validate_executable(path: Path, approved: _ApprovedRoot) -> None:
         raise ProbeError(
             "untrusted_executable", "executable cannot be opened safely"
         ) from None
+    descriptor_metadata: os.stat_result | None = None
+    path_metadata: os.stat_result | None = None
+    metadata_failed = False
     try:
         descriptor_metadata = os.fstat(descriptor)
         path_metadata = path.stat(follow_symlinks=False)
     except OSError:
-        raise ProbeError(
-            "untrusted_executable", "executable metadata is unavailable"
-        ) from None
+        metadata_failed = True
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            raise ProbeError(
+                "untrusted_executable", "executable descriptor could not be closed"
+            ) from None
+    if metadata_failed or descriptor_metadata is None or path_metadata is None:
+        raise ProbeError("untrusted_executable", "executable metadata is unavailable")
     if (
         not stat.S_ISREG(descriptor_metadata.st_mode)
         or (descriptor_metadata.st_mode & 0o111) == 0
@@ -462,6 +618,7 @@ def _validate_executable(path: Path, approved: _ApprovedRoot) -> None:
     )
     if not os.access(path, os.X_OK):
         raise ProbeError("untrusted_executable", "executable is not runnable")
+    return descriptor_metadata
 
 
 def _validate_directory_chain(
@@ -498,24 +655,42 @@ def _validate_owned_mode(
         raise ProbeError(code, "trusted path ownership or mode is unsafe")
 
 
-def _validated_explicit_executable(executable: Path) -> Path:
-    if not isinstance(executable, Path) or not executable.is_absolute():
+def _validated_explicit_executable(executable: Path) -> _ValidatedExecutable:
+    if type(executable) is not _TrustedExecutablePath or not executable.is_absolute():
         raise ProbeError("untrusted_executable", "executable path is invalid")
+    evidence = executable._probe_evidence
+    if evidence.issuer is not _TRUSTED_PATH_ISSUER:
+        raise ProbeError("untrusted_executable", "executable evidence is invalid")
     try:
+        alias_metadata = executable.lstat()
         resolved = executable.resolve(strict=True)
     except OSError:
         raise ProbeError(
             "untrusted_executable", "executable path is unavailable"
         ) from None
-    if executable != resolved:
-        raise ProbeError("untrusted_executable", "executable path is not canonical")
+    if (
+        resolved != evidence.canonical_target
+        or executable.name != evidence.identity
+        or (
+            alias_metadata.st_dev,
+            alias_metadata.st_ino,
+            alias_metadata.st_mode,
+        )
+        != evidence.alias_fingerprint
+    ):
+        raise ProbeError("untrusted_executable", "executable evidence changed")
     for approved in _approved_executable_roots():
         try:
-            resolved.relative_to(approved.canonical)
+            executable.relative_to(approved.search_root)
+            resolved.relative_to(approved.containment_root)
         except ValueError:
             continue
-        _validate_executable(resolved, approved)
-        return resolved
+        target_metadata = _validate_executable(resolved, approved)
+        if (target_metadata.st_dev, target_metadata.st_ino) != (
+            evidence.target_fingerprint
+        ):
+            raise ProbeError("untrusted_executable", "executable target changed")
+        return _ValidatedExecutable(executable, resolved, evidence.identity)
     raise ProbeError(
         "untrusted_executable", "executable path is outside approved roots"
     )
@@ -641,15 +816,18 @@ def _capture_process(
     process: subprocess.Popen[bytes], deadline: float, max_bytes: int
 ) -> tuple[bytes, bytes, bool, bool]:
     if process.stdout is None or process.stderr is None:
-        raise RuntimeError("missing process pipes")
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        _terminate_process_group(process)
+        raise ProbeError("process_io_failed", "probe process pipes are unavailable")
+    selector: selectors.BaseSelector | None = None
     output = {"stdout": bytearray(), "stderr": bytearray()}
     total = 0
     timed_out = False
     truncated = False
+    failure: ProbeError | None = None
     try:
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -691,40 +869,117 @@ def _capture_process(
                 except subprocess.TimeoutExpired:
                     timed_out = True
                     _terminate_process_group(process)
+    except ProbeError as error:
+        failure = error
+    except Exception:  # noqa: BLE001 - hostile selector/pipe boundary
+        failure = ProbeError("process_io_failed", "probe process I/O failed")
     finally:
-        selector.close()
+        if failure is not None and process.returncode is None:
+            try:
+                _terminate_process_group(process)
+            except ProbeError as termination_error:
+                failure = termination_error
+        cleanup_failed = False
+        if selector is not None:
+            try:
+                selector.close()
+            except Exception:  # noqa: BLE001 - hostile selector boundary
+                cleanup_failed = True
         for stream in (process.stdout, process.stderr):
-            with _suppress_all():
+            try:
                 stream.close()
+            except Exception:  # noqa: BLE001 - hostile pipe boundary
+                cleanup_failed = True
+        if failure is None and cleanup_failed:
+            failure = ProbeError(
+                "process_cleanup_failed", "probe process cleanup failed"
+            )
+    if failure is not None:
+        raise failure
     return bytes(output["stdout"]), bytes(output["stderr"]), timed_out, truncated
 
 
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     group_id = process.pid
-    with _suppress_all():
-        os.killpg(group_id, signal.SIGTERM)
-    grace_deadline = time.monotonic() + _TERMINATION_GRACE_SECONDS
-    while time.monotonic() < grace_deadline and _process_group_exists(group_id):
-        time.sleep(0.005)
-    if _process_group_exists(group_id):
-        with _suppress_all():
-            os.killpg(group_id, signal.SIGKILL)
+    failed = False
     try:
-        process.wait(timeout=_REAP_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        with _suppress_all():
-            process.kill()
-        with _suppress_all():
+        os.killpg(group_id, signal.SIGTERM)
+    except OSError as error:
+        if error.errno != errno.ESRCH:
+            failed = True
+    grace_deadline = time.monotonic() + _TERMINATION_GRACE_SECONDS
+    members, scan_failed = _live_process_group_members(group_id)
+    failed = failed or scan_failed
+    while time.monotonic() < grace_deadline and members:
+        time.sleep(0.005)
+        members, scan_failed = _live_process_group_members(group_id)
+        failed = failed or scan_failed
+    if members:
+        try:
+            os.killpg(group_id, signal.SIGKILL)
+        except OSError as error:
+            if error.errno != errno.ESRCH:
+                failed = True
+        kill_deadline = time.monotonic() + _REAP_GRACE_SECONDS
+        while time.monotonic() < kill_deadline and members:
+            time.sleep(0.005)
+            members, scan_failed = _live_process_group_members(group_id)
+            failed = failed or scan_failed
+    for _attempt in range(2):
+        if process.returncode is not None:
+            break
+        try:
             process.wait(timeout=_REAP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            failed = True
+        except OSError:
+            failed = True
+    members, scan_failed = _live_process_group_members(group_id)
+    if failed or scan_failed or members or process.returncode is None:
+        raise ProbeError(
+            "termination_failed", "probe process containment could not be confirmed"
+        )
+
+
+def _live_process_group_members(group_id: int) -> tuple[tuple[int, ...], bool]:
+    proc_root = Path("/proc")
+    try:
+        proc_metadata = proc_root.stat()
+    except FileNotFoundError:
+        return (() if not _process_group_exists(group_id) else (group_id,)), False
+    except OSError:
+        return (), True
+    if not stat.S_ISDIR(proc_metadata.st_mode):
+        return (() if not _process_group_exists(group_id) else (group_id,)), False
+    members: list[int] = []
+    try:
+        entries = tuple(proc_root.glob("[0-9]*"))
+    except OSError:
+        return (), True
+    for entry in entries:
+        try:
+            pid = int(entry.name)
+            raw = (entry / "stat").read_text(encoding="utf-8")
+            _prefix, separator, suffix = raw.rpartition(")")
+            fields = suffix.split()
+            if not separator or len(fields) < 3:
+                return (), True
+            state = fields[0]
+            process_group = int(fields[2])
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError, ValueError):
+            return (), True
+        if process_group == group_id and state != "Z":
+            members.append(pid)
+    return tuple(members), False
 
 
 def _process_group_exists(group_id: int) -> bool:
     try:
         os.killpg(group_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    except OSError as error:
+        return error.errno != errno.ESRCH
     return True
 
 
@@ -734,9 +989,21 @@ def _validate_max_bytes(max_bytes: int) -> None:
 
 
 def _validated_deadline(deadline: float) -> float:
-    if type(deadline) not in (int, float) or not math.isfinite(float(deadline)):
+    if type(deadline) not in (int, float):
         raise ProbeError("invalid_deadline", "probe deadline is invalid")
-    return float(deadline)
+    try:
+        value = float(deadline)
+        now = time.monotonic()
+        horizon = value - now
+    except (OverflowError, OSError, RuntimeError, TypeError, ValueError):
+        raise ProbeError("invalid_deadline", "probe deadline is invalid") from None
+    if (
+        not math.isfinite(value)
+        or not math.isfinite(horizon)
+        or horizon > _MAX_DEADLINE_HORIZON_SECONDS
+    ):
+        raise ProbeError("invalid_deadline", "probe deadline is invalid")
+    return value
 
 
 def _validated_request_path(request_path: str) -> str:
@@ -760,7 +1027,6 @@ def _parse_http_endpoint(endpoint: str) -> tuple[str, int]:
         raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
     try:
         parsed = urllib.parse.urlsplit(endpoint)
-        port = parsed.port or 80
     except ValueError:
         raise ProbeError("invalid_endpoint", "loopback endpoint is invalid") from None
     if (
@@ -771,9 +1037,29 @@ def _parse_http_endpoint(endpoint: str) -> tuple[str, int]:
         or parsed.path not in ("", "/")
         or parsed.query
         or parsed.fragment
-        or not 1 <= port <= 65_535
     ):
         raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
+    authority = parsed.netloc
+    if authority.startswith("["):
+        closing = authority.find("]")
+        if closing <= 1:
+            raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
+        port_suffix = authority[closing + 1 :]
+        if not port_suffix:
+            port = 80
+        elif port_suffix.startswith(":"):
+            port = _validated_explicit_port(port_suffix[1:])
+        else:
+            raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
+    else:
+        colon_count = authority.count(":")
+        if colon_count == 0:
+            port = 80
+        elif colon_count == 1:
+            _host_authority, raw_port = authority.rsplit(":", 1)
+            port = _validated_explicit_port(raw_port)
+        else:
+            raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
     host = parsed.hostname
     try:
         literal = ipaddress.ip_address(host)
@@ -790,32 +1076,53 @@ def _parse_http_endpoint(endpoint: str) -> tuple[str, int]:
     return host, port
 
 
+def _validated_explicit_port(raw_port: str) -> int:
+    if not raw_port or not raw_port.isascii() or not raw_port.isdigit():
+        raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
+    try:
+        port = int(raw_port, 10)
+    except (OverflowError, ValueError):
+        raise ProbeError("invalid_endpoint", "loopback endpoint is invalid") from None
+    if not 1 <= port <= 65_535:
+        raise ProbeError("invalid_endpoint", "loopback endpoint is invalid")
+    return port
+
+
 def _resolve_loopback_addresses(
     host: str, port: int, deadline: float
 ) -> tuple[tuple[int, int, int, tuple[Any, ...]], ...]:
-    results: queue.Queue[object] = queue.Queue(maxsize=1)
-
-    def resolve() -> None:
-        try:
-            answers = socket.getaddrinfo(
-                host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-            )
-            results.put(answers)
-        except Exception:  # noqa: BLE001 - isolated resolver thread boundary
-            results.put(None)
-
-    worker = threading.Thread(
-        target=resolve,
-        name="local-agent-loopback-resolver",
-        daemon=True,
-    )
-    worker.start()
     try:
-        raw_answers = results.get(timeout=_remaining(deadline))
-    except queue.Empty:
-        raise ProbeError(
-            "probe_timeout", "loopback name resolution timed out"
-        ) from None
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        python = TrustedExecutableResolver().resolve("python3")
+        resolver_result = run_bounded_process(
+            python,
+            ("-I", "-S", "-c", _RESOLVER_HELPER_CODE, host, str(port)),
+            {},
+            deadline,
+            _RESOLVER_OUTPUT_BYTES,
+        )
+        if resolver_result.timed_out:
+            raise ProbeError("probe_timeout", "loopback name resolution timed out")
+        if resolver_result.truncated or resolver_result.returncode != 0:
+            raise ProbeError(
+                "loopback_resolution_failed", "loopback name resolution failed"
+            )
+        try:
+            raw_answers = json.loads(resolver_result.stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            raise ProbeError(
+                "loopback_resolution_failed", "loopback name resolution failed"
+            ) from None
+        _remaining(deadline)
+    else:
+        family = socket.AF_INET6 if literal.version == 6 else socket.AF_INET
+        sockaddr: tuple[Any, ...]
+        if family == socket.AF_INET6:
+            sockaddr = (str(literal), port, 0, 0)
+        else:
+            sockaddr = (str(literal), port)
+        raw_answers = [[family, socket.SOCK_STREAM, socket.IPPROTO_TCP, sockaddr]]
     if not isinstance(raw_answers, list) or not raw_answers:
         raise ProbeError(
             "loopback_resolution_failed", "loopback name resolution failed"
@@ -825,7 +1132,18 @@ def _resolve_loopback_addresses(
     seen: set[tuple[int, tuple[Any, ...]]] = set()
     for answer in raw_answers:
         try:
-            family, socktype, protocol, _canonical_name, sockaddr = answer
+            family, socktype, protocol, sockaddr = answer
+            if (
+                family not in {socket.AF_INET, socket.AF_INET6}
+                or socktype != socket.SOCK_STREAM
+                or protocol not in {0, socket.IPPROTO_TCP}
+                or not isinstance(sockaddr, (list, tuple))
+                or (family == socket.AF_INET and len(sockaddr) != 2)
+                or (family == socket.AF_INET6 and len(sockaddr) != 4)
+                or type(sockaddr[1]) is not int
+                or sockaddr[1] != port
+            ):
+                raise ValueError
             address = str(sockaddr[0])
             if not ipaddress.ip_address(address).is_loopback:
                 raise ProbeError(
@@ -988,6 +1306,7 @@ class _SocketDeadlineGuard:
         self._connection = connection.dup()
         self._done = threading.Event()
         self.expired = False
+        self._shutdown_failed = False
         self._thread = threading.Thread(
             target=self._watch,
             args=(deadline,),
@@ -1000,14 +1319,24 @@ class _SocketDeadlineGuard:
         remaining = max(0.0, deadline - time.monotonic())
         if not self._done.wait(remaining):
             self.expired = True
-            with _suppress_all():
+            try:
                 self._connection.shutdown(socket.SHUT_RDWR)
+            except OSError as error:
+                if error.errno not in {errno.ENOTCONN, errno.EBADF}:
+                    self._shutdown_failed = True
 
     def close(self) -> None:
         self._done.set()
-        with _suppress_all():
+        failed = False
+        try:
             self._connection.close()
+        except OSError:
+            failed = True
         self._thread.join(timeout=0.1)
+        if self._thread.is_alive() or self._shutdown_failed or failed:
+            raise ProbeError(
+                "loopback_cleanup_failed", "loopback deadline cleanup failed"
+            )
 
 
 class _HeaderBoundedFile:
@@ -1056,21 +1385,6 @@ class _HeaderBoundedSocket:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._wrapped, name)
-
-
-class _suppress_all:
-    """Tiny local suppressor that avoids exposing caught exception values."""
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(
-        self,
-        _exception_type: type[BaseException] | None,
-        _exception: BaseException | None,
-        _traceback: object,
-    ) -> bool:
-        return True
 
 
 __all__ = [
