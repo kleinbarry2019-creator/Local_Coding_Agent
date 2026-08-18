@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import urllib.error
@@ -679,7 +679,7 @@ def run_python(script, args=None):
         "--tmpfs",
         "/etc",
         "--tmpfs",
-        "/tmp",
+        "/tmp",  # nosec B108
         "--tmpfs",
         "/var",
         "--chdir",
@@ -690,7 +690,7 @@ def run_python(script, args=None):
     ]
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603
             command,
             cwd=ROOT,
             stdin=subprocess.DEVNULL,
@@ -911,7 +911,7 @@ def ask_model(messages):
         raise ValueError(f"Blocked URL scheme: {parsed.scheme}")
 
     try:
-        with urllib.request.urlopen(
+        with urllib.request.urlopen(   # nosec B310
             request,
             timeout=60,
         ) as response:
