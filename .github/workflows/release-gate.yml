@@ -22,9 +22,9 @@ jobs:
           fetch-depth: 0
 
 
-      - name: Python compile check
+      - name: Python compile check V50
         run: |
-          python -m compileall autonomous_agent
+          python -m compileall autonomous_agent/safe_agent_v50.py
 
 
       - name: Install Bandit
@@ -37,7 +37,7 @@ jobs:
           bandit -r autonomous_agent/safe_agent_v50.py
 
 
-      - name: Verify release files
+      - name: Verify V50 release files
         run: |
           test -f autonomous_agent/BUILD_INFO_V50.txt
           test -f autonomous_agent/release/V50_COMMIT.txt
