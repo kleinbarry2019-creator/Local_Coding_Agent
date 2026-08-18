@@ -2,51 +2,46 @@ from datetime import datetime
 import importlib
 
 
-class AgentValidator:
+class Validator:
 
     def __init__(self):
-        self.results = []
-
-
-    def check_module(self, module_name):
-
-        try:
-            importlib.import_module(module_name)
-
-            self.results.append({
-                "module": module_name,
-                "healthy": True
-            })
-
-        except Exception as error:
-
-            self.results.append({
-                "module": module_name,
-                "healthy": False,
-                "error": str(error)
-            })
-
-
-    def validate(self):
-
-        modules = [
+        self.modules = [
             "autonomous_agent.orchestrator",
             "autonomous_agent.planner",
             "autonomous_agent.execution_engine",
             "autonomous_agent.memory_manager",
             "autonomous_agent.self_monitor",
             "autonomous_agent.self_healer",
+            "autonomous_agent.state_manager",
         ]
 
-        for module in modules:
-            self.check_module(module)
+
+    def check(self):
+
+        checks = []
+
+        for module in self.modules:
+            try:
+                importlib.import_module(module)
+
+                checks.append({
+                    "module": module,
+                    "healthy": True
+                })
+
+            except Exception as e:
+
+                checks.append({
+                    "module": module,
+                    "healthy": False,
+                    "error": str(e)
+                })
 
 
         return {
             "time": datetime.now().isoformat(),
             "healthy": all(
-                item["healthy"]
-                for item in self.results
+                item["healthy"] for item in checks
             ),
-            "checks": self.results
+            "checks": checks
         }

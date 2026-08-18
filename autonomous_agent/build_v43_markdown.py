@@ -6,7 +6,7 @@ print("=== SAFE AGENT V43 MARKDOWN PROTOCOL ===")
 
 target = "safe_agent_v43.py"
 
-V43_CODE = r'''#!/usr/bin/env python3
+V43_CODE = r"""#!/usr/bin/env python3
 import os, sys, json, hashlib, datetime, subprocess, re
 import urllib.request, urllib.error
 from pathlib import Path
@@ -71,7 +71,7 @@ def ask_llm(messages):
 def parse_response(text):
     action_match = re.search(r'ACTION:\s*(run_command|done|error)', text)
     if not action_match:
-        return None, "FORMAT-FEHLER: 'ACTION: run_command' oder 'ACTION: done' nicht gefunden. Halte dich an das Format!"
+        return None, "FORMAT-FEHLER: 'ACTION: run_command' oder 'ACTION: done' nicht gefunden. Halte dich an das Format!'''
     
     action = action_match.group(1)
     
@@ -92,7 +92,7 @@ def parse_response(text):
 def run_agent_loop(task_description, max_steps=15):
     state = load_state()
     
-    system_prompt = """Du bist ein autonomer KI-Entwickler auf Linux.
+    system_prompt = '''Du bist ein autonomer KI-Entwickler auf Linux.
 Vergiss JSON! Du antwortest IMMER exakt in diesem strikten Text-Format:
 
 MÖGLICHKEIT 1: Shell-Befehl ausführen (Code per heredoc schreiben & testen)
@@ -102,3 +102,5 @@ COMMAND:
 cat << 'EOF' > script.py
 import os
 print("Hallo")
+
+"""

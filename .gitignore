@@ -18,3 +18,4 @@ autonomous_agent/logs/*.jsonl
 agent_memory.json
 test_agent_output.txt
 __pycache__/
+agent_state.json
