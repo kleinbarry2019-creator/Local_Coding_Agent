@@ -11,7 +11,8 @@ class AgentOrchestrator:
         self.planner = planner
         self.loop = loop
         self.engine = engine
-        self.state = state or {}
+        self.state_manager = state
+        self.state = getattr(state, "state", state or {})
         self.memory = memory
 
 
@@ -19,6 +20,9 @@ class AgentOrchestrator:
 
         self.state["goal"] = goal
         self.state["status"] = "running"
+
+        if self.state_manager:
+            self.state_manager.save()
 
         if self.planner:
             plan = self.planner.create_plan(goal)
@@ -29,6 +33,9 @@ class AgentOrchestrator:
                     result = self.engine.execute(step)
                     self.state["last_result"] = result
 
+                    if self.state_manager:
+                        self.state_manager.save()
+
         if self.memory:
             self.memory.store(
                 "last_goal",
@@ -36,6 +43,9 @@ class AgentOrchestrator:
             )
 
         self.state["status"] = "completed"
+
+        if self.state_manager:
+            self.state_manager.save()
 
         return self.state
 
