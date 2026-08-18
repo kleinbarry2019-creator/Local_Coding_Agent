@@ -167,26 +167,42 @@ def _validate_state_path(state_root: Path) -> None:
 
 
 def _create_state_path(state_root: Path) -> None:
-    current = Path(state_root.anchor)
-    for component in state_root.parts[1:]:
-        current /= component
-        try:
-            metadata = current.lstat()
-        except FileNotFoundError:
-            try:
-                current.mkdir(mode=0o700)
-            except FileExistsError:
-                pass
-            except OSError as error:
-                raise ConfigError("state_creation_failed", "state_root", str(error)) from error
-            _validate_state_path(current)
-        except OSError as error:
-            raise ConfigError("invalid_path", "state_root", str(error)) from error
-        else:
-            if stat.S_ISLNK(metadata.st_mode):
-                raise ConfigError("unsafe_path", "state_root", "must not contain symlinks")
-            if not stat.S_ISDIR(metadata.st_mode):
-                raise ConfigError(
-                    "unsafe_path", "state_root", "must not contain non-directory components"
-                )
+    current_fd = _open_state_directory(state_root.anchor, None)
+    try:
+        for component in state_root.parts[1:]:
+            next_fd = _open_or_create_state_directory(component, current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+    finally:
+        os.close(current_fd)
     _validate_state_path(state_root)
+
+
+def _open_or_create_state_directory(component: str, parent_fd: int) -> int:
+    try:
+        return _open_state_directory(component, parent_fd)
+    except FileNotFoundError:
+        try:
+            os.mkdir(component, mode=0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise ConfigError("state_creation_failed", "state_root", str(error)) from error
+        try:
+            return _open_state_directory(component, parent_fd)
+        except OSError as error:
+            raise ConfigError("unsafe_path", "state_root", str(error)) from error
+    except OSError as error:
+        raise ConfigError("unsafe_path", "state_root", str(error)) from error
+
+
+def _open_state_directory(component: str, parent_fd: int | None) -> int:
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    except AttributeError as error:
+        raise ConfigError(
+            "unsupported_platform",
+            "state_root",
+            "requires no-follow directory descriptors",
+        ) from error
+    return os.open(component, flags, dir_fd=parent_fd)

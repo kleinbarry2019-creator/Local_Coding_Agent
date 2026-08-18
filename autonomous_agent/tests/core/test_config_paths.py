@@ -168,6 +168,46 @@ def test_create_state_creates_owner_only_state_directory(tmp_path: Path) -> None
     assert state_mode == 0o700
 
 
+def test_create_state_does_not_follow_an_ancestor_swapped_to_a_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    displaced = tmp_path / "displaced"
+    original_mkdir = os.mkdir
+    swapped = False
+
+    def swap_ancestor_then_mkdir(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal swapped
+        if not swapped and Path(path).name == "new":
+            trusted.rename(displaced)
+            trusted.symlink_to(destination, target_is_directory=True)
+            swapped = True
+        original_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", swap_ancestor_then_mkdir)
+
+    with pytest.raises(ConfigError, match="state_root"):
+        resolve_paths(
+            cwd=tmp_path,
+            home=tmp_path,
+            environ={},
+            cli_state_override=trusted / "new" / "state",
+            create_state=True,
+        )
+
+    assert swapped
+    assert not (destination / "new").exists()
+
+
 def test_existing_global_config_must_be_owned_by_current_user(tmp_path: Path) -> None:
     config_file = tmp_path / ".config/local-coding-agent/config.toml"
     config_file.parent.mkdir(parents=True)
