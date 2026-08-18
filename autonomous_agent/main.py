@@ -54,6 +54,15 @@ def main():
     # Persistent State
     state = StateManager()
 
+    schema_recovery = state.validate_or_recover()
+
+    print("State Schema Check:")
+    print(schema_recovery)
+
+    if not schema_recovery["accepted"]:
+        print("State-Schema ungültig und kein sicherer Snapshot verfügbar")
+        return
+
     policy = RecoveryPolicyEngine(state)
 
     recovery_decision = policy.execute()
@@ -219,7 +228,10 @@ def main():
 
         if state.recovered:
             state.state["recovery_event"] = True
-            state.state["recovery_reason"] = "snapshot_integrity_failure"
+            state.state.setdefault(
+                "recovery_reason",
+                "snapshot_integrity_failure"
+            )
             state.save(snapshot=False)
 
     except Exception as e:
