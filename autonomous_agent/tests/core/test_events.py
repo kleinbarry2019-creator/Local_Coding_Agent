@@ -10,6 +10,8 @@ import os
 import queue
 import sqlite3
 import stat
+import subprocess
+import sys
 import threading
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
@@ -1069,6 +1071,159 @@ def test_free_text_redaction_preserves_the_persisted_leaf_bound(
     )
 
 
+@pytest.mark.parametrize("secret", ["REDACTED", "[REDACTED]", "E"])
+def test_marker_overlap_known_secret_fails_closed_without_leakage(
+    tmp_path: Path, secret: str
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    before_anchor = store.anchor_path.read_bytes()
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store, sensitive_values=(secret,)).append(
+            _event(
+                event_type="config.snapshot",
+                payload={"paths": {"state_root": f"/safe/{secret}"}},
+            )
+        )
+
+    assert raised.value.code == "redaction_failed"
+    assert secret not in raised.value.message
+    assert secret not in str(raised.value)
+    assert raised.value.__context__ is None
+    assert _rows(store) == before_rows
+    assert store.anchor_path.read_bytes() == before_anchor
+    assert AuditLog(store).verify() == AuditVerification(
+        True, "ok", 1, first.current_hash
+    )
+
+
+@pytest.mark.parametrize("secret", ["REDACTED", "[REDACTED]", "E"])
+def test_marker_overlap_collected_secret_fails_closed_without_persistence(
+    tmp_path: Path, secret: str
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    before_rows = _rows(store)
+    before_anchor = store.anchor_path.read_bytes()
+
+    with pytest.raises(EventError) as raised:
+        AuditLog(store).append(
+            _event(
+                event_type="config.snapshot",
+                payload={
+                    "paths": {"state_root": f"/safe/{secret}"},
+                    "dropped_metadata": {"passwd": secret},
+                },
+            )
+        )
+
+    assert raised.value.code == "redaction_failed"
+    assert secret not in raised.value.message
+    assert secret not in str(raised.value)
+    assert raised.value.__context__ is None
+    assert _rows(store) == before_rows
+    assert store.anchor_path.read_bytes() == before_anchor
+    assert AuditLog(store).verify() == AuditVerification(
+        True, "ok", 1, first.current_hash
+    )
+
+
+@pytest.mark.parametrize("secret", ["REDACTED", "[REDACTED]", "E"])
+def test_verification_rejects_rehashed_marker_containing_known_secret(
+    tmp_path: Path, secret: str
+) -> None:
+    store = _store(tmp_path)
+    first = _start(AuditLog(store), tmp_path)
+    _insert_committed_second_event(
+        store,
+        first,
+        event_id=f"marker-overlap-{len(secret)}",
+        event_type="config.snapshot",
+        payload={"paths": {"state_root": "/safe/[REDACTED]"}},
+    )
+
+    verification = AuditLog(store, sensitive_values=(secret,)).verify()
+
+    assert not verification.ok
+    assert verification.code == "hash_mismatch"
+
+
+def test_sensitive_value_order_is_total_across_hash_seeds_and_input_orders() -> None:
+    outputs: set[str] = set()
+    for hash_seed in ("1", "2"):
+        for values in ('("ab", "bc")', '("bc", "ab")'):
+            script = (
+                "from autonomous_agent.core.events import "
+                "_validated_sensitive_values; "
+                f"print(','.join(_validated_sensitive_values({values})))"
+            )
+            environment = {**os.environ, "PYTHONHASHSEED": hash_seed}
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            outputs.add(completed.stdout.strip())
+
+    assert outputs == {"ab,bc"}
+
+
+def test_equal_length_overlapping_secrets_have_one_canonical_event_hash(
+    tmp_path: Path,
+) -> None:
+    records: list[EventRecord] = []
+    for name, sensitive_values in (
+        ("first", ("ab", "bc")),
+        ("second", ("bc", "ab")),
+    ):
+        root = tmp_path / name
+        root.mkdir()
+        store = _store(root)
+        log = AuditLog(store, sensitive_values=sensitive_values)
+        _start(log, root)
+        record = log.append(
+            _event(
+                event_type="config.snapshot",
+                payload={"paths": {"state_root": "/safe/abc"}},
+            )
+        )
+        assert log.verify().ok
+        records.append(record)
+
+    assert (
+        records[0].payload
+        == records[1].payload
+        == {"paths": {"state_root": "/safe/[REDACTED]c"}}
+    )
+    assert records[0].current_hash == records[1].current_hash
+
+
+def test_ordinary_free_text_redaction_persists_marker_and_still_verifies(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    secret = "ordinary-sensitive-value"
+    log = AuditLog(store, sensitive_values=(secret,))
+    _start(log, tmp_path)
+
+    record = log.append(
+        _event(
+            event_type="config.snapshot",
+            payload={"paths": {"state_root": f"/safe/{secret}"}},
+        )
+    )
+
+    assert record.payload == {"paths": {"state_root": "/safe/[REDACTED]"}}
+    assert secret.encode() not in store.database_path.read_bytes()
+    assert log.verify() == AuditVerification(
+        True, "ok", record.sequence, record.current_hash
+    )
+
+
 def test_safe_structural_leaf_records_remain_verifiable(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _start(AuditLog(store), tmp_path)
@@ -1252,11 +1407,13 @@ def test_append_revalidates_the_entire_chain_before_sqlite_commit(
     verification_calls = 0
 
     def count_full_verification(
-        rows: Any, committed: AuditAnchor
+        rows: Any,
+        committed: AuditAnchor,
+        sensitive_values: tuple[str, ...],
     ) -> tuple[AuditVerification, int]:
         nonlocal verification_calls
         verification_calls += 1
-        return original(rows, committed)
+        return original(rows, committed, sensitive_values)
 
     monkeypatch.setattr(
         events_module, "_verify_committed_prefix", count_full_verification

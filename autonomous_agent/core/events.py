@@ -14,7 +14,7 @@ import sqlite3
 import stat
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -260,14 +260,10 @@ class AuditLog:
             raise EventError(
                 "redaction_failed", "collected configuration secrets are invalid"
             )
-        self._sensitive_values = tuple(
-            sorted(
-                {
-                    *self._sensitive_values,
-                    *_validated_sensitive_values(discovered_values),
-                },
-                key=len,
-                reverse=True,
+        self._sensitive_values = _canonical_sensitive_values(
+            (
+                *self._sensitive_values,
+                *_validated_sensitive_values(discovered_values),
             )
         )
         try:
@@ -433,7 +429,10 @@ class AuditLog:
                             "the pending audit anchor changed inside its mutation"
                         )
                     transaction_check = _verify_exact_pending_transaction(
-                        _database_rows(connection), anchor.committed, pending
+                        _database_rows(connection),
+                        anchor.committed,
+                        pending,
+                        self._sensitive_values,
                     )
                     if not transaction_check.ok:
                         raise sqlite3.IntegrityError(
@@ -559,7 +558,9 @@ class AuditLog:
 
     def _verify_state_locked(self, anchor: _AnchorState) -> AuditVerification:
         rows = self._database_rows_locked()
-        prefix, next_index = _verify_committed_prefix(rows, anchor.committed)
+        prefix, next_index = _verify_committed_prefix(
+            rows, anchor.committed, self._sensitive_values
+        )
         if not prefix.ok:
             return prefix
         remaining = rows[next_index:]
@@ -577,7 +578,12 @@ class AuditLog:
                 anchor.committed.sequence,
                 anchor.committed.hash,
             )
-        pending_check = _verify_pending_row(remaining, anchor.committed, anchor.pending)
+        pending_check = _verify_pending_row(
+            remaining,
+            anchor.committed,
+            anchor.pending,
+            self._sensitive_values,
+        )
         if not pending_check.ok:
             return pending_check
         return AuditVerification(
@@ -591,11 +597,18 @@ class AuditLog:
         if anchor.pending is None:
             return self._verify_state_locked(anchor)
         rows = self._database_rows_locked()
-        prefix, next_index = _verify_committed_prefix(rows, anchor.committed)
+        prefix, next_index = _verify_committed_prefix(
+            rows, anchor.committed, self._sensitive_values
+        )
         if not prefix.ok:
             return prefix
         remaining = rows[next_index:]
-        pending_check = _verify_pending_row(remaining, anchor.committed, anchor.pending)
+        pending_check = _verify_pending_row(
+            remaining,
+            anchor.committed,
+            anchor.pending,
+            self._sensitive_values,
+        )
         if not pending_check.ok:
             return pending_check
         if not remaining:
@@ -740,9 +753,12 @@ def _normalize_database_rows(rows: Sequence[Sequence[object]]) -> list[_Database
 
 
 def _verify_exact_pending_transaction(
-    rows: Sequence[_DatabaseRow], committed: AuditAnchor, pending: AuditAnchor
+    rows: Sequence[_DatabaseRow],
+    committed: AuditAnchor,
+    pending: AuditAnchor,
+    sensitive_values: Sequence[str],
 ) -> AuditVerification:
-    prefix, next_index = _verify_committed_prefix(rows, committed)
+    prefix, next_index = _verify_committed_prefix(rows, committed, sensitive_values)
     if not prefix.ok:
         return prefix
     remaining = rows[next_index:]
@@ -750,7 +766,7 @@ def _verify_exact_pending_transaction(
         return AuditVerification(
             False, "tail_mismatch", committed.sequence, committed.hash
         )
-    checked = _verify_pending_row(remaining, committed, pending)
+    checked = _verify_pending_row(remaining, committed, pending, sensitive_values)
     if not checked.ok or checked.head_hash != pending.hash:
         return checked
     return checked
@@ -778,11 +794,13 @@ def _validated_sensitive_values(values: Sequence[object]) -> tuple[str, ...]:
             "redaction_failed", "sensitive values must be a sequence of strings"
         )
     string_values = [value for value in values if isinstance(value, str)]
+    return _canonical_sensitive_values(string_values)
+
+
+def _canonical_sensitive_values(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            {value for value in string_values if value and value != _REDACTED},
-            key=len,
-            reverse=True,
+            {value for value in values if value}, key=lambda value: (-len(value), value)
         )
     )
 
@@ -824,12 +842,8 @@ def _sanitize_event_payload(
     known_sensitive_values: Sequence[str],
 ) -> dict[str, _JsonValue]:
     collected = _collect_sensitive_values(payload)
-    sensitive_values = tuple(
-        sorted(
-            {*known_sensitive_values, *collected},
-            key=len,
-            reverse=True,
-        )
+    sensitive_values = _canonical_sensitive_values(
+        (*known_sensitive_values, *collected)
     )
     if event_type == "config.snapshot":
         return _sanitize_config_document(payload, sensitive_values)
@@ -937,12 +951,8 @@ def _sanitize_config_document(
         raise EventError(
             "redaction_failed", "the configuration snapshot must be a mapping"
         )
-    sensitive_values = tuple(
-        sorted(
-            {*known_sensitive_values, *_collect_sensitive_values(value)},
-            key=len,
-            reverse=True,
-        )
+    sensitive_values = _canonical_sensitive_values(
+        (*known_sensitive_values, *_collect_sensitive_values(value))
     )
     selected = _select_known_fields(value, _CONFIG_TOP_LEVEL_FIELDS)
     result: dict[str, _JsonValue] = {}
@@ -1183,7 +1193,7 @@ def _collect_sensitive_values(value: object, *, depth: int = 0) -> set[str]:
             raise EventError("redaction_failed", "a payload sequence is too large")
         for item in value:
             collected.update(_collect_sensitive_values(item, depth=depth + 1))
-    return {item for item in collected if item and item != _REDACTED}
+    return {item for item in collected if item}
 
 
 def _strings_below(value: object, *, depth: int) -> set[str]:
@@ -1215,11 +1225,15 @@ def _sensitive_key(name: str) -> bool:
 
 def _redact_string(value: str, sensitive_values: Sequence[str]) -> str:
     result = value
-    for sensitive_value in sensitive_values:
-        if sensitive_value:
-            result = result.replace(sensitive_value, _REDACTED)
+    canonical_values = _canonical_sensitive_values(sensitive_values)
+    for sensitive_value in canonical_values:
+        result = result.replace(sensitive_value, _REDACTED)
     for safeguard in _PATTERN_SAFEGUARDS:
         result = safeguard.sub(_REDACTED, result)
+    if any(sensitive_value in result for sensitive_value in canonical_values):
+        raise EventError(
+            "redaction_failed", "redacted text still contains sensitive data"
+        )
     return result
 
 
@@ -1267,7 +1281,9 @@ def _event_hash(
 
 
 def _verify_committed_prefix(
-    rows: Sequence[_DatabaseRow], committed: AuditAnchor
+    rows: Sequence[_DatabaseRow],
+    committed: AuditAnchor,
+    sensitive_values: Sequence[str],
 ) -> tuple[AuditVerification, int]:
     previous_hash = _GENESIS_HASH
     next_index = 0
@@ -1282,7 +1298,9 @@ def _verify_committed_prefix(
                 ),
                 next_index,
             )
-        checked = _verify_row(rows[next_index], expected_sequence, previous_hash)
+        checked = _verify_row(
+            rows[next_index], expected_sequence, previous_hash, sensitive_values
+        )
         if not checked.ok:
             return checked, next_index
         previous_hash = checked.head_hash
@@ -1307,6 +1325,7 @@ def _verify_pending_row(
     remaining: Sequence[_DatabaseRow],
     committed: AuditAnchor,
     pending: AuditAnchor,
+    sensitive_values: Sequence[str],
 ) -> AuditVerification:
     if len(remaining) > 1:
         return AuditVerification(
@@ -1314,7 +1333,9 @@ def _verify_pending_row(
         )
     if not remaining:
         return AuditVerification(True, "ok", committed.sequence, committed.hash)
-    checked = _verify_row(remaining[0], pending.sequence, committed.hash)
+    checked = _verify_row(
+        remaining[0], pending.sequence, committed.hash, sensitive_values
+    )
     if not checked.ok:
         return checked
     if checked.head_hash != pending.hash:
@@ -1325,7 +1346,10 @@ def _verify_pending_row(
 
 
 def _verify_row(
-    row: _DatabaseRow, expected_sequence: int, previous_hash: str
+    row: _DatabaseRow,
+    expected_sequence: int,
+    previous_hash: str,
+    sensitive_values: Sequence[str],
 ) -> AuditVerification:
     (
         sequence,
@@ -1349,7 +1373,9 @@ def _verify_row(
         parsed_payload = json.loads(payload_json)
         if not isinstance(parsed_payload, dict):
             raise TypeError
-        sanitized_payload = _sanitize_event_payload(event_type, parsed_payload, ())
+        sanitized_payload = _sanitize_event_payload(
+            event_type, parsed_payload, sensitive_values
+        )
         canonical_payload = _canonical_json(sanitized_payload)
     except (json.JSONDecodeError, TypeError, EventError):
         return AuditVerification(
