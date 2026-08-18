@@ -1,24 +1,36 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
 class PlanStep:
     action: str
-    tool: str | None = None
+    target: Optional[str] = None
     reason: str = ""
 
 
 class Planner:
     """
-    Erstellt eine einfache Ausführungsplanung.
-    Noch deterministisch, später durch LLM ersetzbar.
+    Erstellt Ausführungspläne für den Agenten.
+    Später durch LLM-Planung ersetzbar.
     """
 
-    def create_plan(self, goal: str) -> List[PlanStep]:
+    def create_plan(self, goal):
 
         if not goal:
             return []
+
+        if isinstance(goal, dict):
+
+            if goal.get("goal") == "create test file":
+
+                return [
+                    PlanStep(
+                        action="create_file",
+                        target=goal.get("target"),
+                        reason="Erzeuge Testdatei"
+                    )
+                ]
 
         return [
             PlanStep(
@@ -32,5 +44,5 @@ class Planner:
             PlanStep(
                 action="verify",
                 reason="Prüfe Ergebnis"
-            ),
+            )
         ]
