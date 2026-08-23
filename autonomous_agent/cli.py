@@ -138,11 +138,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI without terminating the caller process."""
-    parser = build_parser()
     try:
+        parser = build_parser()
         arguments = None if argv is None else list(argv)
-        if arguments is not None and any(type(item) is not str for item in arguments):
-            raise _CliArgumentError
+    except Exception:  # noqa: BLE001 - redacted parser preparation boundary
+        _write_error(_INTERNAL_ERROR)
+        return 3
+
+    if arguments is not None and any(type(item) is not str for item in arguments):
+        _write_error(_INVALID_ARGUMENTS)
+        return 2
+
+    try:
         namespace = parser.parse_args(arguments)
     except _CliArgumentError:
         _write_error(_INVALID_ARGUMENTS)
@@ -151,13 +158,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         # argparse uses SystemExit only for its successful help action because
         # parser failures are converted to _CliArgumentError above.
         return 0 if error.code == 0 else 2
+    except Exception:  # noqa: BLE001 - redacted parser execution boundary
+        _write_error(_INTERNAL_ERROR)
+        return 3
 
     try:
         if namespace.command != "doctor":
             raise _CliArgumentError
         config = load_config(
             cwd=Path.cwd(),
-            home=Path.home(),
+            # Bazzite exposes the account home through the lexical /home
+            # compatibility symlink. Pass the canonical location so the
+            # config/state resolver can retain its no-symlink invariant.
+            home=Path.home().resolve(strict=False),
             environ=dict(os.environ),
             cli=CliOverrides(
                 project_root=namespace.project,
@@ -167,8 +180,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         _validate_effective_config(config)
         registry = build_doctor_registry(config)
-        report = Doctor(config, registry, DEFAULT_PROBE_NAMES).run()
-        _validate_report(report)
+        raw_report = Doctor(config, registry, DEFAULT_PROBE_NAMES).run()
+        report = _canonical_report(raw_report)
         rendered = _render_json(report) if namespace.json else _render_human(report)
         exit_code = 0 if report.status is DoctorStatus.HEALTHY else 1
     except _CliArgumentError:
@@ -233,29 +246,20 @@ def _validate_effective_config(config: object) -> None:
         raise _ConfigurationBoundaryError
 
 
-def _validate_report(report: object) -> None:
+def _canonical_report(report: object) -> DoctorReport:
     if type(report) is not DoctorReport:
         raise TypeError("invalid doctor report")
-    # Revalidate the immutable value at the CLI trust boundary so hostile
-    # monkeypatches/object mutation cannot exploit bool/int equality.
-    DoctorReport(
-        schema_version=report.schema_version,
-        status=report.status,
-        generated_at=report.generated_at,
-        mode=report.mode,
-        free_only=report.free_only,
-        project_root=report.project_root,
-        probes=report.probes,
-    )
+    canonical = report.canonical_copy()
     if (
-        report.mode
+        canonical.mode
         not in {
             ExecutionMode.MONITORED.value,
             ExecutionMode.AUTONOMOUS.value,
         }
-        or report.free_only is not True
+        or canonical.free_only is not True
     ):
         raise TypeError("invalid doctor report policy")
+    return canonical
 
 
 def _render_json(report: DoctorReport) -> str:

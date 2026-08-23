@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
@@ -564,6 +565,17 @@ def test_every_default_handler_produces_a_bounded_schema_valid_result(
     )
     monkeypatch.setattr("autonomous_agent.core.doctor.get_loopback_json", fake_loopback)
 
+    def forbidden_mkdtemp(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise AssertionError("Doctor called mkdtemp")
+
+    def forbidden_mkdir(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("Doctor called mkdir")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", forbidden_mkdtemp)
+    monkeypatch.setattr(Path, "mkdir", forbidden_mkdir)
+
     report = Doctor(config, build_doctor_registry(config), DEFAULT_PROBE_NAMES).run()
 
     assert report.status is DoctorStatus.HEALTHY
@@ -621,3 +633,31 @@ def test_public_models_reject_unbounded_or_wrong_typed_values() -> None:
             duration_ms=0,
             truncated=False,
         )
+
+
+def test_report_canonical_copy_and_serialization_revalidate_nested_results() -> None:
+    probe = ProbeResult(
+        name="doctor.python",
+        status=ProbeStatus.PASS,
+        required=True,
+        code="doctor.python.ok",
+        summary="Python is ready.",
+        data={"version": "3.14.6", "supported": True},
+        duration_ms=1,
+        truncated=False,
+    )
+    report = DoctorReport(
+        schema_version=1,
+        status=DoctorStatus.HEALTHY,
+        generated_at="2026-08-24T00:00:00Z",
+        mode="monitored",
+        free_only=True,
+        project_root="/safe",
+        probes=(probe,),
+    )
+    object.__setattr__(probe, "data", {"version": "LEAKED_SECRET", "supported": True})
+
+    with pytest.raises(ValueError, match="string"):
+        report.canonical_copy()
+    with pytest.raises(ValueError, match="string"):
+        report.to_dict()

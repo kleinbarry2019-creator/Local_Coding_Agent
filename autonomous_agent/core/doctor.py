@@ -27,8 +27,10 @@ from autonomous_agent.core.probes import (
     ProbeError,
     ProcessResult,
     TrustedExecutableResolver,
-    get_loopback_json,
-    run_bounded_process,
+    run_zero_write_process,
+)
+from autonomous_agent.core.probes import (
+    get_loopback_json_zero_write as get_loopback_json,
 )
 from autonomous_agent.core.tools import (
     ExecutionContext,
@@ -186,15 +188,32 @@ class DoctorReport:
             raise ValueError("doctor probes contain duplicates")
         object.__setattr__(self, "probes", copied)
 
+    def canonical_copy(self) -> DoctorReport:
+        """Return a deeply revalidated copy safe for boundary rendering."""
+        raw_probes = self.probes
+        if type(raw_probes) is not tuple:
+            raise TypeError("doctor probes are invalid")
+        probes = tuple(_canonical_probe_result(item) for item in raw_probes)
+        return DoctorReport(
+            schema_version=self.schema_version,
+            status=self.status,
+            generated_at=self.generated_at,
+            mode=self.mode,
+            free_only=self.free_only,
+            project_root=self.project_root,
+            probes=probes,
+        )
+
     def to_dict(self) -> dict[str, object]:
-        """Return a fresh, deterministic schema-version-1 JSON document."""
+        """Return a fresh, deeply revalidated schema-version-1 document."""
+        report = self.canonical_copy()
         return {
-            "schema_version": self.schema_version,
-            "status": self.status.value,
-            "generated_at": self.generated_at,
-            "mode": self.mode,
-            "free_only": self.free_only,
-            "project_root": self.project_root,
+            "schema_version": report.schema_version,
+            "status": report.status.value,
+            "generated_at": report.generated_at,
+            "mode": report.mode,
+            "free_only": report.free_only,
+            "project_root": report.project_root,
             "probes": [
                 {
                     "name": item.name,
@@ -206,9 +225,24 @@ class DoctorReport:
                     "duration_ms": item.duration_ms,
                     "truncated": item.truncated,
                 }
-                for item in self.probes
+                for item in report.probes
             ],
         }
+
+
+def _canonical_probe_result(item: object) -> ProbeResult:
+    if type(item) is not ProbeResult:
+        raise TypeError("doctor probe item is invalid")
+    return ProbeResult(
+        name=item.name,
+        status=item.status,
+        required=item.required,
+        code=item.code,
+        summary=item.summary,
+        data=item.data,
+        duration_ms=item.duration_ms,
+        truncated=item.truncated,
+    )
 
 
 _REQUIRED_PROBES: Final = frozenset(
@@ -1122,7 +1156,7 @@ def _command(
     context: ExecutionContext,
 ) -> ProcessResult:
     executable = TrustedExecutableResolver().resolve(executable_name)
-    result = run_bounded_process(
+    result = run_zero_write_process(
         executable,
         arguments,
         {},
@@ -1298,6 +1332,7 @@ def _validate_data_string(value: str) -> None:
     if (
         len(value.encode("utf-8")) > _MAX_DATA_STRING_BYTES
         or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+        or _SENSITIVE_TEXT_PATTERN.search(value) is not None
         or _SECRET_VALUE_PATTERN.search(value) is not None
     ):
         raise ValueError("probe data string is invalid")
@@ -1319,6 +1354,7 @@ def _validate_report_path(value: object) -> None:
         or not value
         or len(value.encode("utf-8")) > 4_096
         or "\x00" in value
+        or _SENSITIVE_TEXT_PATTERN.search(value) is not None
     ):
         raise ValueError("doctor project root is invalid")
     path = Path(value)

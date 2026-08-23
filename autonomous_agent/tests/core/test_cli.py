@@ -5,6 +5,7 @@ import os
 import runpy
 import subprocess
 import sys
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,31 @@ def test_doctor_passes_trusted_cli_precedence(
     assert capsys.readouterr().err == ""
 
 
+def test_cli_canonicalizes_bazzite_home_symlink_before_config_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    actual_home = tmp_path / "var-home" / "user"
+    actual_home.mkdir(parents=True)
+    home_alias = tmp_path / "home-user"
+    home_alias.symlink_to(actual_home, target_is_directory=True)
+    config = _config(tmp_path)
+    seen: dict[str, object] = {}
+
+    def fake_load_config(**kwargs: object) -> AgentConfig:
+        seen.update(kwargs)
+        return config
+
+    monkeypatch.setenv("HOME", str(home_alias))
+    monkeypatch.setattr(cli, "load_config", fake_load_config)
+    _fake_doctor(monkeypatch, _report())
+
+    assert cli.main(["doctor", "--json"]) == 0
+    assert seen["home"] == actual_home
+    assert capsys.readouterr().err == ""
+
+
 def test_configured_unrestricted_root_is_rejected_before_doctor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -361,6 +387,165 @@ def test_serialization_failure_is_redacted_and_emits_no_partial_json(
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == "agent: internal diagnostic failure.\n"
+
+
+@pytest.mark.parametrize(
+    ("field", "hostile"),
+    [
+        ("name", "doctor.python.LEAKED_SECRET"),
+        ("status", True),
+        ("required", 1),
+        ("code", "doctor.python.ok.LEAKED_SECRET"),
+        ("summary", "LEAKED_SECRET"),
+        ("data", {"version": "LEAKED_SECRET"}),
+        ("data", {"unknown": "LEAKED_SECRET"}),
+        ("data", {"version": ["LEAKED_SECRET"]}),
+        ("duration_ms", True),
+        ("truncated", 1),
+    ],
+)
+@pytest.mark.parametrize("json_output", [False, True])
+def test_nested_probe_mutation_fails_closed_before_any_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    hostile: object,
+    json_output: bool,
+) -> None:
+    report = _report()
+    object.__setattr__(report.probes[0], field, hostile)
+    monkeypatch.setattr(cli, "load_config", lambda **kwargs: _config(tmp_path))
+    _fake_doctor(monkeypatch, report)
+
+    arguments = ["doctor", "--json"] if json_output else ["doctor"]
+    assert cli.main(arguments) == 3
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+
+@pytest.mark.parametrize(
+    ("field", "hostile"),
+    [
+        ("schema_version", True),
+        ("status", True),
+        ("generated_at", "LEAKED_SECRET"),
+        ("mode", "unrestricted-root"),
+        ("free_only", 1),
+        ("project_root", "/LEAKED_SECRET"),
+        ("probes", [_probe("doctor.python")]),
+    ],
+)
+def test_mutated_report_fields_fail_closed_before_rendering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    hostile: object,
+) -> None:
+    report = _report()
+    object.__setattr__(report, field, hostile)
+    monkeypatch.setattr(cli, "load_config", lambda **kwargs: _config(tmp_path))
+    _fake_doctor(monkeypatch, report)
+
+    assert cli.main(["doctor", "--json"]) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+
+class _HostileReportData(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        raise RuntimeError("LEAKED_SECRET hostile mapping")
+
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError("LEAKED_SECRET hostile mapping")
+
+    def __len__(self) -> int:
+        raise RuntimeError("LEAKED_SECRET hostile mapping")
+
+
+def test_hostile_nested_mapping_and_accessor_are_redacted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = _report()
+    object.__setattr__(report.probes[0], "data", _HostileReportData())
+    monkeypatch.setattr(cli, "load_config", lambda **kwargs: _config(tmp_path))
+    _fake_doctor(monkeypatch, report)
+
+    assert cli.main(["doctor", "--json"]) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+    report = _report()
+
+    def hostile_summary(instance: ProbeResult) -> str:
+        del instance
+        raise RuntimeError("LEAKED_SECRET hostile accessor")
+
+    monkeypatch.setattr(
+        ProbeResult,
+        "summary",
+        property(hostile_summary),
+        raising=False,
+    )
+    _fake_doctor(monkeypatch, report)
+
+    assert cli.main(["doctor"]) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+
+class _HostileArgv(Sequence[str]):
+    def __getitem__(self, index: int) -> str:
+        raise RuntimeError("LEAKED_SECRET argv accessor")
+
+    def __len__(self) -> int:
+        return 1
+
+
+def test_parser_construction_and_argv_copy_fail_inside_redacted_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(_HostileArgv()) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+    def fail_parser() -> cli.argparse.ArgumentParser:
+        raise RuntimeError("LEAKED_SECRET parser construction")
+
+    monkeypatch.setattr(cli, "build_parser", fail_parser)
+    assert cli.main(["doctor"]) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
+
+@pytest.mark.parametrize("failure", [KeyboardInterrupt(), SystemExit(9)])
+def test_parser_base_exceptions_are_not_misclassified_as_internal(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    def fail_parser() -> cli.argparse.ArgumentParser:
+        raise failure
+
+    monkeypatch.setattr(cli, "build_parser", fail_parser)
+    with pytest.raises(type(failure)):
+        cli.main(["doctor"])
 
 
 def test_keyboard_interrupt_is_not_converted_to_internal_failure(

@@ -25,7 +25,9 @@ from autonomous_agent.core.probes import (
     TrustedExecutableResolver,
     build_probe_environment,
     get_loopback_json,
+    get_loopback_json_zero_write,
     run_bounded_process,
+    run_zero_write_process,
 )
 
 
@@ -124,6 +126,32 @@ def _filesystem_snapshot(root: Path) -> tuple[tuple[str, int, bytes | None], ...
     return tuple(entries)
 
 
+def _metadata_snapshot(
+    root: Path, *, recursive: bool = False
+) -> tuple[tuple[str, int, int, int], ...]:
+    try:
+        children = root.rglob("*") if recursive else root.iterdir()
+        paths = [root, *sorted(children)]
+    except OSError:
+        return ()
+    entries: list[tuple[str, int, int, int]] = []
+    for path in paths:
+        try:
+            metadata = path.lstat()
+        except OSError:
+            continue
+        relative = "." if path == root else str(path.relative_to(root))
+        entries.append(
+            (
+                relative,
+                stat.S_IFMT(metadata.st_mode),
+                metadata.st_size,
+                metadata.st_mtime_ns,
+            )
+        )
+    return tuple(entries)
+
+
 class _HostileFloat(float):
     def __float__(self) -> float:
         raise RuntimeError("secret deadline accessor")
@@ -154,6 +182,114 @@ def test_resolver_returns_trusted_system_alias_with_canonical_target() -> None:
     assert resolved.is_absolute()
     assert resolved.name == "python3"
     assert resolved.resolve(strict=True).is_file()
+
+
+def test_zero_write_runner_uses_existing_read_only_context_without_mkdir(
+    resolver_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = resolver_root / "prefix"
+    bin_root = prefix / "bin"
+    bin_root.mkdir(parents=True)
+    probe = bin_root / "gh"
+    _write_executable(
+        probe,
+        "#!/bin/sh\nprintf '%s\\n' \"$PWD|$HOME|$XDG_CONFIG_HOME|"
+        '$XDG_CACHE_HOME|$XDG_DATA_HOME|$XDG_STATE_HOME|$GH_CONFIG_DIR"\n',
+    )
+    executable = _resolver_for(monkeypatch, bin_root).resolve("gh")
+
+    def forbidden_mkdtemp(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise AssertionError("zero-write runner called mkdtemp")
+
+    def forbidden_mkdir(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("zero-write runner called mkdir")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", forbidden_mkdtemp)
+    monkeypatch.setattr(Path, "mkdir", forbidden_mkdir)
+
+    result = run_zero_write_process(
+        executable,
+        ("--version",),
+        {},
+        time.monotonic() + 3.0,
+        4_096,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.decode().strip() == (
+        "/|/dev/null|/dev/null|/dev/null|/dev/null|/dev/null|/proc"
+    )
+    assert result.stderr == b""
+    assert not result.timed_out
+    assert not result.truncated
+
+
+def test_real_gh_version_zero_write_preserves_project_home_xdg_and_tmp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        executable = TrustedExecutableResolver().resolve("gh")
+    except ProbeError:
+        pytest.skip("trusted GitHub CLI is unavailable")
+
+    project = Path.cwd()
+    home = Path.home()
+    roots = [project, home, Path("/tmp")]
+    for name in (
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+    ):
+        value = os.environ.get(name)
+        if value:
+            candidate = Path(value)
+            if candidate.is_absolute() and candidate.exists():
+                roots.append(candidate)
+    snapshots = {root: _metadata_snapshot(root) for root in roots}
+    state_targets = {
+        project / ".local",
+        home / ".config" / "gh",
+        home / ".cache" / "gh",
+        home / ".local" / "share" / "gh",
+        home / ".local" / "state" / "gh",
+    }
+    for root in roots[3:]:
+        state_targets.add(root / "gh")
+    state_snapshots = {
+        root: _metadata_snapshot(root, recursive=True) for root in state_targets
+    }
+
+    def forbidden_mkdtemp(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise AssertionError("real doctor command called mkdtemp")
+
+    def forbidden_mkdir(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("real doctor command called mkdir")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", forbidden_mkdtemp)
+    monkeypatch.setattr(Path, "mkdir", forbidden_mkdir)
+
+    result = run_zero_write_process(
+        executable,
+        ("--version",),
+        {},
+        time.monotonic() + 3.0,
+        8_192,
+    )
+
+    assert result.returncode == 0
+    assert b"gh version" in result.stdout
+    assert all(_metadata_snapshot(root) == before for root, before in snapshots.items())
+    assert all(
+        _metadata_snapshot(root, recursive=True) == before
+        for root, before in state_snapshots.items()
+    )
+    assert not (project / ".local").exists()
 
 
 def test_resolver_preserves_git_alias_identity_and_runner_hardens_target(
@@ -1407,6 +1543,32 @@ def test_loopback_http_accepts_all_ipv4_loopback(host: str) -> None:
     assert response.status_code == 200
     assert response.data == {"ok": True, "path": "/health"}
     assert response.body_bytes > 0
+
+
+def test_zero_write_loopback_name_resolution_never_creates_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_mkdtemp(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise AssertionError("zero-write resolver called mkdtemp")
+
+    def forbidden_mkdir(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("zero-write resolver called mkdir")
+
+    with _http_server("127.0.0.1") as (_server, endpoint):
+        localhost_endpoint = endpoint.replace("127.0.0.1", "localhost")
+        monkeypatch.setattr(tempfile, "mkdtemp", forbidden_mkdtemp)
+        monkeypatch.setattr(Path, "mkdir", forbidden_mkdir)
+        response = get_loopback_json_zero_write(
+            localhost_endpoint,
+            "/health",
+            time.monotonic() + 3.0,
+            4_096,
+        )
+
+    assert response.status_code == 200
+    assert response.data == {"ok": True, "path": "/health"}
 
 
 def test_loopback_http_accepts_ipv6_loopback() -> None:

@@ -48,6 +48,9 @@ _PROBE_SANDBOX_ROOTS: tuple[Path, ...] = (
     Path("/var/tmp"),  # nosec B108
 )
 _PROBE_SANDBOX_PREFIX: Final = ".local-agent-probe-"
+_ZERO_WRITE_WORKING_DIRECTORY: Final = Path("/")
+_ZERO_WRITE_STATE_SINK: Final = Path("/dev/null")
+_ZERO_WRITE_CONFIG_DIRECTORY: Final = Path("/proc")
 _RESOLVER_HELPER_CODE = """
 import json
 import socket
@@ -329,6 +332,177 @@ def run_bounded_process(
     raise ProbeError(*failure)
 
 
+def run_zero_write_process(
+    executable: Path,
+    arguments: tuple[str, ...],
+    environment: Mapping[str, str],
+    deadline_monotonic: float,
+    max_bytes: int,
+) -> ProcessResult:
+    """Run a trusted Doctor command without creating filesystem objects."""
+    failure = ("probe_failed", "probe process failed")
+    try:
+        return _run_zero_write_process(
+            executable,
+            arguments,
+            environment,
+            deadline_monotonic,
+            max_bytes,
+        )
+    except ProbeError as error:
+        failure = (error.code, error.message)
+    except Exception:  # noqa: BLE001 - redacted public trust boundary
+        failure = ("probe_failed", "probe process failed")
+    raise ProbeError(*failure)
+
+
+def _run_zero_write_process(
+    executable: Path,
+    arguments: tuple[str, ...],
+    environment: Mapping[str, str],
+    deadline_monotonic: float,
+    max_bytes: int,
+) -> ProcessResult:
+    _validate_max_bytes(max_bytes)
+    deadline = _validated_deadline(deadline_monotonic)
+    if time.monotonic() >= deadline:
+        raise ProbeError("deadline_expired", "probe deadline has expired")
+    trusted_executable = _validated_explicit_executable(executable)
+    safe_arguments = _validated_arguments(arguments)
+    safe_environment = _build_probe_environment(
+        trusted_executable.identity, environment
+    )
+    if trusted_executable.identity == "git":
+        safe_arguments = _harden_git_arguments(safe_arguments)
+    safe_environment = _zero_write_probe_environment(
+        trusted_executable.identity, safe_environment
+    )
+    working_directory = _validated_zero_write_working_directory()
+    if time.monotonic() >= deadline:
+        raise ProbeError("deadline_expired", "probe deadline has expired")
+
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(  # nosec B603
+            (str(trusted_executable.canonical_target), *safe_arguments),
+            shell=False,
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(safe_environment),
+            cwd=working_directory,
+            close_fds=True,
+            bufsize=0,
+        )
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError):
+        raise ProbeError(
+            "process_start_failed", "probe process could not start"
+        ) from None
+
+    try:
+        stdout, stderr, timed_out, truncated = _capture_process(
+            process, deadline, max_bytes
+        )
+        duration_ms = max(0, int((time.monotonic() - started) * 1_000))
+        returncode = process.returncode
+        if returncode is None:
+            _terminate_process_group(process)
+            returncode = process.returncode
+        if returncode is None:
+            raise ProbeError("process_reap_failed", "probe process was not reaped")
+        return ProcessResult(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=timed_out,
+            truncated=truncated,
+            duration_ms=duration_ms,
+        )
+    except ProbeError:
+        raise
+    except Exception:  # noqa: BLE001 - redacted process boundary
+        raise ProbeError("probe_failed", "probe process failed") from None
+
+
+def _validated_zero_write_working_directory() -> Path:
+    path = _ZERO_WRITE_WORKING_DIRECTORY
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process context is unsafe"
+        ) from None
+    if (
+        type(path) is not _ConcretePath
+        or path != Path("/")
+        or stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_mode & 0o022
+    ):
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process context is unsafe"
+        )
+    return path
+
+
+def _zero_write_probe_environment(
+    tool: str, environment: Mapping[str, str]
+) -> Mapping[str, str]:
+    isolated = dict(environment)
+    if tool not in _STATE_ISOLATED_TOOLS:
+        return MappingProxyType(isolated)
+    sink = _validated_zero_write_state_sink()
+    for key in _SANDBOX_STATE_DIRECTORIES:
+        isolated[key] = str(sink)
+    if tool == "gh":
+        isolated["GH_CONFIG_DIR"] = str(_validated_zero_write_config_directory())
+    return MappingProxyType(isolated)
+
+
+def _validated_zero_write_state_sink() -> Path:
+    path = _ZERO_WRITE_STATE_SINK
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process state sink is unsafe"
+        ) from None
+    if (
+        type(path) is not _ConcretePath
+        or path != Path("/dev/null")
+        or stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISCHR(metadata.st_mode)
+        or metadata.st_uid != 0
+    ):
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process state sink is unsafe"
+        )
+    return path
+
+
+def _validated_zero_write_config_directory() -> Path:
+    path = _ZERO_WRITE_CONFIG_DIRECTORY
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process config sink is unsafe"
+        ) from None
+    if (
+        type(path) is not _ConcretePath
+        or path != Path("/proc")
+        or stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_mode & 0o022
+    ):
+        raise ProbeError(
+            "zero_write_context_failed", "Doctor process config sink is unsafe"
+        )
+    return path
+
+
 def _run_bounded_process(
     executable: Path,
     arguments: tuple[str, ...],
@@ -565,7 +739,36 @@ def get_loopback_json(
     """Fetch bounded JSON from a pinned loopback address or trusted Unix socket."""
     failure = ("loopback_failed", "loopback probe failed")
     try:
-        return _get_loopback_json(endpoint, request_path, deadline_monotonic, max_bytes)
+        return _get_loopback_json(
+            endpoint,
+            request_path,
+            deadline_monotonic,
+            max_bytes,
+            zero_write=False,
+        )
+    except ProbeError as error:
+        failure = (error.code, error.message)
+    except Exception:  # noqa: BLE001 - redacted public trust boundary
+        failure = ("loopback_failed", "loopback probe failed")
+    raise ProbeError(*failure)
+
+
+def get_loopback_json_zero_write(
+    endpoint: str | Path,
+    request_path: str,
+    deadline_monotonic: float,
+    max_bytes: int,
+) -> LoopbackResponse:
+    """Fetch bounded loopback JSON with a zero-write resolver helper."""
+    failure = ("loopback_failed", "loopback probe failed")
+    try:
+        return _get_loopback_json(
+            endpoint,
+            request_path,
+            deadline_monotonic,
+            max_bytes,
+            zero_write=True,
+        )
     except ProbeError as error:
         failure = (error.code, error.message)
     except Exception:  # noqa: BLE001 - redacted public trust boundary
@@ -578,6 +781,8 @@ def _get_loopback_json(
     request_path: str,
     deadline_monotonic: float,
     max_bytes: int,
+    *,
+    zero_write: bool,
 ) -> LoopbackResponse:
     _validate_max_bytes(max_bytes)
     deadline = _validated_deadline(deadline_monotonic)
@@ -597,7 +802,9 @@ def _get_loopback_json(
             )
         elif type(endpoint) is str:
             host, port = _parse_http_endpoint(endpoint)
-            addresses = _resolve_loopback_addresses(host, port, deadline)
+            addresses = _resolve_loopback_addresses(
+                host, port, deadline, zero_write=zero_write
+            )
             raw_socket = _connect_loopback(addresses, deadline)
             connection = http.client.HTTPConnection(
                 host, port=port, timeout=_remaining(deadline)
@@ -1284,13 +1491,14 @@ def _validated_explicit_port(raw_port: str) -> int:
 
 
 def _resolve_loopback_addresses(
-    host: str, port: int, deadline: float
+    host: str, port: int, deadline: float, *, zero_write: bool
 ) -> tuple[tuple[int, int, int, tuple[Any, ...]], ...]:
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
         python = TrustedExecutableResolver().resolve("python3")
-        resolver_result = run_bounded_process(
+        runner = run_zero_write_process if zero_write else run_bounded_process
+        resolver_result = runner(
             python,
             ("-I", "-S", "-c", _RESOLVER_HELPER_CODE, host, str(port)),
             {},
@@ -1590,5 +1798,7 @@ __all__ = [
     "TrustedExecutableResolver",
     "build_probe_environment",
     "get_loopback_json",
+    "get_loopback_json_zero_write",
     "run_bounded_process",
+    "run_zero_write_process",
 ]
