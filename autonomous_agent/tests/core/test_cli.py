@@ -485,6 +485,36 @@ def test_hostile_nested_mapping_and_accessor_are_redacted(
     assert output.err == "agent: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_shadowed_report_callables_cannot_bypass_nested_canonicalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    report = _report()
+    probe = report.probes[0]
+    object.__setattr__(probe, "summary", "LEAKED_SECRET")
+    object.__setattr__(probe, "data", {"version": "LEAKED_SECRET"})
+    object.__setattr__(report, "canonical_copy", lambda: report)
+    object.__setattr__(
+        report,
+        "to_dict",
+        lambda: {"raw": "LEAKED_SECRET", "probes": [probe]},
+    )
+    object.__setattr__(report, "_canonical_probe_result", lambda item: item)
+    monkeypatch.setattr(cli, "load_config", lambda **kwargs: _config(tmp_path))
+    _fake_doctor(monkeypatch, report)
+
+    arguments = ["doctor", "--json"] if json_output else ["doctor"]
+    assert cli.main(arguments) == 3
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "agent: internal diagnostic failure.\n"
+    assert "LEAKED_SECRET" not in output.out + output.err
+
     report = _report()
 
     def hostile_summary(instance: ProbeResult) -> str:
@@ -546,6 +576,21 @@ def test_parser_base_exceptions_are_not_misclassified_as_internal(
     monkeypatch.setattr(cli, "build_parser", fail_parser)
     with pytest.raises(type(failure)):
         cli.main(["doctor"])
+
+
+def test_parse_action_system_exit_propagates_without_reclassification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ForeignExitParser:
+        def parse_args(self, arguments: object) -> None:
+            del arguments
+            raise SystemExit(7)
+
+    monkeypatch.setattr(cli, "build_parser", ForeignExitParser)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["doctor"])
+    assert raised.value.code == 7
 
 
 def test_keyboard_interrupt_is_not_converted_to_internal_failure(

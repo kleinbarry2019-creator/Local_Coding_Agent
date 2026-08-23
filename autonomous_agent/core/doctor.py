@@ -188,25 +188,9 @@ class DoctorReport:
             raise ValueError("doctor probes contain duplicates")
         object.__setattr__(self, "probes", copied)
 
-    def canonical_copy(self) -> DoctorReport:
-        """Return a deeply revalidated copy safe for boundary rendering."""
-        raw_probes = self.probes
-        if type(raw_probes) is not tuple:
-            raise TypeError("doctor probes are invalid")
-        probes = tuple(_canonical_probe_result(item) for item in raw_probes)
-        return DoctorReport(
-            schema_version=self.schema_version,
-            status=self.status,
-            generated_at=self.generated_at,
-            mode=self.mode,
-            free_only=self.free_only,
-            project_root=self.project_root,
-            probes=probes,
-        )
-
     def to_dict(self) -> dict[str, object]:
         """Return a fresh, deeply revalidated schema-version-1 document."""
-        report = self.canonical_copy()
+        report = canonicalize_doctor_report(self)
         return {
             "schema_version": report.schema_version,
             "status": report.status.value,
@@ -228,6 +212,25 @@ class DoctorReport:
                 for item in report.probes
             ],
         }
+
+
+def canonicalize_doctor_report(report: object) -> DoctorReport:
+    """Return an exact, deeply revalidated report without instance dispatch."""
+    if type(report) is not DoctorReport:
+        raise TypeError("doctor report is invalid")
+    raw_probes = report.probes
+    if type(raw_probes) is not tuple:
+        raise TypeError("doctor probes are invalid")
+    probes = tuple(_canonical_probe_result(item) for item in raw_probes)
+    return DoctorReport(
+        schema_version=report.schema_version,
+        status=report.status,
+        generated_at=report.generated_at,
+        mode=report.mode,
+        free_only=report.free_only,
+        project_root=report.project_root,
+        probes=probes,
+    )
 
 
 def _canonical_probe_result(item: object) -> ProbeResult:
@@ -1384,4 +1387,5 @@ __all__ = [
     "ProbeResult",
     "ProbeStatus",
     "build_doctor_registry",
+    "canonicalize_doctor_report",
 ]

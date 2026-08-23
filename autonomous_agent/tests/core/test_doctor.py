@@ -28,6 +28,7 @@ from autonomous_agent.core.doctor import (
     ProbeResult,
     ProbeStatus,
     build_doctor_registry,
+    canonicalize_doctor_report,
 )
 from autonomous_agent.core.policy import NetworkKind, SideEffect
 from autonomous_agent.core.probes import LoopbackResponse, ProbeError, ProcessResult
@@ -658,6 +659,34 @@ def test_report_canonical_copy_and_serialization_revalidate_nested_results() -> 
     object.__setattr__(probe, "data", {"version": "LEAKED_SECRET", "supported": True})
 
     with pytest.raises(ValueError, match="string"):
-        report.canonical_copy()
+        canonicalize_doctor_report(report)
     with pytest.raises(ValueError, match="string"):
         report.to_dict()
+
+
+def test_exact_report_serializer_ignores_shadowed_instance_callables() -> None:
+    probe = ProbeResult(
+        name="doctor.python",
+        status=ProbeStatus.PASS,
+        required=True,
+        code="doctor.python.ok",
+        summary="Python is ready.",
+        data={"version": "3.14.6", "supported": True},
+        duration_ms=1,
+        truncated=False,
+    )
+    report = DoctorReport(
+        schema_version=1,
+        status=DoctorStatus.HEALTHY,
+        generated_at="2026-08-24T00:00:00Z",
+        mode="monitored",
+        free_only=True,
+        project_root="/safe",
+        probes=(probe,),
+    )
+    object.__setattr__(probe, "data", {"version": "LEAKED_SECRET", "supported": True})
+    object.__setattr__(report, "canonical_copy", lambda: report)
+    object.__setattr__(report, "to_dict", lambda: {"raw": "LEAKED_SECRET"})
+
+    with pytest.raises(ValueError, match="string"):
+        DoctorReport.to_dict(report)

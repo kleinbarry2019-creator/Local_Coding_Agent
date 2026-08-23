@@ -24,6 +24,7 @@ from autonomous_agent.core.doctor import (
     DoctorStatus,
     ProbeResult,
     build_doctor_registry,
+    canonicalize_doctor_report,
 )
 from autonomous_agent.core.probes import ProbeError
 
@@ -92,10 +93,22 @@ class _ConfigurationBoundaryError(Exception):
     """An effective configuration that violates the phase-1 CLI contract."""
 
 
+class _ParserExit(Exception):
+    """Private argparse control flow that cannot be confused with SystemExit."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status if type(status) is int and status >= 0 else 2
+        super().__init__(self.status)
+
+
 class _AgentArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         del message
         raise _CliArgumentError
+
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        del message
+        raise _ParserExit(status)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,10 +167,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _CliArgumentError:
         _write_error(_INVALID_ARGUMENTS)
         return 2
-    except SystemExit as error:
-        # argparse uses SystemExit only for its successful help action because
-        # parser failures are converted to _CliArgumentError above.
-        return 0 if error.code == 0 else 2
+    except _ParserExit as error:
+        if error.status == 0:
+            return 0
+        _write_error(_INVALID_ARGUMENTS)
+        return 2
     except Exception:  # noqa: BLE001 - redacted parser execution boundary
         _write_error(_INTERNAL_ERROR)
         return 3
@@ -247,9 +261,7 @@ def _validate_effective_config(config: object) -> None:
 
 
 def _canonical_report(report: object) -> DoctorReport:
-    if type(report) is not DoctorReport:
-        raise TypeError("invalid doctor report")
-    canonical = report.canonical_copy()
+    canonical = canonicalize_doctor_report(report)
     if (
         canonical.mode
         not in {
@@ -263,7 +275,8 @@ def _canonical_report(report: object) -> DoctorReport:
 
 
 def _render_json(report: DoctorReport) -> str:
-    return json.dumps(report.to_dict(), sort_keys=True, separators=(",", ":")) + "\n"
+    document = DoctorReport.to_dict(report)
+    return json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 def _render_human(report: DoctorReport) -> str:
