@@ -9,6 +9,7 @@ import selectors
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import tempfile
 import threading
@@ -99,6 +100,28 @@ def _assert_clean_error(error: ProbeError, secret: str) -> None:
     assert secret not in repr(error)
     assert error.__cause__ is None
     assert error.__context__ is None
+
+
+def _controlled_sandbox_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "probe-sandboxes"
+    root.mkdir(mode=0o700)
+    monkeypatch.setattr(probes_module, "_PROBE_SANDBOX_ROOTS", (root,), raising=False)
+    return root
+
+
+def _sandbox_entries(root: Path) -> tuple[Path, ...]:
+    return tuple(sorted(root.glob(".local-agent-probe-*")))
+
+
+def _filesystem_snapshot(root: Path) -> tuple[tuple[str, int, bytes | None], ...]:
+    entries: list[tuple[str, int, bytes | None]] = []
+    for path in sorted(root.rglob("*")):
+        metadata = path.lstat()
+        content = path.read_bytes() if path.is_file() else None
+        entries.append(
+            (str(path.relative_to(root)), stat.S_IFMT(metadata.st_mode), content)
+        )
+    return tuple(entries)
 
 
 class _HostileFloat(float):
@@ -244,6 +267,37 @@ def test_installed_homebrew_links_resolve_when_present() -> None:
         assert resolved.resolve(strict=True).is_file()
     if checked == 0:
         pytest.skip("no selected Homebrew executable is installed")
+
+
+def test_installed_gh_version_cannot_mutate_project_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    try:
+        gh = TrustedExecutableResolver().resolve("gh")
+    except ProbeError as error:
+        if error.code == "executable_not_found":
+            pytest.skip("Homebrew gh is not installed")
+        raise
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    project = tmp_path / "project-worktree"
+    project.mkdir()
+    (project / "tracked.txt").write_text("unchanged", encoding="utf-8")
+    before = _filesystem_snapshot(project)
+    monkeypatch.chdir(project)
+
+    result = run_bounded_process(
+        gh,
+        ("--version",),
+        {},
+        time.monotonic() + 3.0,
+        8_192,
+    )
+
+    assert result.returncode == 0
+    assert b"gh version" in result.stdout
+    assert _filesystem_snapshot(project) == before
+    assert not (project / ".local").exists()
+    assert _sandbox_entries(sandbox_root) == ()
 
 
 def test_resolver_rejects_symlink_escape(
@@ -622,11 +676,20 @@ def test_process_converts_finite_deadline_overflow_to_stable_error() -> None:
     _assert_clean_error(captured.value, "secret")
 
 
-def test_process_uses_sanitized_environment() -> None:
+def test_process_uses_sanitized_environment_and_private_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
     python = _system_executable("python3")
     code = (
-        "import json,os; print(json.dumps({k: os.environ.get(k) for k in "
-        "['PATH','LD_PRELOAD','PYTHONPATH','BASH_ENV','HTTP_PROXY']}))"
+        "import json,os; print(json.dumps({'cwd': os.getcwd(), 'env': "
+        "{k: os.environ.get(k) for k in "
+        "['PATH','LD_PRELOAD','PYTHONPATH','BASH_ENV','HTTP_PROXY',"
+        "'HOME','XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME',"
+        "'XDG_STATE_HOME']}}))"
     )
 
     result = run_bounded_process(
@@ -646,13 +709,107 @@ def test_process_uses_sanitized_environment() -> None:
     assert result.returncode == 0
     assert result.timed_out is False
     assert result.truncated is False
-    assert json.loads(result.stdout) == {
+    payload = json.loads(result.stdout)
+    child_cwd = Path(payload["cwd"])
+    assert payload["env"] == {
         "PATH": None,
         "LD_PRELOAD": None,
         "PYTHONPATH": None,
         "BASH_ENV": None,
         "HTTP_PROXY": None,
+        "HOME": None,
+        "XDG_CONFIG_HOME": None,
+        "XDG_CACHE_HOME": None,
+        "XDG_DATA_HOME": None,
+        "XDG_STATE_HOME": None,
     }
+    assert child_cwd.parent == sandbox_root
+    assert child_cwd != project
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
+
+
+def test_stateful_probe_uses_cleaned_private_home_and_xdg_paths(
+    resolver_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    user_home = tmp_path / "user-home"
+    project.mkdir()
+    user_home.mkdir()
+    prefix = resolver_root / "trusted-prefix"
+    bin_root = prefix / "bin"
+    bin_root.mkdir(parents=True)
+    fake_gh = bin_root / "gh"
+    keys = (
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+    )
+    code = "\n".join(
+        [
+            "#!/usr/bin/python3",
+            "import json, os, pathlib, stat",
+            f"keys = {keys!r}",
+            "cwd = pathlib.Path.cwd()",
+            "values = {key: os.environ.get(key) for key in keys}",
+            "(cwd / 'cwd-marker').write_text('probe')",
+            "for key, value in values.items():",
+            "    if value is not None:",
+            "        path = pathlib.Path(value)",
+            "        path.mkdir(mode=0o700, parents=True, exist_ok=True)",
+            "        (path / f'{key}.marker').write_text('probe')",
+            "if values['XDG_STATE_HOME'] is None:",
+            "    fallback = cwd / '.local/state/gh'",
+            "    fallback.mkdir(parents=True, exist_ok=True)",
+            "    (fallback / 'device-id').write_text('probe')",
+            (
+                "print(json.dumps({'cwd': str(cwd), 'cwd_mode': "
+                "stat.S_IMODE(cwd.stat().st_mode), 'values': values, "
+                "'modes': {key: stat.S_IMODE(pathlib.Path(value).stat().st_mode) "
+                "for key, value in values.items() if value is not None}}))"
+            ),
+        ]
+    )
+    _write_executable(fake_gh, code)
+    resolver = _resolver_for(monkeypatch, bin_root)
+    project_before = _filesystem_snapshot(project)
+    home_before = _filesystem_snapshot(user_home)
+    monkeypatch.chdir(project)
+
+    result = run_bounded_process(
+        resolver.resolve("gh"),
+        ("--version",),
+        {
+            "HOME": str(user_home),
+            "XDG_CONFIG_HOME": str(project / "hostile-config"),
+            "XDG_CACHE_HOME": str(project / "hostile-cache"),
+            "XDG_DATA_HOME": str(project / "hostile-data"),
+            "XDG_STATE_HOME": str(project / "hostile-state"),
+        },
+        time.monotonic() + 3.0,
+        8_192,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    child_cwd = Path(payload["cwd"])
+    assert child_cwd.parent == sandbox_root
+    assert payload["cwd_mode"] == 0o700
+    assert set(payload["values"]) == set(keys)
+    for value in payload["values"].values():
+        state_path = Path(value)
+        assert state_path.is_relative_to(child_cwd)
+        assert state_path not in {project, user_home}
+    assert set(payload["modes"].values()) == {0o700}
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
+    assert _filesystem_snapshot(project) == project_before
+    assert _filesystem_snapshot(user_home) == home_before
 
 
 @pytest.mark.parametrize("limit", [1, 1_024, 4_096])
@@ -671,6 +828,54 @@ def test_process_combined_output_never_exceeds_cap(limit: int) -> None:
     assert result.truncated is True
     assert result.timed_out is False
     assert len(result.stdout) + len(result.stderr) == limit
+
+
+def test_output_cap_cleans_private_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    code = "import os; os.write(1, (os.getcwd() + '\\n').encode() + b'x' * 8192)"
+
+    result = run_bounded_process(
+        _system_executable("python3"),
+        ("-c", code),
+        {},
+        time.monotonic() + 3.0,
+        512,
+    )
+
+    child_cwd = Path(result.stdout.splitlines()[0].decode())
+    assert result.truncated is True
+    assert child_cwd.parent == sandbox_root
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
+
+
+def test_timeout_cleans_private_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    code = "import os,time; print(os.getcwd(), flush=True); time.sleep(60)"
+
+    result = run_bounded_process(
+        _system_executable("python3"),
+        ("-c", code),
+        {},
+        time.monotonic() + 0.2,
+        1_024,
+    )
+
+    child_cwd = Path(result.stdout.strip().decode())
+    assert result.timed_out is True
+    assert child_cwd.parent == sandbox_root
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
 
 
 def test_output_cap_terminates_entire_process_group(tmp_path: Path) -> None:
@@ -740,6 +945,193 @@ def test_timeout_terminates_entire_process_group(tmp_path: Path) -> None:
     )
 
 
+def test_sandbox_creation_failure_is_stable_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _controlled_sandbox_root(tmp_path, monkeypatch)
+    python = _system_executable("python3")
+
+    def fail_creation(*_args: object, **_kwargs: object) -> str:
+        raise OSError(errno.EIO, "secret-sandbox-parent")
+
+    monkeypatch.setattr(probes_module, "tempfile", tempfile, raising=False)
+    monkeypatch.setattr(tempfile, "mkdtemp", fail_creation)
+    with pytest.raises(ProbeError, match=r"^sandbox_create_failed:") as captured:
+        run_bounded_process(
+            python,
+            ("-c", "pass"),
+            {},
+            time.monotonic() + 2.0,
+            1_024,
+        )
+
+    _assert_clean_error(captured.value, "secret-sandbox-parent")
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "writable"])
+def test_sandbox_rejects_unsafe_parent_without_spawning(
+    unsafe_kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe_parent = tmp_path / "safe-parent"
+    safe_parent.mkdir(mode=0o700)
+    if unsafe_kind == "symlink":
+        sandbox_parent = tmp_path / "sandbox-link"
+        sandbox_parent.symlink_to(safe_parent, target_is_directory=True)
+    else:
+        sandbox_parent = safe_parent
+        sandbox_parent.chmod(0o770)
+    monkeypatch.setattr(
+        probes_module, "_PROBE_SANDBOX_ROOTS", (sandbox_parent,), raising=False
+    )
+    spawned = False
+
+    def forbidden_spawn(*_args: object, **_kwargs: object) -> None:
+        nonlocal spawned
+        spawned = True
+
+    monkeypatch.setattr(probes_module.subprocess, "Popen", forbidden_spawn)
+    with pytest.raises(ProbeError, match=r"^sandbox_create_failed:") as captured:
+        run_bounded_process(
+            _system_executable("python3"),
+            ("-c", "pass"),
+            {},
+            time.monotonic() + 2.0,
+            1_024,
+        )
+
+    assert spawned is False
+    _assert_clean_error(captured.value, str(sandbox_parent))
+    assert _sandbox_entries(safe_parent) == ()
+
+
+def test_invalid_created_sandbox_is_removed_before_stable_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    real_mkdtemp = tempfile.mkdtemp
+
+    def create_with_unsafe_mode(*args: object, **kwargs: object) -> str:
+        created = Path(real_mkdtemp(*args, **kwargs))  # type: ignore[arg-type]
+        created.chmod(0o755)
+        return str(created)
+
+    monkeypatch.setattr(probes_module, "tempfile", tempfile, raising=False)
+    monkeypatch.setattr(tempfile, "mkdtemp", create_with_unsafe_mode)
+    with pytest.raises(ProbeError, match=r"^sandbox_create_failed:"):
+        run_bounded_process(
+            _system_executable("python3"),
+            ("-c", "pass"),
+            {},
+            time.monotonic() + 2.0,
+            1_024,
+        )
+
+    assert _sandbox_entries(sandbox_root) == ()
+
+
+def test_spawn_failure_receives_and_cleans_private_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    python = _system_executable("python3")
+    observed_cwd: list[object] = []
+
+    def fail_spawn(*_args: object, **kwargs: object) -> None:
+        observed_cwd.append(kwargs.get("cwd"))
+        raise OSError(errno.EIO, "secret-chdir-path")
+
+    monkeypatch.setattr(probes_module.subprocess, "Popen", fail_spawn)
+    with pytest.raises(ProbeError, match=r"^process_start_failed:") as captured:
+        run_bounded_process(
+            python,
+            ("-c", "pass"),
+            {},
+            time.monotonic() + 2.0,
+            1_024,
+        )
+
+    _assert_clean_error(captured.value, "secret-chdir-path")
+    assert len(observed_cwd) == 1
+    assert observed_cwd[0] is not None
+    child_cwd = Path(observed_cwd[0])
+    assert child_cwd.parent == sandbox_root
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
+
+
+def test_sandbox_cleanup_failure_is_stable_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    python = _system_executable("python3")
+    real_rmtree = shutil.rmtree
+    cleanup_targets: list[Path] = []
+
+    def fail_cleanup(path: object, *_args: object, **_kwargs: object) -> None:
+        cleanup_targets.append(Path(path))
+        raise OSError(errno.EIO, "secret-cleanup-path")
+
+    monkeypatch.setattr(probes_module, "shutil", shutil, raising=False)
+    monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
+    try:
+        with pytest.raises(ProbeError, match=r"^sandbox_cleanup_failed:") as captured:
+            run_bounded_process(
+                python,
+                ("-c", "pass"),
+                {},
+                time.monotonic() + 2.0,
+                1_024,
+            )
+        _assert_clean_error(captured.value, "secret-cleanup-path")
+    finally:
+        for target in cleanup_targets:
+            if target.exists():
+                real_rmtree(target)
+
+    assert cleanup_targets
+    assert all(target.parent == sandbox_root for target in cleanup_targets)
+    assert _sandbox_entries(sandbox_root) == ()
+
+
+def test_cleanup_failure_does_not_replace_primary_process_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
+    python = _system_executable("python3")
+    real_rmtree = shutil.rmtree
+    cleanup_targets: list[Path] = []
+
+    def fail_spawn(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EIO, "secret-primary-path")
+
+    def fail_cleanup(path: object, *_args: object, **_kwargs: object) -> None:
+        cleanup_targets.append(Path(path))
+        raise OSError(errno.EIO, "secret-secondary-path")
+
+    monkeypatch.setattr(probes_module.subprocess, "Popen", fail_spawn)
+    monkeypatch.setattr(probes_module, "shutil", shutil, raising=False)
+    monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
+    try:
+        with pytest.raises(ProbeError, match=r"^process_start_failed:") as captured:
+            run_bounded_process(
+                python,
+                ("-c", "pass"),
+                {},
+                time.monotonic() + 2.0,
+                1_024,
+            )
+        _assert_clean_error(captured.value, "secret-primary-path")
+        _assert_clean_error(captured.value, "secret-secondary-path")
+    finally:
+        for target in cleanup_targets:
+            if target.exists():
+                real_rmtree(target)
+
+    assert cleanup_targets
+    assert all(target.parent == sandbox_root for target in cleanup_targets)
+    assert _sandbox_entries(sandbox_root) == ()
+
+
 def _stubborn_group_code(identity: Path) -> str:
     return "\n".join(
         [
@@ -770,14 +1162,22 @@ def _cleanup_injected_group(identity: Path, real_killpg: object) -> None:
 def test_termination_surfaces_non_benign_term_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
     identity = tmp_path / "term-failure.pid"
     real_killpg = os.killpg
+    real_popen = subprocess.Popen
+    observed_cwd: list[object] = []
+
+    def capture_spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        observed_cwd.append(kwargs.get("cwd"))
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type,return-value]
 
     def fail_term(group_id: int, requested_signal: int) -> None:
         if requested_signal == signal.SIGTERM:
             raise PermissionError(errno.EPERM, "secret-term-path")
         real_killpg(group_id, requested_signal)
 
+    monkeypatch.setattr(probes_module.subprocess, "Popen", capture_spawn)
     monkeypatch.setattr(probes_module.os, "killpg", fail_term)
     try:
         with pytest.raises(ProbeError, match=r"^termination_failed:") as captured:
@@ -791,6 +1191,13 @@ def test_termination_surfaces_non_benign_term_failure(
         _assert_clean_error(captured.value, "secret-term-path")
     finally:
         _cleanup_injected_group(identity, real_killpg)
+
+    assert len(observed_cwd) == 1
+    assert observed_cwd[0] is not None
+    child_cwd = Path(observed_cwd[0])
+    assert child_cwd.parent == sandbox_root
+    assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
 
 
 def test_termination_surfaces_kill_failure_and_test_cleans_survivor(
@@ -1095,16 +1502,26 @@ def test_loopback_http_rejects_arbitrary_hostname_even_if_dns_claims_loopback(
 
 
 def test_loopback_http_bounds_name_resolution_by_deadline(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    sandbox_root = _controlled_sandbox_root(tmp_path, monkeypatch)
     release = threading.Event()
     resolver_marker = "local-agent-blocked-resolver-marker"
+    real_popen = subprocess.Popen
+    observed_cwd: list[object] = []
 
     def delayed_resolution(*_args: object) -> list[object]:
         release.wait(2.0)
         return []
 
     monkeypatch.setattr(probes_module.socket, "getaddrinfo", delayed_resolution)
+
+    def capture_spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        observed_cwd.append(kwargs.get("cwd"))
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type,return-value]
+
+    monkeypatch.setattr(probes_module.subprocess, "Popen", capture_spawn)
     monkeypatch.setattr(
         probes_module,
         "_RESOLVER_HELPER_CODE",
@@ -1127,6 +1544,14 @@ def test_loopback_http_bounds_name_resolution_by_deadline(
             assert not _process_with_marker_exists(resolver_marker)
     finally:
         release.set()
+
+    assert len(observed_cwd) == 3
+    for raw_cwd in observed_cwd:
+        assert raw_cwd is not None
+        child_cwd = Path(raw_cwd)
+        assert child_cwd.parent == sandbox_root
+        assert not child_cwd.exists()
+    assert _sandbox_entries(sandbox_root) == ()
 
 
 def test_loopback_http_does_not_use_proxy_environment(

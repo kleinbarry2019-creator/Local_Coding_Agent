@@ -10,11 +10,13 @@ import math
 import os
 import re
 import selectors
+import shutil
 import signal
 import socket
 import stat
 import struct
 import subprocess  # nosec B404
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -40,6 +42,12 @@ _TERMINATION_GRACE_SECONDS: Final = 0.2
 _REAP_GRACE_SECONDS: Final = 0.5
 _MAX_DEADLINE_HORIZON_SECONDS: Final = 86_400.0
 _RESOLVER_OUTPUT_BYTES: Final = 65_536
+# Fixed roots are ownership/mode validated before private ``mkdtemp`` use.
+_PROBE_SANDBOX_ROOTS: tuple[Path, ...] = (
+    Path("/tmp"),  # nosec B108
+    Path("/var/tmp"),  # nosec B108
+)
+_PROBE_SANDBOX_PREFIX: Final = ".local-agent-probe-"
 _RESOLVER_HELPER_CODE = """
 import json
 import socket
@@ -58,6 +66,18 @@ except BaseException:
     raise SystemExit(2)
 """.strip()
 _RUNTIME_ENVIRONMENT_TOOLS = frozenset({"podman", "systemctl", "systemd-run"})
+_STATE_ISOLATED_TOOLS = frozenset(
+    {"gh", "npm", "ollama", "podman", "systemctl", "systemd-run", "uv"}
+)
+_SANDBOX_STATE_DIRECTORIES = MappingProxyType(
+    {
+        "HOME": "home",
+        "XDG_CONFIG_HOME": "config",
+        "XDG_CACHE_HOME": "cache",
+        "XDG_DATA_HOME": "data",
+        "XDG_STATE_HOME": "state",
+    }
+)
 _GIT_ENVIRONMENT = MappingProxyType(
     {
         "GIT_OPTIONAL_LOCKS": "0",
@@ -156,6 +176,14 @@ class _ValidatedExecutable:
     lexical_path: Path
     canonical_target: Path
     identity: str
+
+
+@dataclass(frozen=True)
+class _ProbeSandbox:
+    root: Path
+    parent: Path
+    root_fingerprint: tuple[int, int]
+    parent_fingerprint: tuple[int, int]
 
 
 _TRUSTED_PATH_ISSUER = object()
@@ -323,8 +351,16 @@ def _run_bounded_process(
         raise ProbeError("deadline_expired", "probe deadline has expired")
 
     started = time.monotonic()
+    sandbox = _create_probe_sandbox()
     process: subprocess.Popen[bytes] | None = None
+    result: ProcessResult | None = None
+    primary_failure: ProbeError | None = None
     try:
+        safe_environment = _sandbox_probe_environment(
+            trusted_executable.identity, safe_environment, sandbox
+        )
+        if time.monotonic() >= deadline:
+            raise ProbeError("deadline_expired", "probe deadline has expired")
         process = subprocess.Popen(  # nosec B603
             (str(trusted_executable.canonical_target), *safe_arguments),
             shell=False,
@@ -332,33 +368,192 @@ def _run_bounded_process(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=dict(safe_environment),
+            cwd=sandbox.root,
             close_fds=True,
             bufsize=0,
         )
     except (OSError, TypeError, ValueError, subprocess.SubprocessError):
-        raise ProbeError(
+        primary_failure = ProbeError(
             "process_start_failed", "probe process could not start"
+        )
+    except ProbeError as error:
+        primary_failure = error
+    else:
+        try:
+            stdout, stderr, timed_out, truncated = _capture_process(
+                process, deadline, max_bytes
+            )
+
+            duration_ms = max(0, int((time.monotonic() - started) * 1_000))
+            returncode = process.returncode
+            if returncode is None:
+                _terminate_process_group(process)
+                returncode = process.returncode
+            if returncode is None:
+                raise ProbeError("process_reap_failed", "probe process was not reaped")
+            result = ProcessResult(
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=timed_out,
+                truncated=truncated,
+                duration_ms=duration_ms,
+            )
+        except ProbeError as error:
+            primary_failure = error
+        except Exception:  # noqa: BLE001 - redacted process boundary
+            primary_failure = ProbeError("probe_failed", "probe process failed")
+    finally:
+        cleanup_failure = _cleanup_probe_sandbox(sandbox)
+        if primary_failure is None and cleanup_failure is not None:
+            primary_failure = cleanup_failure
+
+    if primary_failure is not None:
+        raise primary_failure
+    if result is None:
+        raise ProbeError("probe_failed", "probe process failed")
+    return result
+
+
+def _create_probe_sandbox() -> _ProbeSandbox:
+    cleanup_failed = False
+    for parent in _PROBE_SANDBOX_ROOTS:
+        candidate: Path | None = None
+        parent_fingerprint: tuple[int, int] | None = None
+        try:
+            parent_path, parent_metadata = _validated_probe_sandbox_parent(parent)
+            parent_fingerprint = (parent_metadata.st_dev, parent_metadata.st_ino)
+            raw_root = tempfile.mkdtemp(prefix=_PROBE_SANDBOX_PREFIX, dir=parent_path)
+            root = Path(raw_root)
+            candidate = root
+            root_metadata = root.lstat()
+            current_parent = parent_path.lstat()
+            if (
+                root.parent != parent_path
+                or not root.name.startswith(_PROBE_SANDBOX_PREFIX)
+                or stat.S_ISLNK(root_metadata.st_mode)
+                or not stat.S_ISDIR(root_metadata.st_mode)
+                or root_metadata.st_uid != os.getuid()
+                or stat.S_IMODE(root_metadata.st_mode) != 0o700
+                or (current_parent.st_dev, current_parent.st_ino)
+                != (parent_metadata.st_dev, parent_metadata.st_ino)
+            ):
+                raise OSError(errno.EPERM, "unsafe probe sandbox")
+            return _ProbeSandbox(
+                root=root,
+                parent=parent_path,
+                root_fingerprint=(root_metadata.st_dev, root_metadata.st_ino),
+                parent_fingerprint=(parent_metadata.st_dev, parent_metadata.st_ino),
+            )
+        except Exception:  # noqa: BLE001 - redacted sandbox creation boundary
+            if candidate is not None and not _discard_probe_sandbox_candidate(
+                candidate, parent, parent_fingerprint
+            ):
+                cleanup_failed = True
+                break
+            continue
+    if cleanup_failed:
+        raise ProbeError("sandbox_cleanup_failed", "probe sandbox could not be removed")
+    raise ProbeError("sandbox_create_failed", "probe sandbox could not be created")
+
+
+def _discard_probe_sandbox_candidate(
+    candidate: Path,
+    parent: Path,
+    parent_fingerprint: tuple[int, int] | None,
+) -> bool:
+    try:
+        parent_metadata = parent.lstat()
+        metadata = candidate.lstat()
+        if (
+            parent_fingerprint is None
+            or stat.S_ISLNK(parent_metadata.st_mode)
+            or not stat.S_ISDIR(parent_metadata.st_mode)
+            or (parent_metadata.st_dev, parent_metadata.st_ino) != parent_fingerprint
+            or candidate.parent != parent
+            or not candidate.name.startswith(_PROBE_SANDBOX_PREFIX)
+            or stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+        ):
+            return False
+        shutil.rmtree(candidate)
+        return True
+    except Exception:  # noqa: BLE001 - best-effort failed-creation cleanup
+        return False
+
+
+def _validated_probe_sandbox_parent(parent: Path) -> tuple[Path, os.stat_result]:
+    if (
+        type(parent) is not _ConcretePath
+        or not parent.is_absolute()
+        or Path(os.path.normpath(os.fspath(parent))) != parent
+    ):
+        raise OSError(errno.EINVAL, "unsafe probe sandbox parent")
+    _validate_safe_directory_ancestors(parent, "sandbox_create_failed")
+    metadata = parent.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise OSError(errno.EPERM, "unsafe probe sandbox parent")
+    if metadata.st_uid not in {0, os.getuid()}:
+        raise OSError(errno.EPERM, "unsafe probe sandbox parent")
+    writable = bool(metadata.st_mode & 0o022)
+    sticky_root = bool(metadata.st_mode & stat.S_ISVTX) and metadata.st_uid == 0
+    if writable and not sticky_root:
+        raise OSError(errno.EPERM, "unsafe probe sandbox parent")
+    return parent, metadata
+
+
+def _sandbox_probe_environment(
+    tool: str,
+    environment: Mapping[str, str],
+    sandbox: _ProbeSandbox,
+) -> Mapping[str, str]:
+    isolated = dict(environment)
+    if tool not in _STATE_ISOLATED_TOOLS:
+        return MappingProxyType(isolated)
+    try:
+        for key, relative in _SANDBOX_STATE_DIRECTORIES.items():
+            path = sandbox.root / relative
+            path.mkdir(mode=0o700)
+            metadata = path.lstat()
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or path.parent != sandbox.root
+            ):
+                raise OSError(errno.EPERM, "unsafe probe state directory")
+            isolated[key] = str(path)
+    except Exception:  # noqa: BLE001 - redacted sandbox preparation boundary
+        raise ProbeError(
+            "sandbox_prepare_failed", "probe sandbox could not be prepared"
         ) from None
+    return MappingProxyType(isolated)
 
-    stdout, stderr, timed_out, truncated = _capture_process(
-        process, deadline, max_bytes
-    )
 
-    duration_ms = max(0, int((time.monotonic() - started) * 1_000))
-    returncode = process.returncode
-    if returncode is None:
-        _terminate_process_group(process)
-        returncode = process.returncode
-    if returncode is None:
-        raise ProbeError("process_reap_failed", "probe process was not reaped")
-    return ProcessResult(
-        returncode=returncode,
-        stdout=stdout,
-        stderr=stderr,
-        timed_out=timed_out,
-        truncated=truncated,
-        duration_ms=duration_ms,
-    )
+def _cleanup_probe_sandbox(sandbox: _ProbeSandbox) -> ProbeError | None:
+    try:
+        parent_metadata = sandbox.parent.lstat()
+        root_metadata = sandbox.root.lstat()
+        if (
+            stat.S_ISLNK(parent_metadata.st_mode)
+            or not stat.S_ISDIR(parent_metadata.st_mode)
+            or (parent_metadata.st_dev, parent_metadata.st_ino)
+            != sandbox.parent_fingerprint
+            or sandbox.root.parent != sandbox.parent
+            or stat.S_ISLNK(root_metadata.st_mode)
+            or not stat.S_ISDIR(root_metadata.st_mode)
+            or root_metadata.st_uid != os.getuid()
+            or (root_metadata.st_dev, root_metadata.st_ino) != sandbox.root_fingerprint
+        ):
+            raise OSError(errno.EPERM, "unsafe probe sandbox cleanup")
+        shutil.rmtree(sandbox.root)
+    except Exception:  # noqa: BLE001 - redacted sandbox cleanup boundary
+        return ProbeError(
+            "sandbox_cleanup_failed", "probe sandbox could not be removed"
+        )
+    return None
 
 
 def get_loopback_json(
