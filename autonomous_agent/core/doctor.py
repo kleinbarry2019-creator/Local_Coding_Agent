@@ -305,7 +305,14 @@ _DATA_SCHEMA: Final[Mapping[str, Mapping[str, type[object]]]] = MappingProxyType
         "doctor.node": {"version": str},
         "doctor.npm": {"version": str},
         "doctor.uv": {"version": str},
-        "doctor.quality": {"available": list, "missing": list},
+        "doctor.quality": {
+            "available": list,
+            "missing": list,
+            "bandit_path": str,
+            "mypy_path": str,
+            "pytest_path": str,
+            "ruff_path": str,
+        },
         "doctor.runtime-paths": {
             "config_file": str,
             "project_file": str,
@@ -568,6 +575,12 @@ def _normalize_tool_result(
         )
         if status is ToolStatus.TIMED_OUT:
             return _failure_result(name, required, "timeout", safe_duration)
+        if tool_truncated or (
+            status is ToolStatus.INVALID_OUTPUT
+            and type(diagnostic_code) is str
+            and diagnostic_code in {"output_too_large", "tool_truncated"}
+        ):
+            return _truncated_result(name, required, safe_duration)
         if status is ToolStatus.INVALID_INPUT and diagnostic_code == "unknown_tool":
             return _failure_result(name, required, "unavailable", safe_duration)
         if status is not ToolStatus.OK or not isinstance(data, Mapping):
@@ -691,6 +704,19 @@ def _failure_result(
         data={},
         duration_ms=duration_ms,
         truncated=False,
+    )
+
+
+def _truncated_result(name: str, required: bool, duration_ms: int) -> ProbeResult:
+    return ProbeResult(
+        name=name,
+        status=ProbeStatus.FAIL if required else ProbeStatus.WARNING,
+        required=required,
+        code=f"{name}.truncated",
+        summary="The diagnostic response was truncated.",
+        data={},
+        duration_ms=duration_ms,
+        truncated=True,
     )
 
 
@@ -960,25 +986,20 @@ def _version_probe(
 
 
 def _quality_probe(context: ExecutionContext) -> DoctorProbeOutput:
-    commands = {
-        "bandit": ("--version",),
-        "mypy": ("--version",),
-        "pytest": ("--version",),
-        "ruff": ("--version",),
-    }
+    del context
+    names = ("bandit", "mypy", "pytest", "ruff")
+    resolver = TrustedExecutableResolver()
     available: list[str] = []
     missing: list[str] = []
-    for name in sorted(commands):
+    paths: dict[str, str] = {}
+    for name in names:
         try:
-            result = _command(name, commands[name], context)
-            if result.returncode == 0:
-                available.append(name)
-            else:
-                missing.append(name)
-        except ProbeError as error:
-            if error.code in {"deadline_expired", "probe_timeout"}:
-                raise
+            executable = resolver.resolve(name)
+        except ProbeError:
             missing.append(name)
+        else:
+            available.append(name)
+            paths[f"{name}_path"] = str(executable)
     status = ProbeStatus.PASS if not missing else ProbeStatus.WARNING
     return _probe_output(
         status=status,
@@ -986,6 +1007,7 @@ def _quality_probe(context: ExecutionContext) -> DoctorProbeOutput:
         summary="Quality tools are ready."
         if not missing
         else "Some quality tools are unavailable.",
+        strings=paths,
         string_lists={"available": available, "missing": missing},
     )
 

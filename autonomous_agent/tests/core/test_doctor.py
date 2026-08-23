@@ -29,7 +29,7 @@ from autonomous_agent.core.doctor import (
     build_doctor_registry,
 )
 from autonomous_agent.core.policy import NetworkKind, SideEffect
-from autonomous_agent.core.probes import LoopbackResponse, ProcessResult
+from autonomous_agent.core.probes import LoopbackResponse, ProbeError, ProcessResult
 from autonomous_agent.core.tools import (
     ExecutionContext,
     ToolRegistry,
@@ -65,6 +65,7 @@ def _register(
     handler: Callable[[DoctorProbeInput, ExecutionContext], DoctorProbeOutput],
     *,
     loopback: bool = False,
+    max_output_bytes: int = 4_096,
 ) -> None:
     registry.register(
         ToolSpec(
@@ -81,7 +82,7 @@ def _register(
             requires_elevation=False,
             requires_recovery=False,
             default_timeout_s=1.0,
-            max_output_bytes=4_096,
+            max_output_bytes=max_output_bytes,
             handler=handler,
         )
     )
@@ -282,6 +283,40 @@ def test_timeout_is_distinct_and_required_timeout_is_unhealthy(tmp_path: Path) -
     assert report.probes[0].truncated is False
 
 
+@pytest.mark.parametrize(
+    ("name", "overall", "probe_status"),
+    [
+        ("doctor.python", DoctorStatus.UNHEALTHY, ProbeStatus.FAIL),
+        ("doctor.uv", DoctorStatus.WARNING, ProbeStatus.WARNING),
+    ],
+)
+def test_registry_output_truncation_is_classified_before_generic_failure(
+    tmp_path: Path,
+    name: str,
+    overall: DoctorStatus,
+    probe_status: ProbeStatus,
+) -> None:
+    registry = ToolRegistry()
+    _register(
+        registry,
+        name,
+        lambda _request, _context: _output(
+            code=f"{name}.ok",
+            summary="The oversized diagnostic completed.",
+            strings={"version": "x" * 400},
+        ),
+        max_output_bytes=256,
+    )
+
+    report = Doctor(_config(tmp_path), registry, (name,)).run()
+
+    assert report.status is overall
+    assert report.probes[0].status is probe_status
+    assert report.probes[0].code == f"{name}.truncated"
+    assert report.probes[0].truncated is True
+    assert report.probes[0].data == {}
+
+
 def test_unexpected_exception_becomes_redacted_in_memory_incident(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -397,6 +432,56 @@ def test_default_inventory_is_complete_and_registry_classification_is_exact(
         }
 
 
+def test_quality_inventory_resolves_tools_without_executing_wrappers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "executed-marker"
+    wrappers: dict[str, Path] = {}
+    for name in ("bandit", "ruff"):
+        wrapper = tmp_path / name
+        wrapper.write_text(f"#!/bin/sh\nprintf unsafe > {marker}\n", encoding="utf-8")
+        wrapper.chmod(0o755)
+        wrappers[name] = wrapper
+
+    class ControlledResolver:
+        def resolve(self, name: str) -> Path:
+            if name in wrappers:
+                return wrappers[name]
+            raise ProbeError(
+                "executable_not_found", "trusted executable is unavailable"
+            )
+
+    command_calls: list[str] = []
+
+    def forbidden_command(
+        name: str,
+        _arguments: tuple[str, ...],
+        _context: ExecutionContext,
+    ) -> ProcessResult:
+        command_calls.append(name)
+        raise AssertionError("quality discovery executed a command")
+
+    monkeypatch.setattr(
+        "autonomous_agent.core.doctor.TrustedExecutableResolver",
+        ControlledResolver,
+    )
+    monkeypatch.setattr("autonomous_agent.core.doctor._command", forbidden_command)
+    config = _config(tmp_path)
+
+    report = Doctor(config, build_doctor_registry(config), ("doctor.quality",)).run()
+
+    assert report.status is DoctorStatus.WARNING
+    assert report.probes[0].code == "doctor.quality.partial"
+    assert report.probes[0].data == {
+        "available": ("bandit", "ruff"),
+        "bandit_path": str(wrappers["bandit"]),
+        "missing": ("mypy", "pytest"),
+        "ruff_path": str(wrappers["ruff"]),
+    }
+    assert command_calls == []
+    assert not marker.exists()
+
+
 def test_default_doctor_has_no_persistent_side_effects(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -468,7 +553,15 @@ def test_every_default_handler_produces_a_bounded_schema_valid_result(
         )
         return LoopbackResponse(status_code=200, data=data, body_bytes=64)
 
+    class AllPresentResolver:
+        def resolve(self, name: str) -> Path:
+            return Path("/usr/bin") / name
+
     monkeypatch.setattr("autonomous_agent.core.doctor._command", fake_command)
+    monkeypatch.setattr(
+        "autonomous_agent.core.doctor.TrustedExecutableResolver",
+        AllPresentResolver,
+    )
     monkeypatch.setattr("autonomous_agent.core.doctor.get_loopback_json", fake_loopback)
 
     report = Doctor(config, build_doctor_registry(config), DEFAULT_PROBE_NAMES).run()
