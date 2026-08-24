@@ -448,7 +448,9 @@ def _run_gtk(config: AgentConfig) -> int:
             scroll.set_child(form)
             page.append(scroll)
             self._load_settings_controls()
-            self._apply_theme(self.controller.preferences().theme)
+            preferences = self.controller.preferences()
+            self._apply_theme(preferences.theme)
+            self._apply_accessibility(preferences)
             return page
 
         @staticmethod
@@ -517,6 +519,7 @@ def _run_gtk(config: AgentConfig) -> int:
                 self.preference_status.set_text("Einstellungen konnten nicht gespeichert werden. Bitte Eingaben prüfen.")
                 return
             self._apply_theme(preferences.theme)
+            self._apply_accessibility(preferences)
             self.preference_status.set_text(
                 "Gespeichert. ACB verwendet diese Einstellungen für neue Antworten und die Bedienung."
             )
@@ -530,6 +533,23 @@ def _run_gtk(config: AgentConfig) -> int:
                 self.window.add_css_class("theme-light")
             elif theme == "dark":
                 self.window.add_css_class("theme-dark")
+
+        def _apply_accessibility(self, preferences: Any) -> None:
+            for css_class in (
+                "large-text",
+                "high-contrast",
+                "color-red-green",
+                "color-blue-yellow",
+                "color-monochrome",
+            ):
+                self.window.remove_css_class(css_class)
+            if preferences.large_text:
+                self.window.add_css_class("large-text")
+            if preferences.high_contrast:
+                self.window.add_css_class("high-contrast")
+            mode = preferences.color_blind_mode
+            if mode != "none":
+                self.window.add_css_class(f"color-{mode}")
 
         def _header(self) -> Any:
             bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
@@ -706,6 +726,12 @@ def _run_gtk(config: AgentConfig) -> int:
                 .theme-light .muted, .theme-light .subtitle { color: #53627a; }
                 .theme-light entry, .theme-light combobox { background: #ffffff; color: #172033; }
                 .theme-dark .app-shell { background: #070c16; }
+                .large-text .conversation, .large-text entry, .large-text button { font-size: 21px; }
+                .high-contrast .conversation, .high-contrast .composer { border: 2px solid #ffffff; }
+                .high-contrast .muted { color: #ffffff; }
+                .color-red-green .state-good, .color-red-green .offline { color: #00b7ff; }
+                .color-blue-yellow .state-good, .color-blue-yellow .offline { color: #ff7b00; }
+                .color-monochrome .app-shell, .color-monochrome .topbar, .color-monochrome .sidebar { background: #111111; color: #ffffff; }
                 """
             )
             gtk.StyleContext.add_provider_for_display(
