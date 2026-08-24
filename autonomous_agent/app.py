@@ -671,6 +671,7 @@ def _run_gtk(config: AgentConfig) -> int:
                 self.window.add_css_class("theme-dark")
 
         def _apply_accessibility(self, preferences: Any) -> None:
+            hints = self.controller.assistive_hints()
             for css_class in (
                 "large-text",
                 "high-contrast",
@@ -679,9 +680,9 @@ def _run_gtk(config: AgentConfig) -> int:
                 "color-monochrome",
             ):
                 self.window.remove_css_class(css_class)
-            if preferences.large_text:
+            if preferences.large_text or hints.large_text:
                 self.window.add_css_class("large-text")
-            if preferences.high_contrast:
+            if preferences.high_contrast or hints.high_contrast:
                 self.window.add_css_class("high-contrast")
             mode = preferences.color_blind_mode
             if mode != "none":
