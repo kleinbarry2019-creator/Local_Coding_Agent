@@ -8,8 +8,8 @@ import pytest
 from autonomous_agent.core.learning import (
     LearningService,
     ResearchSource,
-    _validate_research_url,
     _parse_feed,
+    _validate_research_url,
 )
 
 
