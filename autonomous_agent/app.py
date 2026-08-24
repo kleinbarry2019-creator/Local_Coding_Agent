@@ -136,6 +136,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.suggestion_view: Any = None
             self.update_view: Any = None
             self.account_status: Any = None
+            self.research_thread: threading.Thread | None = None
             self.recovered = self.controller.recover_pending()
 
         def do_activate(self) -> None:
@@ -469,11 +470,20 @@ def _run_gtk(config: AgentConfig) -> int:
                 )
 
         def _research_now(self, *_args: object) -> None:
-            threading.Thread(
-                target=self.controller.research_now,
+            if self.research_thread is not None and self.research_thread.is_alive():
+                return
+            self.research_thread = threading.Thread(
+                target=self._run_research,
                 name="acb-research-now",
                 daemon=True,
-            ).start()
+            )
+            self.research_thread.start()
+
+        def _run_research(self) -> None:
+            try:
+                self.controller.research_now()
+            finally:
+                self.research_thread = None
 
         def _create_account(self, username: Any, password: Any) -> None:
             try:

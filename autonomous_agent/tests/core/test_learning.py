@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from autonomous_agent.core.learning import (
     LearningService,
     ResearchSource,
+    _validate_research_url,
     _parse_feed,
 )
 
@@ -70,6 +72,30 @@ def test_feed_dtd_and_entity_declarations_are_rejected(tmp_path: Path) -> None:
     payload = b"<!DOCTYPE rss [<!ENTITY x 'expanded'>]><rss/>"
     with pytest.raises(ValueError, match="forbidden XML"):
         _parse_feed(payload, source)
+
+
+def test_research_url_rejects_non_https_ports() -> None:
+    with pytest.raises(ValueError, match="port"):
+        _validate_research_url("https://arxiv.org:8443/rss/cs.AI")
+
+
+def test_research_service_allows_only_one_in_flight_run(tmp_path: Path) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def fetch(_source: ResearchSource) -> bytes:
+        started.set()
+        release.wait(timeout=2)
+        return b"<rss><channel/></rss>"
+
+    service = _service(tmp_path, fetcher=fetch)
+    worker = threading.Thread(target=service.research_now)
+    worker.start()
+    assert started.wait(timeout=1)
+    assert service.research_now()["status"] == "busy"
+    release.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
 
 
 def test_accounts_store_hashes_and_exposes_only_public_sync_manifest(tmp_path: Path) -> None:

@@ -15,6 +15,7 @@ from autonomous_agent.core.config import (
     CliOverrides,
     ConfigError,
     ExecutionMode,
+    ensure_state_root,
     load_config,
 )
 from autonomous_agent.core.doctor import (
@@ -267,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if namespace.command == "learn":
             from autonomous_agent.core.learning import LearningService
 
+            ensure_state_root(config)
             service = LearningService(
                 config.paths.state_root,
                 config.paths.project_root,

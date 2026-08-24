@@ -11,10 +11,12 @@ turning the network into an untrusted code execution channel.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import secrets
+import socket
 import stat
 import tempfile
 import threading
@@ -26,8 +28,9 @@ import xml.etree.ElementTree as ET  # nosec B405 - DTD/entity declarations are r
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from http.client import HTTPMessage
 from pathlib import Path
-from typing import cast
+from typing import IO, cast
 
 MAX_FEED_BYTES = 512_000
 MAX_ITEMS_PER_FEED = 20
@@ -357,6 +360,7 @@ class LearningService:
         self.interval_s = max(300, min(interval_s, 7 * 24 * 60 * 60))
         self._fetcher = _fetch_feed if fetcher is None else fetcher
         self._lock = threading.RLock()
+        self._research_running = False
 
     def status(self) -> LearningStatus:
         metadata = self.store.metadata()
@@ -392,6 +396,24 @@ class LearningService:
         return self.research_now()
 
     def research_now(self) -> dict[str, object]:
+        with self._lock:
+            if self._research_running:
+                return {
+                    "status": "busy",
+                    "started_at": _timestamp(),
+                    "finished_at": _timestamp(),
+                    "sources": 0,
+                    "items": 0,
+                    "message": "research already running",
+                }
+            self._research_running = True
+        try:
+            return self._research_now()
+        finally:
+            with self._lock:
+                self._research_running = False
+
+    def _research_now(self) -> dict[str, object]:
         started = _timestamp()
         if not self.network_enabled:
             result = {
@@ -592,16 +614,59 @@ class LearningScheduler:
 
 
 def _fetch_feed(source: ResearchSource) -> bytes:
-    parsed = urllib.parse.urlsplit(source.url)
-    if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_HOSTS:
-        raise ValueError("research source is not trusted")
+    _validate_research_url(source.url)
     request = urllib.request.Request(
         source.url,
         headers={"User-Agent": "ACB-Learning/1.0", "Accept": "application/rss+xml, application/xml"},
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - HTTPS allowlist above
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
+    with opener.open(request, timeout=10) as response:  # nosec B310 - HTTPS allowlist above
         return cast(bytes, response.read(MAX_FEED_BYTES + 1))
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        new_url: str,
+    ) -> urllib.request.Request | None:
+        _validate_research_url(new_url)
+        return super().redirect_request(request, fp, code, msg, headers, new_url)
+
+
+def _validate_research_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_HOSTS:
+        raise ValueError("research source is not trusted")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("research source port is invalid") from error
+    if port not in {None, 443}:
+        raise ValueError("research source port is not allowed")
+    hostname = parsed.hostname
+    if hostname is None:
+        raise ValueError("research source host is missing")
+    try:
+        addresses = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+    except OSError as error:
+        raise ValueError("research source host could not be resolved") from error
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("research source resolves to a non-public address")
 
 
 def _parse_feed(payload: bytes, source: ResearchSource) -> tuple[KnowledgeItem, ...]:
