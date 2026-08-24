@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 from autonomous_agent.core.preferences import ProfileStore, UserPreferences
 
@@ -315,11 +316,13 @@ def _feedback(value: Mapping[str, object]) -> TaskFeedback:
         raise RuntimeError("feedback record is invalid")
     if type(rating) is not int or not 1 <= rating <= 10:
         raise RuntimeError("feedback rating is invalid")
-    assert isinstance(session_id, str)
-    assert isinstance(comment, str)
-    assert isinstance(feedback_id, str)
-    assert isinstance(created_at, str)
-    return TaskFeedback(feedback_id, session_id, rating, comment, created_at)
+    return TaskFeedback(
+        cast(str, feedback_id),
+        cast(str, session_id),
+        rating,
+        cast(str, comment),
+        cast(str, created_at),
+    )
 
 
 __all__ = [
