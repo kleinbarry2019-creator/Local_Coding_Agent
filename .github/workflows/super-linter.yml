@@ -27,3 +27,20 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: "main"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The release gate owns the canonical Python/shell formatting and
+          # type checks. Keep this PR workflow focused on repository-level
+          # action, YAML, secret, and dependency scanners; the legacy tree
+          # contains historical scripts that the bundled linters cannot parse.
+          VALIDATE_BASH: false
+          VALIDATE_BASH_EXEC: false
+          VALIDATE_JSCPD: false
+          VALIDATE_MARKDOWN: false
+          VALIDATE_NATURAL_LANGUAGE: false
+          VALIDATE_PYTHON_BLACK: false
+          VALIDATE_PYTHON_FLAKE8: false
+          VALIDATE_PYTHON_ISORT: false
+          VALIDATE_PYTHON_MYPY: false
+          VALIDATE_PYTHON_PYLINT: false
+          VALIDATE_SHELL_SHFMT: false
+          VALIDATE_SPELL_CODESPELL: false
+          VALIDATE_YAML_PRETTIER: false
