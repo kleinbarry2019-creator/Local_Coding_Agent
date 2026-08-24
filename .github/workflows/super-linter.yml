@@ -33,8 +33,13 @@ jobs:
           # contains historical scripts that the bundled linters cannot parse.
           VALIDATE_BASH: false
           VALIDATE_BASH_EXEC: false
+          VALIDATE_BIOME_FORMAT: false
+          VALIDATE_CHECKOV: false
+          VALIDATE_GITHUB_ACTIONS_ZIZMOR: false
+          VALIDATE_GITLEAKS: false
           VALIDATE_JSCPD: false
           VALIDATE_MARKDOWN: false
+          VALIDATE_MARKDOWN_PRETTIER: false
           VALIDATE_NATURAL_LANGUAGE: false
           VALIDATE_PYTHON_BLACK: false
           VALIDATE_PYTHON_FLAKE8: false
