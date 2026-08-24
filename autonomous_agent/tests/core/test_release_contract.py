@@ -4,6 +4,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 RELEASE_SCRIPT = REPOSITORY_ROOT / "tools" / "release_check.sh"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release-gate.yml"
 DEVELOPMENT_RULES = REPOSITORY_ROOT / "docs" / "DEVELOPMENT_RULES.md"
+V50_AGENT = REPOSITORY_ROOT / "autonomous_agent" / "safe_agent_v50.py"
 
 REQUIRED_GATE_FRAGMENTS = {
     RELEASE_SCRIPT: (
@@ -103,3 +104,11 @@ def test_error_correction_workflow_is_complete_and_ordered() -> None:
     assert [line.split(".", 1)[0] for line in numbered_steps] == [
         str(number) for number in range(1, 10)
     ]
+
+
+def test_v50_sandbox_uses_python_from_its_mounted_system_tree() -> None:
+    document = V50_AGENT.read_text(encoding="utf-8")
+    run_python = document.split("def run_python", 1)[1].split("TOOL_NAMES", 1)[0]
+
+    assert '"/usr/bin/python3"' in run_python
+    assert "sys.executable" not in run_python
