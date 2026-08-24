@@ -458,6 +458,30 @@ def _run_gtk(config: AgentConfig) -> int:
                 ),
             )
             page.append(create)
+            recovery_title = Gtk.Label(label="Passwort wiederherstellen")
+            recovery_title.set_xalign(0)
+            recovery_title.add_css_class("section-title")
+            page.append(recovery_title)
+            recovery_username = Gtk.Entry()
+            recovery_username.set_placeholder_text("Benutzername")
+            page.append(recovery_username)
+            recovery_answer = Gtk.Entry()
+            recovery_answer.set_placeholder_text("Antwort auf die Sicherheitsfrage")
+            recovery_answer.set_visibility(False)
+            page.append(recovery_answer)
+            recovery_password = Gtk.Entry()
+            recovery_password.set_placeholder_text("Neues Passwort (mindestens 10 Zeichen)")
+            recovery_password.set_visibility(False)
+            page.append(recovery_password)
+            recover = Gtk.Button(label="Passwort zurücksetzen")
+            recover.set_halign(Gtk.Align.START)
+            recover.connect(
+                "clicked",
+                lambda *_args: self._reset_account(
+                    recovery_username, recovery_answer, recovery_password
+                ),
+            )
+            page.append(recover)
             self.account_status = Gtk.Label(label="Noch kein lokales Konto angelegt.")
             self.account_status.set_xalign(0)
             self.account_status.set_wrap(True)
@@ -980,6 +1004,26 @@ def _run_gtk(config: AgentConfig) -> int:
             )
             if self.stack is not None:
                 self.stack.set_visible_child_name("tasks")
+
+        def _reset_account(self, username: Any, answer: Any, password: Any) -> None:
+            try:
+                account = self.controller.reset_password(
+                    username.get_text().strip(),
+                    answer.get_text(),
+                    password.get_text(),
+                )
+            except (TypeError, ValueError, RuntimeError):
+                account = None
+            answer.set_text("")
+            password.set_text("")
+            if account is None:
+                self.account_status.set_text(
+                    "Passwort konnte nicht zurückgesetzt werden. Prüfe Benutzername, Antwort und Passwortlänge."
+                )
+            else:
+                self.account_status.set_text(
+                    f"Passwort für {account.username} wurde lokal neu gesetzt."
+                )
 
         def _close_request(self, *_args: object) -> bool:
             self.controller.close()
