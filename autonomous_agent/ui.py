@@ -42,6 +42,7 @@ from autonomous_agent.core.user_experience import (
     detect_assistive_hints,
     detect_voice_capabilities,
 )
+from autonomous_agent.core.voice import SpeechResult, VoiceService, VoiceStatus
 
 UI_NAME = "ACB – Autonome Computing Butler"
 DEFAULT_UI_HOST = "127.0.0.1"
@@ -127,6 +128,7 @@ class RuntimeTaskController:
         self.profile_store = ProfileStore(config.paths.state_root)
         self.onboarding = OnboardingService(self.profile_store)
         self.feedback = TaskFeedbackStore(config.paths.state_root)
+        self.voice = VoiceService()
         self._learning_scheduler = (
             LearningScheduler(self.learning) if start_learning else None
         )
@@ -167,6 +169,12 @@ class RuntimeTaskController:
 
     def feedback_items(self, limit: int = 50) -> tuple[TaskFeedback, ...]:
         return self.feedback.items(limit)
+
+    def voice_status(self) -> VoiceStatus:
+        return self.voice.status()
+
+    def speak(self, text: str) -> SpeechResult:
+        return self.voice.speak(text)
 
     def submit(self, goal: str) -> UiTask:
         request_id = f"request-{uuid.uuid4().hex}"
@@ -414,6 +422,12 @@ class AcbUiServer:
     def audit_status(self) -> dict[str, object]:
         return self._controller.audit_status()
 
+    def voice_status(self) -> dict[str, object]:
+        return self._controller.voice_status().to_dict()
+
+    def speak(self, text: str) -> dict[str, object]:
+        return self._controller.speak(text).to_dict()
+
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> dict[str, object]:
         return self._controller.add_feedback(session_id, rating, comment).to_dict()
 
@@ -485,6 +499,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, self._app().audit_status())
             return
+        if path == "/api/voice":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().voice_status())
+            return
         if path.startswith("/api/tasks/"):
             request_id = path.removeprefix("/api/tasks/")
             if not _REQUEST_ID_PATTERN.fullmatch(request_id):
@@ -520,6 +540,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/onboarding",
             "/api/feedback",
             "/api/undo",
+            "/api/voice/speak",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -574,6 +595,17 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 result = self._app().undo(session_id, step)
             except (TypeError, ValueError, RuntimeError):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "undo is invalid or unavailable")
+                return
+            self._send_json(HTTPStatus.OK, result)
+            return
+        if path == "/api/voice/speak":
+            text = payload.get("text")
+            try:
+                if not isinstance(text, str):
+                    raise TypeError("speech text is invalid")
+                result = self._app().speak(text)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "speech request is invalid")
                 return
             self._send_json(HTTPStatus.OK, result)
             return

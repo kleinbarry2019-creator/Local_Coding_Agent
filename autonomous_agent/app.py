@@ -143,6 +143,8 @@ def _run_gtk(config: AgentConfig) -> int:
             self.onboarding_status_view: Any = None
             self.undo_button: Any = None
             self.audit_button: Any = None
+            self.speak_button: Any = None
+            self.voice_thread: threading.Thread | None = None
             self.feedback_box: Any = None
             self.feedback_rating: Any = None
             self.feedback_comment: Any = None
@@ -662,6 +664,9 @@ def _run_gtk(config: AgentConfig) -> int:
             self.audit_button = Gtk.Button(label="Audit prüfen")
             self.audit_button.connect("clicked", self._show_audit)
             bar.append(self.audit_button)
+            self.speak_button = Gtk.Button(label="🔊 Vorlesen")
+            self.speak_button.connect("clicked", self._speak_current)
+            bar.append(self.speak_button)
             offline = Gtk.Label(label="● OFFLINE · LOKAL")
             offline.set_hexpand(True)
             offline.set_xalign(1)
@@ -793,6 +798,22 @@ def _run_gtk(config: AgentConfig) -> int:
                 f"Sequenz: {result['sequence']}\n"
                 f"Code: {result['code']}"
             )
+
+        def _speak_current(self, *_args: object) -> None:
+            text = self.current.get_text().strip()
+            if not text or (self.voice_thread is not None and self.voice_thread.is_alive()):
+                return
+            def speak() -> None:
+                result = self.controller.speak(text)
+                GLib.idle_add(self._show_speech_result, result)
+
+            self.voice_thread = threading.Thread(target=speak, name="acb-voice", daemon=True)
+            self.voice_thread.start()
+
+        def _show_speech_result(self, result: Any) -> bool:
+            if not result.started:
+                self.current.set_text(f"Sprachausgabe nicht gestartet: {result.diagnostic}")
+            return False
 
         def _refresh_learning(self) -> None:
             status = self.controller.learning_status()
