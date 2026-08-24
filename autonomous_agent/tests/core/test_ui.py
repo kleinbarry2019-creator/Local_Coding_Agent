@@ -331,6 +331,9 @@ def test_ui_real_http_e2e_executes_and_persists_task(tmp_path: Path) -> None:
         result = cast(Mapping[str, object], task["result"])
         completion = cast(Mapping[str, object], result["completion"])
         assert completion["completed"] is True
+        protocol = cast(Mapping[str, object], result["protocol"])
+        assert protocol["event_count"] > 0
+        assert (tmp_path / "project" / str(protocol["path"])).is_file()
         assert (tmp_path / "project" / "ui-result.txt").read_text() == "verified"
         session_id = task["session_id"]
         status, undone = _post_json(

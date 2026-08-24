@@ -277,6 +277,10 @@ class RuntimeTaskController:
             result = operation()
             document = result.to_dict()
             session_id = result.session_id
+            try:
+                document["protocol"] = self.export_audit_log(session_id)
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                document["protocol"] = {"error": "protocol-export-failed"}
             if result.completion.completed:
                 self.learning.review_task(goal, document)
             self._update_task(
