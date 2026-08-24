@@ -514,7 +514,16 @@ class AcbUiServer:
         return self._controller.export_audit_log(session_id)
 
     def voice_status(self) -> dict[str, object]:
-        return self._controller.voice_status().to_dict()
+        status = self._controller.voice_status().to_dict()
+        preferences = self._controller.preferences()
+        status.update(
+            {
+                "voice_input_enabled": preferences.voice_input,
+                "voice_output_enabled": preferences.voice_output,
+                "wake_phrase": preferences.wake_phrase,
+            }
+        )
+        return status
 
     def speak(self, text: str) -> dict[str, object]:
         return self._controller.speak(text).to_dict()

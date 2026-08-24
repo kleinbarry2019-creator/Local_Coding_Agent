@@ -294,6 +294,12 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert preferences["theme"] == "light"
         assert preferences["simple_language"] is True
         assert server.preferences()["nickname"] == "Alex"
+        voice_status, voice, _ = _get_json(
+            f"{server.url}api/voice", token=server.token
+        )
+        assert voice_status == 200
+        assert voice["voice_output_enabled"] is False
+        assert isinstance(voice["wake_phrase"], str)
         status, onboarding = _post_json(
             f"{server.url}api/onboarding", {"action": "start-trial"}, token=server.token
         )
