@@ -75,6 +75,20 @@ def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None
     assert runtime.audit_status()["ok"] is True
 
 
+def test_runtime_exports_redacted_audit_log_to_project_protocols(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runtime = AutonomyRuntime(config)
+    result = runtime.run("Erstelle `export-me.txt` mit dem Inhalt `logged`")
+
+    exported = runtime.export_audit_log(result.session_id)
+    path = config.paths.project_root / str(exported["path"])
+
+    assert exported["event_count"] > 0
+    assert path.parent.name == "Protokolle"
+    assert path.is_file()
+    assert result.session_id in path.read_text(encoding="utf-8")
+
+
 def test_runtime_rejects_state_inside_project(tmp_path: Path) -> None:
     config = _config(tmp_path)
     unsafe = tmp_path / "project" / ".state"

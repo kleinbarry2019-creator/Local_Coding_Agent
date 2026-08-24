@@ -680,6 +680,9 @@ def _run_gtk(config: AgentConfig) -> int:
             terminal_button = Gtk.Button(label="🖥 Protokoll")
             terminal_button.connect("clicked", self._show_terminal_log)
             bar.append(terminal_button)
+            export_button = Gtk.Button(label="⇩ Export")
+            export_button.connect("clicked", self._export_protocol)
+            bar.append(export_button)
             self.speak_button = Gtk.Button(label="🔊 Vorlesen")
             self.speak_button.connect("clicked", self._speak_current)
             bar.append(self.speak_button)
@@ -854,6 +857,18 @@ def _run_gtk(config: AgentConfig) -> int:
             scroll.set_child(view)
             self.log_window.set_child(scroll)
             self.log_window.present()
+
+        def _export_protocol(self, *_args: object) -> None:
+            try:
+                result = self.controller.export_audit_log()
+            except (TypeError, ValueError, RuntimeError, OSError):
+                self.current.set_text("Protokoll konnte nicht exportiert werden.")
+                return
+            self.current.set_text(
+                "Protokoll exportiert\n"
+                f"Datei: {result['path']}\n"
+                f"Ereignisse: {result['event_count']}"
+            )
 
         def _close_log_window(self, *_args: object) -> bool:
             self.log_window = None

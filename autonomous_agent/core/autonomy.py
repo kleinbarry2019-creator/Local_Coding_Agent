@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 import time
 import uuid
 from collections.abc import Mapping
@@ -447,6 +449,49 @@ class AutonomyRuntime:
     def audit_events(self, limit: int = 100) -> tuple[dict[str, object], ...]:
         """Expose bounded sanitized events for the local process viewer."""
         return self.audit.recent_events(limit=limit)
+
+    def export_audit_log(self, session_id: str | None = None) -> dict[str, object]:
+        """Persist a redacted audit snapshot beneath the project Protokolle folder."""
+        if session_id is not None and (
+            type(session_id) is not str or not session_id.startswith("session-")
+        ):
+            raise ValueError("session id is invalid")
+        events = self.audit.recent_events(limit=200)
+        if session_id is not None:
+            events = tuple(
+                event for event in events if event["session_id"] == session_id
+            )
+        directory = self.config.paths.project_root / "Protokolle"
+        if directory.exists() and directory.is_symlink():
+            raise ValueError("audit directory must not be a symlink")
+        directory.mkdir(mode=0o700, exist_ok=True)
+        filename = f"audit-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
+        destination = directory / filename
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".audit-", dir=directory)
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, 0o600)
+            payload = json.dumps(
+                {"session_id": session_id, "events": list(events)},
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            with os.fdopen(descriptor, "wb", closefd=True) as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            temporary.unlink(missing_ok=True)
+            raise
+        return {
+            "path": destination.relative_to(self.config.paths.project_root).as_posix(),
+            "event_count": len(events),
+        }
 
     def _execute(
         self,

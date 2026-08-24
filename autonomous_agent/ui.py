@@ -76,6 +76,8 @@ class _Runtime(Protocol):
 
     def audit_events(self, limit: int = 100) -> tuple[dict[str, object], ...]: ...
 
+    def export_audit_log(self, session_id: str | None = None) -> dict[str, object]: ...
+
 
 @dataclass
 class UiTask:
@@ -255,6 +257,9 @@ class RuntimeTaskController:
 
     def audit_events(self, limit: int = 100) -> list[dict[str, object]]:
         return [dict(item) for item in self.runtime.audit_events(limit)]
+
+    def export_audit_log(self, session_id: str | None = None) -> dict[str, object]:
+        return self.runtime.export_audit_log(session_id)
 
     def _run_task(self, request_id: str, goal: str) -> None:
         self._execute(request_id, goal, lambda: self.runtime.run(goal))
@@ -451,6 +456,9 @@ class AcbUiServer:
     def audit_events(self, limit: int = 100) -> list[dict[str, object]]:
         return self._controller.audit_events(limit)
 
+    def export_audit_log(self, session_id: str | None = None) -> dict[str, object]:
+        return self._controller.export_audit_log(session_id)
+
     def voice_status(self) -> dict[str, object]:
         return self._controller.voice_status().to_dict()
 
@@ -612,6 +620,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/undo",
             "/api/voice/speak",
             "/api/account",
+            "/api/audit/export",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -663,6 +672,18 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "account request is invalid")
                 return
             self._send_json(HTTPStatus.OK, result or {})
+            return
+        if path == "/api/audit/export":
+            session_id = payload.get("session_id")
+            if session_id is not None and not isinstance(session_id, str):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "session id is invalid")
+                return
+            try:
+                result = self._app().export_audit_log(session_id)
+            except (TypeError, ValueError, RuntimeError, OSError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "audit export failed")
+                return
+            self._send_json(HTTPStatus.OK, result)
             return
         if path == "/api/onboarding":
             action = payload.get("action")
