@@ -792,11 +792,16 @@ def _run_gtk(config: AgentConfig) -> int:
 
         def _show_audit(self, *_args: object) -> None:
             result = self.controller.audit_status()
+            events = self.controller.audit_events(20)
+            recent = "\n".join(
+                f"#{item['sequence']} {item['event_type']} · {item['created_at']}"
+                for item in events[:8]
+            )
             self.current.set_text(
                 "Audit-Prüfung\n"
                 f"Status: {'gültig' if result['ok'] else 'ungültig'}\n"
                 f"Sequenz: {result['sequence']}\n"
-                f"Code: {result['code']}"
+                f"Code: {result['code']}\n\nLetzte Ereignisse:\n{recent or 'keine'}"
             )
 
         def _speak_current(self, *_args: object) -> None:

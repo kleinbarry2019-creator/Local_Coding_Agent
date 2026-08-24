@@ -504,6 +504,37 @@ class AuditLog:
             )
         raise clean_error
 
+    def recent_events(self, *, limit: int = 100) -> tuple[dict[str, object], ...]:
+        """Return a bounded, read-only view of the newest sanitized events."""
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("audit event limit must be between 1 and 200")
+        try:
+            with self._locked():
+                rows = self._database_rows_locked()
+        except EventError:
+            raise
+        except OSError as error:
+            raise EventError(
+                "filesystem_failed", "the audit database could not be read"
+            ) from error
+        events: list[dict[str, object]] = []
+        for sequence, event_id, session_id, event_type, payload_json, _previous, _current, created_at in reversed(rows[-limit:]):
+            try:
+                payload = json.loads(payload_json)
+            except json.JSONDecodeError:
+                payload = {"error": "payload-unreadable"}
+            events.append(
+                {
+                    "sequence": sequence,
+                    "event_id": event_id,
+                    "session_id": session_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                    "created_at": created_at,
+                }
+            )
+        return tuple(events)
+
     def _verify(self) -> AuditVerification:
         with self._locked():
             try:

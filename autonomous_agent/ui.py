@@ -74,6 +74,8 @@ class _Runtime(Protocol):
 
     def audit_status(self) -> dict[str, object]: ...
 
+    def audit_events(self, limit: int = 100) -> tuple[dict[str, object], ...]: ...
+
 
 @dataclass
 class UiTask:
@@ -251,6 +253,9 @@ class RuntimeTaskController:
     def audit_status(self) -> dict[str, object]:
         return self.runtime.audit_status()
 
+    def audit_events(self, limit: int = 100) -> list[dict[str, object]]:
+        return [dict(item) for item in self.runtime.audit_events(limit)]
+
     def _run_task(self, request_id: str, goal: str) -> None:
         self._execute(request_id, goal, lambda: self.runtime.run(goal))
 
@@ -426,6 +431,9 @@ class AcbUiServer:
     def audit_status(self) -> dict[str, object]:
         return self._controller.audit_status()
 
+    def audit_events(self, limit: int = 100) -> list[dict[str, object]]:
+        return self._controller.audit_events(limit)
+
     def voice_status(self) -> dict[str, object]:
         return self._controller.voice_status().to_dict()
 
@@ -502,6 +510,17 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
                 return
             self._send_json(HTTPStatus.OK, self._app().audit_status())
+            return
+        if path == "/api/audit/events":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            try:
+                events = self._app().audit_events()
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "audit events unavailable")
+                return
+            self._send_json(HTTPStatus.OK, {"events": events})
             return
         if path == "/api/voice":
             if not self._authorized():

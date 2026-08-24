@@ -444,6 +444,10 @@ class AutonomyRuntime:
             "head_hash": verification.head_hash,
         }
 
+    def audit_events(self, limit: int = 100) -> tuple[dict[str, object], ...]:
+        """Expose bounded sanitized events for the local process viewer."""
+        return self.audit.recent_events(limit=limit)
+
     def _execute(
         self,
         session_id: str,
