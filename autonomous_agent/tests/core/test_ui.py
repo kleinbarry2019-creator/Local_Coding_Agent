@@ -70,8 +70,13 @@ def _start(server: AcbUiServer) -> threading.Thread:
     raise AssertionError("UI server did not start")
 
 
-def _get_json(url: str) -> tuple[int, Mapping[str, object], dict[str, str]]:
-    with urlopen(url, timeout=2) as response:
+def _get_json(
+    url: str, *, token: str | None = None
+) -> tuple[int, Mapping[str, object], dict[str, str]]:
+    request = Request(url)
+    if token is not None:
+        request.add_header("X-ACB-Token", token)
+    with urlopen(request, timeout=2) as response:
         return response.status, json.loads(response.read()), dict(response.headers)
 
 
@@ -289,7 +294,9 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         request_id = accepted["request_id"]
         assert isinstance(request_id, str)
         for _ in range(50):
-            status, task, _ = _get_json(f"{server.url}api/tasks/{request_id}")
+            status, task, _ = _get_json(
+                f"{server.url}api/tasks/{request_id}", token=server.token
+            )
             assert status == 200
             if task["status"] == "completed":
                 break
@@ -323,7 +330,9 @@ def test_ui_real_http_e2e_executes_and_persists_task(tmp_path: Path) -> None:
         request_id = accepted["request_id"]
         task: Mapping[str, object]
         for _ in range(100):
-            _, task, _ = _get_json(f"{server.url}api/tasks/{request_id}")
+            _, task, _ = _get_json(
+                f"{server.url}api/tasks/{request_id}", token=server.token
+            )
             if task["status"] in {"completed", "failed", "rejected"}:
                 break
             time.sleep(0.02)

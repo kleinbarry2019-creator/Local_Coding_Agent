@@ -561,6 +561,9 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/tasks":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
             self._send_json(
                 HTTPStatus.OK,
                 {"tasks": [task.to_dict() for task in reversed(app.tasks())]},
@@ -622,6 +625,9 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, self._app().voice_status())
             return
         if path.startswith("/api/tasks/"):
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
             request_id = path.removeprefix("/api/tasks/")
             if not _REQUEST_ID_PATTERN.fullmatch(request_id):
                 self._send_error_json(HTTPStatus.NOT_FOUND, "task not found")
@@ -633,6 +639,9 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, task.to_dict())
             return
         if path.startswith("/api/sessions/"):
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
             session_id = path.removeprefix("/api/sessions/")
             if not _SESSION_ID_PATTERN.fullmatch(session_id):
                 self._send_error_json(HTTPStatus.NOT_FOUND, "session not found")
