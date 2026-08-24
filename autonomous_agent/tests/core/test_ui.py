@@ -390,6 +390,11 @@ def test_ui_http_account_recovery_never_returns_credentials(tmp_path: Path) -> N
         assert status == 200
         assert created["recovery_configured"] is True
         assert "password_hash" not in str(created)
+        onboarding_status, onboarding, _ = _get_json(
+            f"{server.url}api/onboarding", token=server.token
+        )
+        assert onboarding_status == 200
+        assert onboarding["phase"] == "ready"
         status, denied = _post_json(
             f"{server.url}api/account",
             {

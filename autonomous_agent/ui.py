@@ -522,6 +522,7 @@ class AcbUiServer:
             security_question=security_question,
             security_answer=security_answer,
         )
+        self._controller.complete_onboarding()
         return account.to_public_dict()
 
     def reset_password(
