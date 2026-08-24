@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class RecoveryGovernanceEngine:
@@ -78,7 +78,7 @@ class RecoveryGovernanceEngine:
             "policy_decision": decision,
             "confidence": confidence,
             "authorization": action,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
 
