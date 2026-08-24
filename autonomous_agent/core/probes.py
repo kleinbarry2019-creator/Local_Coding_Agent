@@ -945,12 +945,19 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
                 canonical_prefix,
                 owners,
             )
-            _validate_directory_chain(
-                canonical_prefix,
-                canonical_bin,
-                owners,
-                "untrusted_executable_root",
-            )
+            try:
+                _validate_directory_chain(
+                    canonical_prefix,
+                    canonical_bin,
+                    owners,
+                    "untrusted_executable_root",
+                )
+            except ProbeError:
+                # Homebrew is optional.  Keep the fixed system roots when
+                # available; fail closed when this is the only source.
+                if approved:
+                    return tuple(approved)
+                raise
             seen.add(canonical_bin)
             approved.append(root)
     return tuple(approved)
