@@ -143,6 +143,11 @@ def _run_gtk(config: AgentConfig) -> int:
             self.onboarding_status_view: Any = None
             self.undo_button: Any = None
             self.audit_button: Any = None
+            self.feedback_box: Any = None
+            self.feedback_rating: Any = None
+            self.feedback_comment: Any = None
+            self.feedback_status: Any = None
+            self.feedback_session: str | None = None
             self.research_thread: threading.Thread | None = None
             self.recovered = self.controller.recover_pending()
 
@@ -215,6 +220,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.send.connect("clicked", self._submit)
             composer.append(self.send)
             main.append(composer)
+            main.append(self._feedback_panel())
 
             self.stack.add_titled(self._welcome_page(), "welcome", "Willkommen")
             self.stack.add_titled(main, "tasks", "Aufträge")
@@ -234,6 +240,35 @@ def _run_gtk(config: AgentConfig) -> int:
             for task in self.recovered:
                 self._show_task(task, recovered=True)
             GLib.timeout_add(400, self._refresh)
+
+        def _feedback_panel(self) -> Any:
+            panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            panel.add_css_class("feedback-panel")
+            panel.set_visible(False)
+            title = Gtk.Label(label="Auftrag bewerten")
+            title.set_xalign(0)
+            title.add_css_class("section-title")
+            panel.append(title)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            self.feedback_rating = Gtk.ComboBoxText()
+            for rating in range(1, 11):
+                self.feedback_rating.append(str(rating), str(rating))
+            self.feedback_rating.set_active_id("10")
+            row.append(self.feedback_rating)
+            self.feedback_comment = Gtk.Entry()
+            self.feedback_comment.set_hexpand(True)
+            self.feedback_comment.set_placeholder_text("Optionaler Kommentar")
+            row.append(self.feedback_comment)
+            save = Gtk.Button(label="Bewertung speichern")
+            save.connect("clicked", self._save_feedback)
+            row.append(save)
+            panel.append(row)
+            self.feedback_status = Gtk.Label(label="")
+            self.feedback_status.set_xalign(0)
+            self.feedback_status.add_css_class("muted")
+            panel.append(self.feedback_status)
+            self.feedback_box = panel
+            return panel
 
         def _welcome_page(self) -> Any:
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -703,8 +738,33 @@ def _run_gtk(config: AgentConfig) -> int:
                     self.undo_button.set_sensitive(latest_completed is not None)
             else:
                 self.current.set_text(f"{active.goal}\nStatus: {active.status}")
+            self._refresh_feedback(tasks)
             self._refresh_learning()
             return True
+
+        def _refresh_feedback(self, tasks: list[UiTask]) -> None:
+            completed = next(
+                (item for item in reversed(tasks) if item.status == "completed" and item.session_id),
+                None,
+            )
+            if completed is None or completed.session_id is None or self.feedback_box is None:
+                return
+            if self.feedback_session != completed.session_id:
+                self.feedback_session = completed.session_id
+                self.feedback_box.set_visible(True)
+                self.feedback_status.set_text("Wie bewertest du Ergebnis und Erklärung?")
+
+        def _save_feedback(self, *_args: object) -> None:
+            if self.feedback_session is None or self.feedback_rating is None:
+                return
+            try:
+                rating = int(self.feedback_rating.get_active_id() or "10")
+                comment = self.feedback_comment.get_text().strip()
+                self.controller.add_feedback(self.feedback_session, rating, comment)
+            except (TypeError, ValueError, RuntimeError):
+                self.feedback_status.set_text("Bewertung konnte nicht gespeichert werden.")
+                return
+            self.feedback_status.set_text("Danke. Die Bewertung wurde lokal gespeichert.")
 
         def _undo_last(self, *_args: object) -> None:
             completed = next(
@@ -797,9 +857,12 @@ def _run_gtk(config: AgentConfig) -> int:
                 self.account_status.set_text("Konto konnte nicht angelegt werden. Prüfe Benutzername und Passwort.")
                 return
             password.set_text("")
+            self.controller.complete_onboarding()
             self.account_status.set_text(
                 f"Konto {account.username} lokal angelegt. Geräte-ID: {account.device_id}"
             )
+            if self.stack is not None:
+                self.stack.set_visible_child_name("tasks")
 
         def _close_request(self, *_args: object) -> bool:
             self.controller.close()
