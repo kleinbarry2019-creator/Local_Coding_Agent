@@ -124,6 +124,32 @@ Die App benötigt GTK 4 und PyGObject auf dem lokalen System. Falls diese
 Desktop-Integration nicht vorhanden ist, bleibt `acb ui` als sichere lokale
 Browser-Oberfläche verfügbar.
 
+### Lernen, Recherche und kontrollierte Selbstentwicklung
+
+ACB besitzt in der Desktop-App eigene Reiter für `Wissen & Recherche`,
+`Verbesserungen`, `Selbstentwicklung` sowie `Konto & Sync`. Ein lokaler
+Scheduler prüft in regelmäßigen Abständen allow-listete HTTPS-Feeds zu KI- und
+Sicherheitsmeldungen. Ohne Netz bleibt der Scheduler lokal verfügbar und meldet
+den Offline-Zustand; gespeichertes Wissen, Auftragsnachprüfungen und Vorschläge
+bleiben nutzbar.
+
+Neue Informationen werden als lokale Wissenseinträge und nachvollziehbare
+Verbesserungsvorschläge abgelegt. Ein externer Artikel kann niemals direkt Code
+ausführen. Eine mögliche Änderung wird erst nach Ressourcenprüfung,
+Acceptance-Tests, Security-Scan, Release-Gate und Checkpoint/Rollback zur
+Übernahme zugelassen. Damit kann ACB kontinuierlich lernen und konkrete
+Verbesserungen vorbereiten, ohne die Sicherheitsgrenzen des Systems zu
+überspringen.
+
+Abgeschlossene Aufgaben erzeugen automatisch eine spätere Review-Notiz, zum
+Beispiel für Regressionstests, Dokumentation oder sicherere Automatisierung.
+Lokale Konten werden mit scrypt-Passwort-Hashes gespeichert. Die Geräte- und
+Kontostruktur für eine spätere system- und netzwerkübergreifende Synchronisation
+ist vorbereitet; Passwörter und Geheimnisse werden niemals in ein Sync-Mani-
+fest exportiert und es wird keine Cloud-Verbindung ohne ausdrückliches Pairing
+angelegt. Die Recherche kann für eine Sitzung über `ACB_RESEARCH_NETWORK=0`
+abgeschaltet werden.
+
 Example (shown on multiple lines here only for readability):
 
 ```json

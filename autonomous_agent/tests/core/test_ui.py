@@ -191,6 +191,14 @@ def test_cli_exposes_loopback_ui_command() -> None:
         "project": None,
         "state_dir": None,
     }
+    learn = cli.build_parser().parse_args(["learn", "--network", "--json"])
+    assert vars(learn) == {
+        "command": "learn",
+        "network": True,
+        "json": True,
+        "project": None,
+        "state_dir": None,
+    }
 
 
 def test_controller_resumes_persisted_interrupted_work(tmp_path: Path) -> None:

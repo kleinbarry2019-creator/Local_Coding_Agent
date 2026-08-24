@@ -19,6 +19,15 @@ from urllib.parse import urlsplit
 from autonomous_agent.core.autonomy import AutonomyRuntime, RuntimeResult
 from autonomous_agent.core.config import AgentConfig
 from autonomous_agent.core.goals import GoalError
+from autonomous_agent.core.learning import (
+    ImprovementSuggestion,
+    KnowledgeItem,
+    LearningScheduler,
+    LearningService,
+    LearningStatus,
+    SelfUpdateProposal,
+    UserAccount,
+)
 from autonomous_agent.core.task_state import TaskRecord
 
 UI_NAME = "ACB – Autonome Computing Butler"
@@ -80,6 +89,8 @@ class RuntimeTaskController:
         config: AgentConfig,
         *,
         runtime: _Runtime | None = None,
+        start_learning: bool = False,
+        research_network: bool = False,
     ) -> None:
         self.runtime: _Runtime = (
             cast(_Runtime, AutonomyRuntime(config)) if runtime is None else runtime
@@ -90,8 +101,21 @@ class RuntimeTaskController:
             max_workers=1,
             thread_name_prefix="acb-ui-runtime",
         )
+        self.learning = LearningService(
+            config.paths.state_root,
+            config.paths.project_root,
+            network_enabled=research_network,
+            interval_s=6 * 60 * 60,
+        )
+        self._learning_scheduler = (
+            LearningScheduler(self.learning) if start_learning else None
+        )
+        if self._learning_scheduler is not None:
+            self._learning_scheduler.start()
 
     def close(self) -> None:
+        if self._learning_scheduler is not None:
+            self._learning_scheduler.stop()
         self._executor.shutdown(wait=True, cancel_futures=True)
 
     def submit(self, goal: str) -> UiTask:
@@ -160,19 +184,23 @@ class RuntimeTaskController:
         return document
 
     def _run_task(self, request_id: str, goal: str) -> None:
-        self._execute(request_id, lambda: self.runtime.run(goal))
+        self._execute(request_id, goal, lambda: self.runtime.run(goal))
 
     def _resume_task(self, request_id: str, session_id: str) -> None:
-        self._execute(request_id, lambda: self.runtime.resume(session_id))
+        record = self.runtime.tasks.load_task(session_id)
+        goal = "recovered task" if record is None else record.original_goal
+        self._execute(request_id, goal, lambda: self.runtime.resume(session_id))
 
     def _execute(
-        self, request_id: str, operation: Callable[[], RuntimeResult]
+        self, request_id: str, goal: str, operation: Callable[[], RuntimeResult]
     ) -> None:
         self._update_task(request_id, status="running")
         try:
             result = operation()
             document = result.to_dict()
             session_id = result.session_id
+            if result.completion.completed:
+                self.learning.review_task(goal, document)
             self._update_task(
                 request_id,
                 status=result.status,
@@ -191,6 +219,30 @@ class RuntimeTaskController:
                 status="failed",
                 error="task execution failed before verification",
             )
+
+    def learning_status(self) -> LearningStatus:
+        return self.learning.status()
+
+    def knowledge(self, limit: int = 50) -> tuple[KnowledgeItem, ...]:
+        return self.learning.store.knowledge(limit)
+
+    def suggestions(self, limit: int = 50) -> tuple[ImprovementSuggestion, ...]:
+        return self.learning.store.suggestions(limit)
+
+    def self_updates(self, limit: int = 50) -> tuple[SelfUpdateProposal, ...]:
+        return self.learning.store.self_updates(limit)
+
+    def research_now(self) -> dict[str, object]:
+        return self.learning.research_now()
+
+    def create_account(self, username: str, password: str) -> UserAccount:
+        return self.learning.create_account(username, password)
+
+    def authenticate(self, username: str, password: str) -> UserAccount | None:
+        return self.learning.authenticate(username, password)
+
+    def sync_manifest(self) -> dict[str, object]:
+        return self.learning.sync_manifest()
 
     def _update_task(
         self,
