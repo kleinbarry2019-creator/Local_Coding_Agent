@@ -765,7 +765,11 @@ def _run_gtk(config: AgentConfig) -> int:
 
         def _show_task(self, task: UiTask, *, recovered: bool) -> None:
             prefix = "Fortsetzung" if recovered else "Auftrag"
-            self.current.set_text(f"{prefix}: {task.goal}\nStatus: {task.status}")
+            self.current.set_text(
+                f"{prefix}: {task.goal}\nStatus: {task.status} · "
+                f"{task.progress_percent}% · noch ca. "
+                f"{task.estimated_remaining_seconds}s"
+            )
             row = Gtk.ListBoxRow()
             label = Gtk.Label(label=f"{task.status} · {task.goal}")
             label.set_wrap(True)
@@ -789,7 +793,11 @@ def _run_gtk(config: AgentConfig) -> int:
                 if self.undo_button is not None:
                     self.undo_button.set_sensitive(latest_completed is not None)
             else:
-                self.current.set_text(f"{active.goal}\nStatus: {active.status}")
+                self.current.set_text(
+                    f"{active.goal}\nStatus: {active.status} · "
+                    f"{active.progress_percent}% · noch ca. "
+                    f"{active.estimated_remaining_seconds}s"
+                )
             self._refresh_feedback(tasks)
             self._refresh_learning()
             return True

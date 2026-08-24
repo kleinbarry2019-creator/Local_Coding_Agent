@@ -88,6 +88,9 @@ class UiTask:
     session_id: str | None = None
     result: Mapping[str, object] | None = None
     error: str | None = None
+    progress_percent: int = 0
+    remaining_steps: int = 0
+    estimated_remaining_seconds: int = 0
 
     def to_dict(self) -> dict[str, object]:
         document: dict[str, object] = {
@@ -95,6 +98,9 @@ class UiTask:
             "goal": self.goal,
             "status": self.status,
             "created_at": self.created_at,
+            "progress_percent": self.progress_percent,
+            "remaining_steps": self.remaining_steps,
+            "estimated_remaining_seconds": self.estimated_remaining_seconds,
         }
         if self.session_id is not None:
             document["session_id"] = self.session_id
@@ -224,11 +230,39 @@ class RuntimeTaskController:
     def task(self, request_id: str) -> UiTask | None:
         with self._lock:
             task = self._tasks.get(request_id)
-            return None if task is None else _copy_task(task)
+            if task is None:
+                return None
+            snapshot = _copy_task(task)
+        self._refresh_progress(snapshot)
+        return snapshot
 
     def tasks(self) -> list[UiTask]:
         with self._lock:
-            return [_copy_task(item) for item in self._tasks.values()]
+            snapshots = [_copy_task(item) for item in self._tasks.values()]
+        for snapshot in snapshots:
+            self._refresh_progress(snapshot)
+        return snapshots
+
+    def _refresh_progress(self, task: UiTask) -> None:
+        if task.session_id is None:
+            task.progress_percent = 100 if task.status in {"completed", "failed"} else 0
+            return
+        try:
+            record = self.runtime.tasks.load_task(task.session_id)
+        except Exception:  # noqa: BLE001 - progress must not break task polling
+            task.progress_percent = 100 if task.status in {"completed", "failed"} else 0
+            return
+        if record is None or not record.plan:
+            task.progress_percent = 100 if task.status in {"completed", "failed"} else 0
+            return
+        total = len(record.plan)
+        completed_steps = min(max(record.current_step, 0), total)
+        task.remaining_steps = max(total - completed_steps, 0)
+        task.progress_percent = min(100, int(completed_steps * 100 / total))
+        if task.status == "completed":
+            task.progress_percent = 100
+            task.remaining_steps = 0
+        task.estimated_remaining_seconds = min(task.remaining_steps * 5, 300)
 
     def persisted_session(self, session_id: str) -> dict[str, object] | None:
         record = self.runtime.tasks.load_task(session_id)
@@ -863,6 +897,9 @@ def _copy_task(task: UiTask) -> UiTask:
         session_id=task.session_id,
         result=task.result,
         error=task.error,
+        progress_percent=task.progress_percent,
+        remaining_steps=task.remaining_steps,
+        estimated_remaining_seconds=task.estimated_remaining_seconds,
     )
 
 
@@ -907,7 +944,7 @@ _HTML = """<!doctype html>
 const TOKEN = __ACB_TOKEN__; const form = document.getElementById('task-form'); const goal = document.getElementById('goal'); const submit = document.getElementById('submit'); const state = document.getElementById('state'); const current = document.getElementById('current'); const history = document.getElementById('history');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 async function request(path, options={}) { const response = await fetch(path, {...options, headers:{'Content-Type':'application/json','X-ACB-Token':TOKEN,...(options.headers||{})}}); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Anfrage fehlgeschlagen'); return data; }
-function renderTask(task) { const result = task.result || {}; const completion = result.completion || {}; const criteria = (completion.criteria || []).map(item => `<div>${item.passed ? '✓' : '✗'} ${esc(item.criterion_id)}: ${esc(item.evidence)}</div>`).join(''); current.innerHTML = `<strong class="${task.status === 'completed' ? 'success' : task.status === 'failed' || task.status === 'rejected' ? 'error' : ''}">${esc(task.status)}</strong><p>${esc(task.goal)}</p>${task.session_id ? `<div>Session: <code>${esc(task.session_id)}</code></div>` : ''}${criteria ? `<p>${criteria}</p>` : ''}${task.error ? `<p class="error">${esc(task.error)}</p>` : ''}${result.outputs ? `<details><summary>Ausgabe</summary><pre>${esc(JSON.stringify(result.outputs,null,2))}</pre></details>` : ''}`; }
+function renderTask(task) { const result = task.result || {}; const completion = result.completion || {}; const criteria = (completion.criteria || []).map(item => `<div>${item.passed ? '✓' : '✗'} ${esc(item.criterion_id)}: ${esc(item.evidence)}</div>`).join(''); current.innerHTML = `<strong class="${task.status === 'completed' ? 'success' : task.status === 'failed' || task.status === 'rejected' ? 'error' : ''}">${esc(task.status)}</strong><p>${esc(task.goal)}</p><div>Fortschritt: ${esc(task.progress_percent)}% · verbleibende Schritte: ${esc(task.remaining_steps)} · geschätzt: ${esc(task.estimated_remaining_seconds)}s</div>${task.session_id ? `<div>Session: <code>${esc(task.session_id)}</code></div>` : ''}${criteria ? `<p>${criteria}</p>` : ''}${task.error ? `<p class="error">${esc(task.error)}</p>` : ''}${result.outputs ? `<details><summary>Ausgabe</summary><pre>${esc(JSON.stringify(result.outputs,null,2))}</pre></details>` : ''}`; }
 async function refresh() { try { const data = await request('/api/tasks',{headers:{}}); history.innerHTML = data.tasks.length ? data.tasks.map(task => `<div class="task ${esc(task.status)}"><strong>${esc(task.status)}</strong> · ${esc(task.goal)}${task.session_id ? `<br><code>${esc(task.session_id)}</code>` : ''}</div>`).join('') : 'Keine Aufträge in dieser Sitzung.'; } catch (error) { state.textContent = error.message; state.className='error'; } }
 async function poll(id) { try { const task = await request(`/api/tasks/${encodeURIComponent(id)}`,{headers:{}}); renderTask(task); await refresh(); if (['queued','running'].includes(task.status)) setTimeout(() => poll(id), 600); else { submit.disabled=false; state.textContent = task.status === 'completed' ? 'Auftrag vollständig verifiziert.' : 'Auftrag beendet; bitte Evidenz prüfen.'; state.className = task.status === 'completed' ? 'success' : 'error'; } } catch (error) { submit.disabled=false; state.textContent=error.message; state.className='error'; } }
 form.addEventListener('submit', async event => { event.preventDefault(); submit.disabled=true; state.textContent='Auftrag angenommen …'; state.className=''; try { const task=await request('/api/tasks',{method:'POST',body:JSON.stringify({goal:goal.value})}); renderTask(task); goal.value=''; poll(task.request_id); } catch(error) { submit.disabled=false; state.textContent=error.message; state.className='error'; } });
