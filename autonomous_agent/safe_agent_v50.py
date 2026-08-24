@@ -709,7 +709,7 @@ def run_python(script, args=None):
         "/var",
         "--chdir",
         "/workspace",
-        sys.executable,
+        "/usr/bin/python3",
         "/workspace/" + relative_script,
         *args,
     ]
