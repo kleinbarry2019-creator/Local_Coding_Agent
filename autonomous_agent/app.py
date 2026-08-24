@@ -139,6 +139,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.account_status: Any = None
             self.preference_status: Any = None
             self.preference_controls: dict[str, Any] = {}
+            self.onboarding_status_view: Any = None
             self.research_thread: threading.Thread | None = None
             self.recovered = self.controller.recover_pending()
 
@@ -212,6 +213,7 @@ def _run_gtk(config: AgentConfig) -> int:
             composer.append(self.send)
             main.append(composer)
 
+            self.stack.add_titled(self._welcome_page(), "welcome", "Willkommen")
             self.stack.add_titled(main, "tasks", "Aufträge")
             self.stack.add_titled(self._knowledge_page(), "knowledge", "Wissen & Recherche")
             self.stack.add_titled(
@@ -224,9 +226,64 @@ def _run_gtk(config: AgentConfig) -> int:
             self.stack.add_titled(self._settings_page(), "settings", "Einstellungen")
 
             self._install_css(Gdk, Gtk)
+            if self.controller.onboarding_status().phase == "ready":
+                self.stack.set_visible_child_name("tasks")
             for task in self.recovered:
                 self._show_task(task, recovered=True)
             GLib.timeout_add(400, self._refresh)
+
+        def _welcome_page(self) -> Any:
+            page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+            page.set_margin_top(42)
+            page.set_margin_bottom(42)
+            page.set_margin_start(42)
+            page.set_margin_end(42)
+            title = Gtk.Label(label="Willkommen bei ACB – deinem persönlichen Computing Butler")
+            title.set_xalign(0)
+            title.set_wrap(True)
+            title.add_css_class("section-title")
+            page.append(title)
+            intro = Gtk.Label(
+                label=(
+                    "ACB arbeitet lokal und offline weiter. Datenschutz steht an erster Stelle: "
+                    "Für den Start sind keine E-Mail-, Telefon- oder Adressdaten nötig. "
+                    "Du kannst zuerst drei Tage testen oder das Profil direkt einrichten."
+                )
+            )
+            intro.set_xalign(0)
+            intro.set_wrap(True)
+            intro.add_css_class("conversation")
+            page.append(intro)
+            self.onboarding_status_view = Gtk.Label(label="")
+            self.onboarding_status_view.set_xalign(0)
+            self.onboarding_status_view.set_wrap(True)
+            self.onboarding_status_view.add_css_class("muted")
+            page.append(self.onboarding_status_view)
+            actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            trial = Gtk.Button(label="Erstmal testen")
+            trial.add_css_class("suggested-action")
+            trial.connect("clicked", self._start_trial)
+            actions.append(trial)
+            setup = Gtk.Button(label="Schieß los – Profil einrichten")
+            setup.connect("clicked", self._start_setup)
+            actions.append(setup)
+            page.append(actions)
+            self._refresh_onboarding()
+            return page
+
+        def _refresh_onboarding(self) -> None:
+            if self.onboarding_status_view is None:
+                return
+            status = self.controller.onboarding_status()
+            self.onboarding_status_view.set_text(status.message)
+
+        def _start_trial(self, *_args: object) -> None:
+            status = self.controller.start_trial()
+            self.onboarding_status_view.set_text(status.message)
+            self.stack.set_visible_child_name("tasks")
+
+        def _start_setup(self, *_args: object) -> None:
+            self.stack.set_visible_child_name("account")
 
         def _knowledge_page(self) -> Any:
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)

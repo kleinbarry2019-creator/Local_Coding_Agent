@@ -173,6 +173,14 @@ vorhandene lokale Sprach- oder Assistenzhardware fällt ACB sicher auf Tastatur,
 Standardaudio und die gewählte Darstellung zurück; es werden keine fremden
 Treiber oder externen Konten automatisch installiert.
 
+Der Erststart bietet jetzt eine lokale dreitägige Testphase oder die direkte
+Profileinrichtung. Testaufträge bleiben in dieser Phase eingeschränkt. Die
+Runtime kann außerdem den Antwortkontext (Wissensniveau, einfache Sprache,
+Ansprache und nächste Schritte), lokale Assistenzhinweise und verfügbare
+Offline-Sprachadapter melden. Nach einem abgeschlossenen Auftrag kann eine
+Bewertung von 1 bis 10 mit Kommentar lokal gespeichert werden; sie verändert
+keinen Audit- oder Task-State.
+
 Example (shown on multiple lines here only for readability):
 
 ```json

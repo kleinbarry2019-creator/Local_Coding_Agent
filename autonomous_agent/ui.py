@@ -30,6 +30,18 @@ from autonomous_agent.core.learning import (
 )
 from autonomous_agent.core.preferences import ProfileStore, UserPreferences
 from autonomous_agent.core.task_state import TaskRecord
+from autonomous_agent.core.user_experience import (
+    AssistiveHints,
+    OnboardingService,
+    OnboardingStatus,
+    ResponseContext,
+    TaskFeedback,
+    TaskFeedbackStore,
+    VoiceCapability,
+    build_response_context,
+    detect_assistive_hints,
+    detect_voice_capabilities,
+)
 
 UI_NAME = "ACB – Autonome Computing Butler"
 DEFAULT_UI_HOST = "127.0.0.1"
@@ -109,6 +121,8 @@ class RuntimeTaskController:
             interval_s=6 * 60 * 60,
         )
         self.profile_store = ProfileStore(config.paths.state_root)
+        self.onboarding = OnboardingService(self.profile_store)
+        self.feedback = TaskFeedbackStore(config.paths.state_root)
         self._learning_scheduler = (
             LearningScheduler(self.learning) if start_learning else None
         )
@@ -125,6 +139,30 @@ class RuntimeTaskController:
 
     def update_preferences(self, changes: Mapping[str, object]) -> UserPreferences:
         return self.profile_store.update(changes)
+
+    def onboarding_status(self) -> OnboardingStatus:
+        return self.onboarding.status(account_exists=bool(self.learning.store.accounts()))
+
+    def start_trial(self) -> OnboardingStatus:
+        return self.onboarding.start_trial()
+
+    def complete_onboarding(self) -> OnboardingStatus:
+        return self.onboarding.complete()
+
+    def response_context(self) -> ResponseContext:
+        return build_response_context(self.preferences())
+
+    def assistive_hints(self) -> AssistiveHints:
+        return detect_assistive_hints()
+
+    def voice_capabilities(self) -> tuple[VoiceCapability, ...]:
+        return detect_voice_capabilities()
+
+    def add_feedback(self, session_id: str, rating: int, comment: str = "") -> TaskFeedback:
+        return self.feedback.add(session_id, rating, comment)
+
+    def feedback_items(self, limit: int = 50) -> tuple[TaskFeedback, ...]:
+        return self.feedback.items(limit)
 
     def submit(self, goal: str) -> UiTask:
         request_id = f"request-{uuid.uuid4().hex}"
@@ -339,6 +377,30 @@ class AcbUiServer:
     def update_preferences(self, changes: Mapping[str, object]) -> dict[str, object]:
         return self._controller.update_preferences(changes).to_dict()
 
+    def onboarding(self) -> dict[str, object]:
+        return self._controller.onboarding_status().to_dict()
+
+    def start_trial(self) -> dict[str, object]:
+        return self._controller.start_trial().to_dict()
+
+    def complete_onboarding(self) -> dict[str, object]:
+        return self._controller.complete_onboarding().to_dict()
+
+    def response_context(self) -> dict[str, object]:
+        return self._controller.response_context().to_dict()
+
+    def assistive_hints(self) -> dict[str, object]:
+        return self._controller.assistive_hints().to_dict()
+
+    def voice_capabilities(self) -> list[dict[str, object]]:
+        return [item.to_dict() for item in self._controller.voice_capabilities()]
+
+    def feedback(self, limit: int = 50) -> list[dict[str, object]]:
+        return [item.to_dict() for item in self._controller.feedback_items(limit)]
+
+    def add_feedback(self, session_id: str, rating: int, comment: str = "") -> dict[str, object]:
+        return self._controller.add_feedback(session_id, rating, comment).to_dict()
+
 
 class _AcbHttpServer(ThreadingHTTPServer):
     allow_reuse_address = True
@@ -381,6 +443,26 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, self._app().preferences())
             return
+        if path == "/api/onboarding":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().onboarding())
+            return
+        if path == "/api/experience":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "response_context": self._app().response_context(),
+                    "assistive_hints": self._app().assistive_hints(),
+                    "voice_capabilities": self._app().voice_capabilities(),
+                    "feedback": self._app().feedback(),
+                },
+            )
+            return
         if path.startswith("/api/tasks/"):
             request_id = path.removeprefix("/api/tasks/")
             if not _REQUEST_ID_PATTERN.fullmatch(request_id):
@@ -410,7 +492,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
             return
-        if path not in {"/api/tasks", "/api/preferences"}:
+        if path not in {"/api/tasks", "/api/preferences", "/api/onboarding", "/api/feedback"}:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
         payload = self._read_json()
@@ -424,6 +506,36 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "preferences are invalid")
                 return
             self._send_json(HTTPStatus.OK, updated)
+            return
+        if path == "/api/onboarding":
+            action = payload.get("action")
+            try:
+                status = (
+                    self._app().start_trial()
+                    if action == "start-trial"
+                    else self._app().complete_onboarding()
+                    if action == "complete"
+                    else None
+                )
+            except (TypeError, ValueError, RuntimeError):
+                status = None
+            if status is None:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "onboarding action is invalid")
+                return
+            self._send_json(HTTPStatus.OK, status)
+            return
+        if path == "/api/feedback":
+            session_id = payload.get("session_id")
+            rating = payload.get("rating")
+            comment = payload.get("comment", "")
+            try:
+                if not isinstance(session_id, str) or type(rating) is not int or not isinstance(comment, str):
+                    raise ValueError("feedback shape is invalid")
+                feedback = self._app().add_feedback(session_id, rating, comment)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "feedback is invalid")
+                return
+            self._send_json(HTTPStatus.OK, feedback)
             return
         goal = payload.get("goal")
         if type(goal) is not str or not goal.strip():

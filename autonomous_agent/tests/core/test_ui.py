@@ -276,6 +276,11 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert preferences["theme"] == "light"
         assert preferences["simple_language"] is True
         assert server.preferences()["nickname"] == "Alex"
+        status, onboarding = _post_json(
+            f"{server.url}api/onboarding", {"action": "start-trial"}, token=server.token
+        )
+        assert status == 200
+        assert onboarding["phase"] == "trial"
         request_id = accepted["request_id"]
         assert isinstance(request_id, str)
         for _ in range(50):
@@ -288,6 +293,13 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         result = cast(Mapping[str, object], task["result"])
         completion = cast(Mapping[str, object], result["completion"])
         assert completion["e2e_verified"] is True
+        status, feedback = _post_json(
+            f"{server.url}api/feedback",
+            {"session_id": task["session_id"], "rating": 9, "comment": "gut"},
+            token=server.token,
+        )
+        assert status == 200
+        assert feedback["rating"] == 9
     finally:
         server.shutdown()
         thread.join(timeout=2)
