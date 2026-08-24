@@ -641,6 +641,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                     "response_context": self._app().response_context(),
                     "assistive_hints": self._app().assistive_hints(),
                     "voice_capabilities": self._app().voice_capabilities(),
+                    "voice_status": self._app().voice_status(),
                     "feedback": self._app().feedback(),
                 },
             )
