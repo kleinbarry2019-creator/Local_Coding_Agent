@@ -97,6 +97,33 @@ werden. Der Standard ist `http://127.0.0.1:8765/`. Jeder Schreibauftrag benötig
 ein zufälliges Sitzungstoken, das nur der lokal ausgelieferten Oberfläche bekannt
 ist. Netzwerkzugriff auf die UI wird nicht akzeptiert.
 
+## Lokale Desktop-App und Offline-Fortsetzung
+
+Für die installierte Anwendung gibt es zusätzlich eine native GTK-Desktop-App:
+
+```bash
+uv tool install .
+acb app
+```
+
+Für einen Eintrag im lokalen Anwendungsmenü kann die mitgelieferte Desktop-
+Definition installiert werden:
+
+```bash
+install -D packaging/acb.desktop ~/.local/share/applications/acb.desktop
+```
+
+Die Desktop-App öffnet keinen Netzwerkdienst. Auf Linux wird sie mit dem lokalen
+GTK-System gestartet, zeigt den Arbeitsbereich und den Aufgabenverlauf an und
+setzt beim Neustart alle persistent als `pending`, `running` oder `recovering`
+gespeicherten Aufgaben automatisch fort. Die Runtime verwendet nur lokale
+Werkzeuge und den lokalen State; externe Netzwerkverbindungen sind für die App
+nicht erforderlich.
+
+Die App benötigt GTK 4 und PyGObject auf dem lokalen System. Falls diese
+Desktop-Integration nicht vorhanden ist, bleibt `acb ui` als sichere lokale
+Browser-Oberfläche verfügbar.
+
 Example (shown on multiple lines here only for readability):
 
 ```json

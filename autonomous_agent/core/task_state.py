@@ -209,6 +209,35 @@ class TaskStateStore:
             updated_at=str(row[10]),
         )
 
+    def list_tasks(
+        self,
+        *,
+        statuses: frozenset[str] | None = None,
+        limit: int = 100,
+    ) -> tuple[TaskRecord, ...]:
+        """Return recent persisted tasks for restart recovery and local UIs."""
+        if type(limit) is not int or not 1 <= limit <= 1_000:
+            raise ValueError("task list limit is invalid")
+        selected = None if statuses is None else frozenset(statuses)
+        if selected is not None and not selected.issubset(_TASK_STATUSES):
+            raise ValueError("task list status is invalid")
+        query = """SELECT session_id FROM tasks"""
+        parameters: list[object] = []
+        if selected:
+            placeholders = ",".join("?" for _ in selected)
+            query += f" WHERE status IN ({placeholders})"
+            parameters.extend(sorted(selected))
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        parameters.append(limit)
+        with self.store.connection() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        records = tuple(
+            record
+            for row in rows
+            if (record := self.load_task(str(row[0]))) is not None
+        )
+        return records
+
     def create_checkpoint(
         self,
         session_id: str,

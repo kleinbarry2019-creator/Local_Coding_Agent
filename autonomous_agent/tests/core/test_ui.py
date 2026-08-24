@@ -27,7 +27,13 @@ from autonomous_agent.core.config import (
     ResourceLimits,
 )
 from autonomous_agent.core.task_state import TaskRecord
-from autonomous_agent.ui import UI_NAME, AcbUiServer, _Runtime, validate_ui_host
+from autonomous_agent.ui import (
+    UI_NAME,
+    AcbUiServer,
+    RuntimeTaskController,
+    _Runtime,
+    validate_ui_host,
+)
 
 
 def _config(tmp_path: Path) -> AgentConfig:
@@ -98,6 +104,12 @@ class _FakeTasks:
         del session_id
         raise AssertionError("fake task store is only used for task execution")
 
+    def list_tasks(
+        self, *, statuses: frozenset[str] | None = None, limit: int = 100
+    ) -> tuple[TaskRecord, ...]:
+        del statuses, limit
+        return ()
+
 
 class _FakeRuntime:
     def __init__(self) -> None:
@@ -117,6 +129,36 @@ class _FakeRuntime:
             ),
             outputs=({"goal": goal, "success": True},),
         )
+
+
+class _RecoveryTasks:
+    def __init__(self, record: TaskRecord) -> None:
+        self.record = record
+
+    def load_task(self, session_id: str) -> TaskRecord | None:
+        return self.record if session_id == self.record.session_id else None
+
+    def list_tasks(
+        self, *, statuses: frozenset[str] | None = None, limit: int = 100
+    ) -> tuple[TaskRecord, ...]:
+        del limit
+        return (
+            (self.record,)
+            if statuses is None or self.record.status in statuses
+            else ()
+        )
+
+
+class _RecoveryRuntime:
+    def __init__(self, record: TaskRecord) -> None:
+        self.tasks = _RecoveryTasks(record)
+
+    def run(self, goal: str) -> RuntimeResult:
+        del goal
+        raise AssertionError("recovery runtime should resume, not start")
+
+    def resume(self, session_id: str) -> RuntimeResult:
+        return _FakeRuntime().run(f"resumed {session_id}")
 
 
 def test_ui_is_loopback_only() -> None:
@@ -142,6 +184,46 @@ def test_cli_exposes_loopback_ui_command() -> None:
     }
     with pytest.raises(cli._CliArgumentError):
         cli.build_parser().parse_args(["ui", "--host", "0.0.0.0"])
+
+    app = cli.build_parser().parse_args(["app"])
+    assert vars(app) == {
+        "command": "app",
+        "project": None,
+        "state_dir": None,
+    }
+
+
+def test_controller_resumes_persisted_interrupted_work(tmp_path: Path) -> None:
+    record = TaskRecord(
+        session_id="session-0123456789abcdef0123456789abcdef",
+        original_goal="list files",
+        normalized_goal={"kind": "list-files"},
+        plan=({"step_id": "step-list"},),
+        status="running",
+        current_step=0,
+        attempts=1,
+        failure_fingerprint=None,
+        completion=None,
+        created_at="2026-08-24T00:00:00+00:00",
+        updated_at="2026-08-24T00:00:01+00:00",
+    )
+    runtime = _RecoveryRuntime(record)
+    controller = RuntimeTaskController(
+        _config(tmp_path), runtime=cast(_Runtime, runtime)
+    )
+    try:
+        recovered = controller.recover_pending()
+        assert len(recovered) == 1
+        for _ in range(50):
+            task = controller.task(recovered[0].request_id)
+            assert task is not None
+            if task.status == "completed":
+                break
+            time.sleep(0.01)
+        assert task.status == "completed"
+        assert task.session_id == record.session_id
+    finally:
+        controller.close()
 
 
 def test_ui_http_boundary_requires_token_and_serves_security_headers(

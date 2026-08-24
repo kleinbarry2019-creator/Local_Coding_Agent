@@ -8,7 +8,7 @@ import re
 import secrets
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -33,11 +33,17 @@ _SESSION_ID_PATTERN = re.compile(r"^session-[0-9a-f]{32}$")
 class _TaskStore(Protocol):
     def load_task(self, session_id: str) -> TaskRecord | None: ...
 
+    def list_tasks(
+        self, *, statuses: frozenset[str] | None = None, limit: int = 100
+    ) -> tuple[TaskRecord, ...]: ...
+
 
 class _Runtime(Protocol):
     tasks: _TaskStore
 
     def run(self, raw_goal: str) -> RuntimeResult: ...
+
+    def resume(self, session_id: str) -> RuntimeResult: ...
 
 
 @dataclass
@@ -66,20 +72,15 @@ class UiTask:
         return document
 
 
-class AcbUiServer:
-    """Serve a small browser UI while sharing one persistent runtime instance."""
+class RuntimeTaskController:
+    """Coordinate UI tasks over one shared, persistent autonomy runtime."""
 
     def __init__(
         self,
         config: AgentConfig,
         *,
-        host: str = DEFAULT_UI_HOST,
-        port: int = DEFAULT_UI_PORT,
         runtime: _Runtime | None = None,
     ) -> None:
-        self.host = validate_ui_host(host)
-        self.port = _validate_port(port)
-        self.token = secrets.token_urlsafe(24)
         self.runtime: _Runtime = (
             cast(_Runtime, AutonomyRuntime(config)) if runtime is None else runtime
         )
@@ -89,26 +90,8 @@ class AcbUiServer:
             max_workers=1,
             thread_name_prefix="acb-ui-runtime",
         )
-        self._serving = threading.Event()
-        self._httpd = _AcbHttpServer((self.host, self.port), _AcbRequestHandler, self)
 
-    @property
-    def url(self) -> str:
-        host = f"[{self.host}]" if ":" in self.host else self.host
-        return f"http://{host}:{self._httpd.server_port}/"
-
-    def serve_forever(self) -> None:
-        self._serving.set()
-        try:
-            self._httpd.serve_forever()
-        finally:
-            self._serving.clear()
-            self._executor.shutdown(wait=True, cancel_futures=True)
-
-    def shutdown(self) -> None:
-        if self._serving.is_set():
-            self._httpd.shutdown()
-        self._httpd.server_close()
+    def close(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)
 
     def submit(self, goal: str) -> UiTask:
@@ -124,6 +107,29 @@ class AcbUiServer:
             self._trim_tasks()
         self._executor.submit(self._run_task, request_id, goal)
         return task
+
+    def recover_pending(self) -> tuple[UiTask, ...]:
+        """Resume tasks interrupted while pending, running, or recovering."""
+        records = self.runtime.tasks.list_tasks(
+            statuses=frozenset({"pending", "running", "recovering"}),
+            limit=MAX_TASK_RECORDS,
+        )
+        recovered: list[UiTask] = []
+        for record in reversed(records):
+            request_id = f"request-{uuid.uuid4().hex}"
+            task = UiTask(
+                request_id=request_id,
+                goal=record.original_goal,
+                status="recovering",
+                created_at=record.created_at,
+                session_id=record.session_id,
+            )
+            with self._lock:
+                self._tasks[request_id] = task
+                self._trim_tasks()
+            self._executor.submit(self._resume_task, request_id, record.session_id)
+            recovered.append(_copy_task(task))
+        return tuple(recovered)
 
     def task(self, request_id: str) -> UiTask | None:
         with self._lock:
@@ -154,9 +160,17 @@ class AcbUiServer:
         return document
 
     def _run_task(self, request_id: str, goal: str) -> None:
+        self._execute(request_id, lambda: self.runtime.run(goal))
+
+    def _resume_task(self, request_id: str, session_id: str) -> None:
+        self._execute(request_id, lambda: self.runtime.resume(session_id))
+
+    def _execute(
+        self, request_id: str, operation: Callable[[], RuntimeResult]
+    ) -> None:
         self._update_task(request_id, status="running")
         try:
-            result = self.runtime.run(goal)
+            result = operation()
             document = result.to_dict()
             session_id = result.session_id
             self._update_task(
@@ -200,6 +214,64 @@ class AcbUiServer:
         while len(self._tasks) > MAX_TASK_RECORDS:
             oldest = next(iter(self._tasks))
             del self._tasks[oldest]
+
+
+class AcbUiServer:
+    """Serve a small browser UI while sharing one persistent runtime instance."""
+
+    def __init__(
+        self,
+        config: AgentConfig,
+        *,
+        host: str = DEFAULT_UI_HOST,
+        port: int = DEFAULT_UI_PORT,
+        runtime: _Runtime | None = None,
+    ) -> None:
+        self.host = validate_ui_host(host)
+        self.port = _validate_port(port)
+        self.token = secrets.token_urlsafe(24)
+        self._controller = RuntimeTaskController(config, runtime=runtime)
+        self.runtime = self._controller.runtime
+        self._serving = threading.Event()
+        self._httpd = _AcbHttpServer((self.host, self.port), _AcbRequestHandler, self)
+        self._controller.recover_pending()
+
+    @property
+    def url(self) -> str:
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return f"http://{host}:{self._httpd.server_port}/"
+
+    def serve_forever(self) -> None:
+        self._serving.set()
+        try:
+            self._httpd.serve_forever()
+        finally:
+            self._serving.clear()
+            self.close()
+
+    def shutdown(self) -> None:
+        if self._serving.is_set():
+            self._httpd.shutdown()
+        self._httpd.server_close()
+        self.close()
+
+    def close(self) -> None:
+        self._controller.close()
+
+    def submit(self, goal: str) -> UiTask:
+        return self._controller.submit(goal)
+
+    def recover_pending(self) -> tuple[UiTask, ...]:
+        return self._controller.recover_pending()
+
+    def task(self, request_id: str) -> UiTask | None:
+        return self._controller.task(request_id)
+
+    def tasks(self) -> list[UiTask]:
+        return self._controller.tasks()
+
+    def persisted_session(self, session_id: str) -> dict[str, object] | None:
+        return self._controller.persisted_session(session_id)
 
 
 class _AcbHttpServer(ThreadingHTTPServer):
@@ -447,5 +519,6 @@ __all__ = [
     "MAX_REQUEST_BYTES",
     "UI_NAME",
     "AcbUiServer",
+    "RuntimeTaskController",
     "validate_ui_host",
 ]
