@@ -15,6 +15,8 @@ def test_cli_run_executes_and_reports_verified_completion(
     home.mkdir()
     project.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
     exit_code = cli.main(
         [
@@ -29,7 +31,6 @@ def test_cli_run_executes_and_reports_verified_completion(
     )
 
     output = capsys.readouterr()
-    assert output.out, f"CLI emitted no JSON; stderr={output.err!r}"
     document = json.loads(output.out)
     assert exit_code == 0
     assert output.err == ""
@@ -47,6 +48,8 @@ def test_cli_run_returns_nonzero_when_real_command_fails(
     home.mkdir()
     project.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
     exit_code = cli.main(
         [
@@ -61,7 +64,6 @@ def test_cli_run_returns_nonzero_when_real_command_fails(
     )
 
     output = capsys.readouterr()
-    assert output.out, f"CLI emitted no JSON; stderr={output.err!r}"
     document = json.loads(output.out)
     assert exit_code == 1
     assert document["status"] == "failed"
