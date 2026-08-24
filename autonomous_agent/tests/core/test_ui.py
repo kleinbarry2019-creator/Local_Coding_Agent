@@ -267,6 +267,15 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
             f"{server.url}api/tasks", {"goal": "list files"}, token=server.token
         )
         assert status == 202
+        status, preferences = _post_json(
+            f"{server.url}api/preferences",
+            {"theme": "light", "simple_language": True, "nickname": "Alex"},
+            token=server.token,
+        )
+        assert status == 200
+        assert preferences["theme"] == "light"
+        assert preferences["simple_language"] is True
+        assert server.preferences()["nickname"] == "Alex"
         request_id = accepted["request_id"]
         assert isinstance(request_id, str)
         for _ in range(50):

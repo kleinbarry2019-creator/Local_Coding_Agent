@@ -28,6 +28,7 @@ from autonomous_agent.core.learning import (
     SelfUpdateProposal,
     UserAccount,
 )
+from autonomous_agent.core.preferences import ProfileStore, UserPreferences
 from autonomous_agent.core.task_state import TaskRecord
 
 UI_NAME = "ACB – Autonome Computing Butler"
@@ -107,6 +108,7 @@ class RuntimeTaskController:
             network_enabled=research_network,
             interval_s=6 * 60 * 60,
         )
+        self.profile_store = ProfileStore(config.paths.state_root)
         self._learning_scheduler = (
             LearningScheduler(self.learning) if start_learning else None
         )
@@ -117,6 +119,12 @@ class RuntimeTaskController:
         if self._learning_scheduler is not None:
             self._learning_scheduler.stop()
         self._executor.shutdown(wait=True, cancel_futures=True)
+
+    def preferences(self) -> UserPreferences:
+        return self.profile_store.load()
+
+    def update_preferences(self, changes: Mapping[str, object]) -> UserPreferences:
+        return self.profile_store.update(changes)
 
     def submit(self, goal: str) -> UiTask:
         request_id = f"request-{uuid.uuid4().hex}"
@@ -325,6 +333,12 @@ class AcbUiServer:
     def persisted_session(self, session_id: str) -> dict[str, object] | None:
         return self._controller.persisted_session(session_id)
 
+    def preferences(self) -> dict[str, object]:
+        return self._controller.preferences().to_dict()
+
+    def update_preferences(self, changes: Mapping[str, object]) -> dict[str, object]:
+        return self._controller.update_preferences(changes).to_dict()
+
 
 class _AcbHttpServer(ThreadingHTTPServer):
     allow_reuse_address = True
@@ -361,6 +375,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 {"tasks": [task.to_dict() for task in reversed(app.tasks())]},
             )
             return
+        if path == "/api/preferences":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().preferences())
+            return
         if path.startswith("/api/tasks/"):
             request_id = path.removeprefix("/api/tasks/")
             if not _REQUEST_ID_PATTERN.fullmatch(request_id):
@@ -390,11 +410,20 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
             return
-        if path != "/api/tasks":
+        if path not in {"/api/tasks", "/api/preferences"}:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
         payload = self._read_json()
         if payload is None:
+            return
+        if path == "/api/preferences":
+            try:
+                changes = {key: value for key, value in payload.items() if key != "_"}
+                updated = self._app().update_preferences(changes)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "preferences are invalid")
+                return
+            self._send_json(HTTPStatus.OK, updated)
             return
         goal = payload.get("goal")
         if type(goal) is not str or not goal.strip():

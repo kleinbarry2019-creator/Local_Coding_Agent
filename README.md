@@ -150,6 +150,29 @@ fest exportiert und es wird keine Cloud-Verbindung ohne ausdrückliches Pairing
 angelegt. Die Recherche kann für eine Sitzung über `ACB_RESEARCH_NETWORK=0`
 abgeschaltet werden.
 
+### Profil, Darstellung und Bedienung
+
+Der Reiter `Einstellungen` speichert ein lokales Profil unter dem geschützten
+State-Verzeichnis. Dort können Darstellung (`System`, `Hell`, `Dunkel`),
+Antwortumfang, einfache Sprache, Gendern, Nickname/Pronomen, optionale
+Interessen und Beruf sowie das eigene Wissensniveau eingestellt werden.
+Zusätzlich gibt es Schalter für Sprach-Ein-/Ausgabe, einen eigenen Wake-Satz,
+große Schrift, hohen Kontrast, Screenreader-/Braille-Unterstützung,
+motorische/kognitive Unterstützung und Farbsehmodi. Datenschutz- und
+Recherchefreigaben sind getrennt steuerbar; standardmäßig bleibt die Freigabe
+für sensible Daten bestätigungspflichtig.
+
+Die gleichen Präferenzen können über die authentifizierte lokale UI-Schnittstelle
+`/api/preferences` gelesen und als JSON geändert werden. Dadurch können spätere
+Chat-, Sprach- und mobile Adapter dieselbe geprüfte Profilstruktur verwenden,
+ohne eine zweite Einstellungslogik einzuführen.
+
+Sprachmodelle, gerätespezifische Mikrofon-/Lautsprecheradapter und eine
+geräteübergreifende Synchronisierung bleiben bewusst optionale Adapter. Ohne
+vorhandene lokale Sprach- oder Assistenzhardware fällt ACB sicher auf Tastatur,
+Standardaudio und die gewählte Darstellung zurück; es werden keine fremden
+Treiber oder externen Konten automatisch installiert.
+
 Example (shown on multiple lines here only for readability):
 
 ```json

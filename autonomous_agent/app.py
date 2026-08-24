@@ -24,6 +24,7 @@ from autonomous_agent.core.config import (
     ExecutionMode,
     load_config,
 )
+from autonomous_agent.core.preferences import THEMES
 from autonomous_agent.ui import RuntimeTaskController, UiTask
 
 APP_NAME = "ACB – Autonome Computing Butler"
@@ -136,6 +137,8 @@ def _run_gtk(config: AgentConfig) -> int:
             self.suggestion_view: Any = None
             self.update_view: Any = None
             self.account_status: Any = None
+            self.preference_status: Any = None
+            self.preference_controls: dict[str, Any] = {}
             self.research_thread: threading.Thread | None = None
             self.recovered = self.controller.recover_pending()
 
@@ -218,6 +221,7 @@ def _run_gtk(config: AgentConfig) -> int:
                 self._self_update_page(), "self-development", "Selbstentwicklung"
             )
             self.stack.add_titled(self._account_page(), "account", "Konto & Sync")
+            self.stack.add_titled(self._settings_page(), "settings", "Einstellungen")
 
             self._install_css(Gdk, Gtk)
             for task in self.recovered:
@@ -349,6 +353,183 @@ def _run_gtk(config: AgentConfig) -> int:
             self.account_status.add_css_class("muted")
             page.append(self.account_status)
             return page
+
+        def _settings_page(self) -> Any:
+            """Build the first-class profile, accessibility, and privacy settings."""
+            page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            page.set_margin_top(24)
+            page.set_margin_bottom(24)
+            page.set_margin_start(28)
+            page.set_margin_end(28)
+            title = Gtk.Label(label="Einstellungen")
+            title.set_xalign(0)
+            title.add_css_class("section-title")
+            page.append(title)
+            intro = Gtk.Label(
+                label=(
+                    "Diese Einstellungen werden lokal gespeichert. ACB nutzt sie für "
+                    "Antwortstil, Erklärungsniveau, Barrierefreiheit und Bedienung. "
+                    "E-Mail, Telefon und Adresse sind nicht erforderlich."
+                )
+            )
+            intro.set_xalign(0)
+            intro.set_wrap(True)
+            intro.add_css_class("muted")
+            page.append(intro)
+
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_vexpand(True)
+            form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            form.set_margin_top(12)
+            form.set_margin_bottom(12)
+            form.set_margin_start(4)
+            form.set_margin_end(12)
+
+            self._settings_section(form, "Erscheinungsbild & Antworten")
+            self._combo_setting(form, "theme", "Darstellung", ("system", "System", "light", "Hell", "dark", "Dunkel"))
+            self._combo_setting(
+                form,
+                "response_style",
+                "Antwortumfang",
+                ("concise", "Kurz", "balanced", "Ausgewogen", "detailed", "Ausführlich"),
+            )
+            self._combo_setting(
+                form,
+                "knowledge_level",
+                "Computerkentnisse",
+                ("beginner", "Anfänger", "hobbyist", "Hobbyist", "advanced", "Fortgeschritten", "expert", "Erweitert fortgeschritten", "developer", "Entwickler/Developer"),
+            )
+            self._check_setting(form, "simple_language", "Einfache Sprache verwenden")
+            self._check_setting(form, "gendered_language", "Wenn passend gendern")
+
+            self._settings_section(form, "Persönliche Ansprache (optional)")
+            self._text_setting(form, "nickname", "Nickname / Alias")
+            self._text_setting(form, "pronouns", "Pronomen")
+            self._text_setting(form, "gender_identity", "Geschlechtsidentität")
+            self._text_setting(form, "interests", "Interessen")
+            self._text_setting(form, "occupation", "Beruf / Tätigkeit")
+            self._text_setting(form, "age", "Alter", numeric=True)
+
+            self._settings_section(form, "Sprache & Zugänglichkeit")
+            self._check_setting(form, "voice_input", "Spracheingabe erlauben")
+            self._check_setting(form, "voice_output", "Sprachausgabe erlauben")
+            self._check_setting(form, "wake_phrase_enabled", "Individuellen Sprachbefehl aktivieren")
+            self._text_setting(form, "wake_phrase", "Sprachbefehl")
+            self._check_setting(form, "large_text", "Große Schrift")
+            self._check_setting(form, "high_contrast", "Hoher Kontrast")
+            self._check_setting(form, "screen_reader", "Screenreader-Unterstützung")
+            self._check_setting(form, "braille_input", "Braille-Eingabe")
+            self._check_setting(form, "motor_assistance", "Motorische Unterstützung")
+            self._check_setting(form, "cognitive_support", "Kognitive Unterstützung")
+            self._combo_setting(
+                form,
+                "color_blind_mode",
+                "Farbseh-Unterstützung",
+                ("none", "Keine", "red-green", "Rot-Grün", "blue-yellow", "Blau-Gelb", "monochrome", "Monochrom"),
+            )
+
+            self._settings_section(form, "Datenschutz & Recherche")
+            self._check_setting(form, "store_chat_history", "Chatverlauf lokal speichern")
+            self._check_setting(form, "store_task_history", "Aufgabenverlauf lokal speichern")
+            self._check_setting(form, "store_personalization", "Personalisierung lokal speichern")
+            self._check_setting(form, "allow_network_research", "Vertrauenswürdige Online-Recherche erlauben")
+            self._check_setting(form, "require_confirmation_for_sensitive_data", "Vor sensibler Datenfreigabe bestätigen")
+
+            save = Gtk.Button(label="Einstellungen speichern")
+            save.set_halign(Gtk.Align.START)
+            save.add_css_class("suggested-action")
+            save.connect("clicked", self._save_settings)
+            form.append(save)
+            self.preference_status = Gtk.Label(label="Noch keine Änderungen gespeichert.")
+            self.preference_status.set_xalign(0)
+            self.preference_status.set_wrap(True)
+            self.preference_status.add_css_class("muted")
+            form.append(self.preference_status)
+            scroll.set_child(form)
+            page.append(scroll)
+            self._load_settings_controls()
+            self._apply_theme(self.controller.preferences().theme)
+            return page
+
+        @staticmethod
+        def _settings_section(form: Any, label: str) -> None:
+            heading = Gtk.Label(label=label)
+            heading.set_xalign(0)
+            heading.set_margin_top(12)
+            heading.add_css_class("section-title")
+            form.append(heading)
+
+        def _text_setting(self, form: Any, key: str, label: str, *, numeric: bool = False) -> None:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            caption = Gtk.Label(label=label)
+            caption.set_xalign(0)
+            caption.set_hexpand(True)
+            row.append(caption)
+            entry = Gtk.Entry()
+            entry.set_width_chars(18)
+            entry.set_input_purpose(Gtk.InputPurpose.DIGITS if numeric else Gtk.InputPurpose.FREE_FORM)
+            row.append(entry)
+            form.append(row)
+            self.preference_controls[key] = entry
+
+        def _check_setting(self, form: Any, key: str, label: str) -> None:
+            check = Gtk.CheckButton(label=label)
+            form.append(check)
+            self.preference_controls[key] = check
+
+        def _combo_setting(self, form: Any, key: str, label: str, options: tuple[str, ...]) -> None:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            caption = Gtk.Label(label=label)
+            caption.set_xalign(0)
+            caption.set_hexpand(True)
+            row.append(caption)
+            combo = Gtk.ComboBoxText()
+            for index in range(0, len(options), 2):
+                combo.append(options[index], options[index + 1])
+            row.append(combo)
+            form.append(row)
+            self.preference_controls[key] = combo
+
+        def _load_settings_controls(self) -> None:
+            preferences = self.controller.preferences()
+            for key, control in self.preference_controls.items():
+                value = getattr(preferences, key)
+                if isinstance(control, Gtk.CheckButton):
+                    control.set_active(bool(value))
+                elif isinstance(control, Gtk.ComboBoxText):
+                    control.set_active_id(str(value))
+                else:
+                    control.set_text("" if value is None else str(value))
+
+        def _save_settings(self, *_args: object) -> None:
+            changes: dict[str, object] = {}
+            for key, control in self.preference_controls.items():
+                if isinstance(control, Gtk.CheckButton):
+                    changes[key] = control.get_active()
+                elif isinstance(control, Gtk.ComboBoxText):
+                    changes[key] = control.get_active_id() or "system"
+                else:
+                    raw = control.get_text().strip()
+                    changes[key] = int(raw) if key == "age" and raw else (None if key == "age" else raw)
+            try:
+                preferences = self.controller.update_preferences(changes)
+            except (TypeError, ValueError, RuntimeError):
+                self.preference_status.set_text("Einstellungen konnten nicht gespeichert werden. Bitte Eingaben prüfen.")
+                return
+            self._apply_theme(preferences.theme)
+            self.preference_status.set_text(
+                "Gespeichert. ACB verwendet diese Einstellungen für neue Antworten und die Bedienung."
+            )
+
+        def _apply_theme(self, theme: str) -> None:
+            if theme not in THEMES:
+                return
+            self.window.remove_css_class("theme-light")
+            self.window.remove_css_class("theme-dark")
+            if theme == "light":
+                self.window.add_css_class("theme-light")
+            elif theme == "dark":
+                self.window.add_css_class("theme-dark")
 
         def _header(self) -> Any:
             bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
@@ -518,6 +699,13 @@ def _run_gtk(config: AgentConfig) -> int:
                 .conversation { background: #121c2e; border-radius: 14px; padding: 24px; font-size: 17px; }
                 .composer { background: #121c2e; border-radius: 12px; padding: 12px; }
                 button.suggested-action { background: #5eead4; color: #052e2b; font-weight: 700; }
+                .theme-light .app-shell { background: #f7f9fc; color: #172033; }
+                .theme-light .topbar, .theme-light .sidebar { background: #e8edf5; }
+                .theme-light .conversation, .theme-light .composer { background: #ffffff; }
+                .theme-light .section-title { color: #172033; }
+                .theme-light .muted, .theme-light .subtitle { color: #53627a; }
+                .theme-light entry, .theme-light combobox { background: #ffffff; color: #172033; }
+                .theme-dark .app-shell { background: #070c16; }
                 """
             )
             gtk.StyleContext.add_provider_for_display(
