@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from autonomous_agent.core.preferences import ProfileStore, UserPreferences
+from autonomous_agent.core.preferences import ProfileStore
 
 
 def test_profile_defaults_are_local_and_round_trip(tmp_path: Path) -> None:
