@@ -373,7 +373,7 @@ def _sandbox_command(
             "--dev",
             "/dev",
             "--tmpfs",
-            "/tmp",  # nosec B108 - isolated sandbox temporary filesystem
+            "/tmp",  # nosec B108
             "--tmpfs",
             "/etc",
             "--chdir",
