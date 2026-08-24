@@ -14,6 +14,7 @@ from autonomous_agent.core.autonomy import (
 )
 from autonomous_agent.core.config import (
     AgentConfig,
+    ConfigError,
     ExecutionMode,
     ResolvedPaths,
     ResourceLimits,
@@ -57,6 +58,29 @@ def test_runtime_completes_only_after_independent_file_readback(tmp_path: Path) 
     assert persisted.completion is not None
     assert persisted.completion["completed"] is True
     assert runtime.audit.verify().ok
+
+
+def test_runtime_rejects_state_inside_project(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    unsafe = tmp_path / "project" / ".state"
+    unsafe_config = AgentConfig(
+        schema_version=config.schema_version,
+        mode=config.mode,
+        paths=ResolvedPaths(
+            config_file=config.paths.config_file,
+            project_file=config.paths.project_file,
+            project_root=config.paths.project_root,
+            state_root=unsafe,
+        ),
+        limits=config.limits,
+        free_only=config.free_only,
+        audit_required=config.audit_required,
+        provenance=config.provenance,
+    )
+
+    with pytest.raises(ConfigError, match="state_root"):
+        AutonomyRuntime(unsafe_config)
+    assert not unsafe.exists()
 
 
 def test_exit_zero_is_required_but_not_sufficient_without_e2e(tmp_path: Path) -> None:

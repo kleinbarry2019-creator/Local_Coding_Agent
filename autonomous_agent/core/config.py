@@ -779,8 +779,24 @@ def ensure_state_root(config: AgentConfig) -> Path:
     """Create the already-resolved state root through the secure path walker."""
     if type(config) is not AgentConfig:
         raise TypeError("config must be AgentConfig")
+    validate_state_root_isolated(
+        config.paths.project_root,
+        config.paths.state_root,
+    )
     _create_state_path(config.paths.state_root)
     return config.paths.state_root
+
+
+def validate_state_root_isolated(project_root: Path, state_root: Path) -> None:
+    """Keep persistent state outside the writable project process boundary."""
+    project = project_root.resolve(strict=True)
+    state = state_root.resolve(strict=False)
+    if state == project or state.is_relative_to(project):
+        raise ConfigError(
+            "unsafe_path",
+            "state_root",
+            "must be outside project_root so project processes cannot modify runtime state",
+        )
 
 
 def _global_config_file(home: Path, environ: Mapping[str, str]) -> Path:

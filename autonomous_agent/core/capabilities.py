@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+from autonomous_agent.core.runtime_tools import sandbox_command
+
 _TRUSTED_CATALOG: Mapping[str, Mapping[str, str]] = MappingProxyType(
     {
         "git": MappingProxyType({"apt": "git", "dnf": "git", "brew": "git"}),
@@ -52,12 +54,25 @@ class CapabilityRegistry:
         if not _valid_name(name):
             raise ValueError("capability name is invalid")
         path = _find_executable(name, self.project_root)
+        project_local = path is not None and path.is_relative_to(self.project_root)
         capability = Capability(
             name=name,
             available=path is not None,
             executable=path,
-            source="local" if path is not None else "missing",
-            version=_version(path) if path is not None else None,
+            source=(
+                "project-sandbox"
+                if project_local
+                else "local"
+                if path is not None
+                else "missing"
+            ),
+            version=(
+                _sandboxed_version(path, self.project_root)
+                if project_local and path is not None
+                else _version(path)
+                if path is not None
+                else None
+            ),
         )
         self._capabilities[name] = capability
         return capability
@@ -183,6 +198,33 @@ def _version(path: Path) -> str | None:
             timeout=5.0,
         )
     except (OSError, subprocess.TimeoutExpired):
+        return None
+    output = (result.stdout or result.stderr).strip().splitlines()
+    return output[0][:256] if output else None
+
+
+def _sandboxed_version(path: Path, project_root: Path) -> str | None:
+    """Probe a repository-local executable without giving it host access."""
+    try:
+        result = subprocess.run(  # nosec B603
+            sandbox_command(
+                project_root,
+                project_root,
+                path,
+                ["--version"],
+            ),
+            cwd=project_root,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
         return None
     output = (result.stdout or result.stderr).strip().splitlines()
     return output[0][:256] if output else None

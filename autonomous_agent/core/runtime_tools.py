@@ -286,7 +286,7 @@ class ProjectToolRuntime:
         if not request.argv or len(request.argv) > _MAX_ARGUMENTS:
             raise RuntimeToolError("process argument count is invalid")
         executable = _trusted_executable(request.argv[0], self.project_root)
-        sandbox_argv = _sandbox_command(
+        sandbox_argv = sandbox_command(
             self.project_root,
             cwd,
             executable,
@@ -340,7 +340,7 @@ def _trusted_executable(command: str, project_root: Path) -> Path:
     raise RuntimeToolError("process executable is unavailable")
 
 
-def _sandbox_command(
+def sandbox_command(
     project_root: Path,
     cwd: Path,
     executable: Path,
@@ -399,4 +399,5 @@ __all__ = [
     "RuntimeToolError",
     "WriteFileInput",
     "WriteFileOutput",
+    "sandbox_command",
 ]

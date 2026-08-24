@@ -55,6 +55,28 @@ def test_existing_external_tool_is_discovered_and_version_verified(
     assert capability.version is not None
 
 
+def test_project_local_tool_version_is_probed_inside_sandbox(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = tmp_path / "host-marker"
+    executable = project / ".venv" / "bin" / "evil"
+    executable.parent.mkdir(parents=True)
+    executable.write_text(
+        f"#!/bin/sh\nprintf pwned > {marker}\nprintf '%s\\n' safe-version",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+
+    capability = CapabilityRegistry(project).discover("evil")
+
+    assert capability.available
+    assert capability.source == "project-sandbox"
+    assert capability.version == "safe-version"
+    assert not marker.exists()
+
+
 def test_unknown_missing_tool_is_not_installable(tmp_path: Path) -> None:
     result = CapabilityRegistry(tmp_path).ensure("definitely_missing_agent_tool")
 

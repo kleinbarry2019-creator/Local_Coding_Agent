@@ -14,7 +14,12 @@ from pathlib import Path
 
 from autonomous_agent.core.capabilities import CapabilityRegistry
 from autonomous_agent.core.checkpoints import CheckpointManager
-from autonomous_agent.core.config import AgentConfig, ExecutionMode, ensure_state_root
+from autonomous_agent.core.config import (
+    AgentConfig,
+    ExecutionMode,
+    ensure_state_root,
+    validate_state_root_isolated,
+)
 from autonomous_agent.core.events import AuditLog
 from autonomous_agent.core.goals import (
     AcceptanceCriterion,
@@ -336,6 +341,10 @@ class AutonomyRuntime:
         if config.mode is not ExecutionMode.AUTONOMOUS:
             raise ValueError("task execution requires autonomous mode")
         self.config = config
+        validate_state_root_isolated(
+            config.paths.project_root,
+            config.paths.state_root,
+        )
         state_root = ensure_state_root(config)
         self.store = CoreStateStore(
             state_root / "agent_core.sqlite3",
