@@ -143,6 +143,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.onboarding_status_view: Any = None
             self.undo_button: Any = None
             self.audit_button: Any = None
+            self.log_window: Any = None
             self.speak_button: Any = None
             self.voice_thread: threading.Thread | None = None
             self.feedback_box: Any = None
@@ -676,6 +677,9 @@ def _run_gtk(config: AgentConfig) -> int:
             self.audit_button = Gtk.Button(label="Audit prüfen")
             self.audit_button.connect("clicked", self._show_audit)
             bar.append(self.audit_button)
+            terminal_button = Gtk.Button(label="🖥 Protokoll")
+            terminal_button.connect("clicked", self._show_terminal_log)
+            bar.append(terminal_button)
             self.speak_button = Gtk.Button(label="🔊 Vorlesen")
             self.speak_button.connect("clicked", self._speak_current)
             bar.append(self.speak_button)
@@ -815,6 +819,45 @@ def _run_gtk(config: AgentConfig) -> int:
                 f"Sequenz: {result['sequence']}\n"
                 f"Code: {result['code']}\n\nLetzte Ereignisse:\n{recent or 'keine'}"
             )
+
+        def _show_terminal_log(self, *_args: object) -> None:
+            if self.log_window is not None:
+                self.log_window.present()
+                return
+            self.log_window = Gtk.Window(title="ACB – Terminal und Protokoll")
+            self.log_window.set_default_size(900, 560)
+            if self.window is not None:
+                self.log_window.set_transient_for(self.window)
+            self.log_window.connect("close-request", self._close_log_window)
+            view = Gtk.TextView()
+            view.set_editable(False)
+            view.set_monospace(True)
+            view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            lines: list[str] = ["ACB lokales Prozessprotokoll", "=" * 32, ""]
+            try:
+                for event in self.controller.audit_events(100):
+                    lines.append(
+                        f"[{event['created_at']}] #{event['sequence']} "
+                        f"{event['event_type']} · {event['payload']}"
+                    )
+            except (TypeError, ValueError, RuntimeError):
+                lines.append("Audit-Ereignisse konnten nicht gelesen werden.")
+            lines.append("")
+            lines.append("Aufgabenstatus")
+            lines.append("=" * 16)
+            for task in reversed(self.controller.tasks()):
+                lines.append(f"[{task.status}] {task.goal}")
+                if task.error:
+                    lines.append(f"  Fehler: {task.error}")
+            view.get_buffer().set_text("\n".join(lines))
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_child(view)
+            self.log_window.set_child(scroll)
+            self.log_window.present()
+
+        def _close_log_window(self, *_args: object) -> bool:
+            self.log_window = None
+            return False
 
         def _speak_current(self, *_args: object) -> None:
             text = self.current.get_text().strip()
