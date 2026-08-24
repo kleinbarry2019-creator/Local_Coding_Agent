@@ -391,6 +391,14 @@ class RuntimeTaskController:
     def sync_manifest(self) -> dict[str, object]:
         return self.learning.sync_manifest()
 
+    def learning_snapshot(self) -> dict[str, object]:
+        return {
+            "status": self.learning_status().to_dict(),
+            "knowledge": [item.to_dict() for item in self.knowledge(50)],
+            "suggestions": [item.to_dict() for item in self.suggestions(50)],
+            "self_updates": [item.to_dict() for item in self.self_updates(50)],
+        }
+
     def _update_task(
         self,
         request_id: str,
@@ -477,6 +485,9 @@ class AcbUiServer:
 
     def persisted_sessions(self, limit: int = 50) -> list[dict[str, object]]:
         return self._controller.persisted_sessions(limit)
+
+    def learning_snapshot(self) -> dict[str, object]:
+        return self._controller.learning_snapshot()
 
     def preferences(self) -> dict[str, object]:
         return self._controller.preferences().to_dict()
@@ -646,6 +657,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                     "feedback": self._app().feedback(),
                 },
             )
+            return
+        if path == "/api/learning":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().learning_snapshot())
             return
         if path == "/api/audit":
             if not self._authorized():

@@ -316,6 +316,13 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         )
         assert status == 200
         assert experience["voice_status"] == voice
+        status, learning, _ = _get_json(
+            f"{server.url}api/learning", token=server.token
+        )
+        assert status == 200
+        assert {"status", "knowledge", "suggestions", "self_updates"} <= set(
+            learning
+        )
         status, wake = _post_json(
             f"{server.url}api/voice/wake",
             {"text": "Hey ACB, starte"},
