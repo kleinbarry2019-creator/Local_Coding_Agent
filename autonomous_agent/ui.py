@@ -131,13 +131,16 @@ class RuntimeTaskController:
             max_workers=1,
             thread_name_prefix="acb-ui-runtime",
         )
+        self.profile_store = ProfileStore(config.paths.state_root)
+        self._research_network_requested = research_network
         self.learning = LearningService(
             config.paths.state_root,
             config.paths.project_root,
-            network_enabled=research_network,
+            network_enabled=(
+                research_network and self.profile_store.load().allow_network_research
+            ),
             interval_s=6 * 60 * 60,
         )
-        self.profile_store = ProfileStore(config.paths.state_root)
         self.onboarding = OnboardingService(self.profile_store)
         self.feedback = TaskFeedbackStore(config.paths.state_root)
         self.voice = VoiceService()
@@ -156,7 +159,11 @@ class RuntimeTaskController:
         return self.profile_store.load()
 
     def update_preferences(self, changes: Mapping[str, object]) -> UserPreferences:
-        return self.profile_store.update(changes)
+        preferences = self.profile_store.update(changes)
+        self.learning.network_enabled = (
+            self._research_network_requested and preferences.allow_network_research
+        )
+        return preferences
 
     def onboarding_status(self) -> OnboardingStatus:
         return self.onboarding.status(account_exists=bool(self.learning.store.accounts()))

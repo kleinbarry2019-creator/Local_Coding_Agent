@@ -252,6 +252,19 @@ def test_controller_honors_disabled_voice_output_preference(tmp_path: Path) -> N
         controller.close()
 
 
+def test_controller_honors_network_research_preference(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(_config(tmp_path), research_network=True)
+    try:
+        assert controller.learning_status().network_enabled is True
+        preferences = controller.update_preferences({"allow_network_research": False})
+        assert preferences.allow_network_research is False
+        assert controller.learning_status().network_enabled is False
+        result = controller.research_now()
+        assert result["status"] == "offline"
+    finally:
+        controller.close()
+
+
 def test_ui_http_boundary_requires_token_and_serves_security_headers(
     tmp_path: Path,
 ) -> None:
