@@ -202,6 +202,7 @@ def _run_gtk(config: AgentConfig) -> int:
                 label="ACB ist bereit. Aufgaben werden lokal ausgeführt und persistiert."
             )
             self.current.set_wrap(True)
+            self.current.set_selectable(True)
             self.current.set_xalign(0)
             self.current.set_yalign(0)
             self.current.set_valign(Gtk.Align.START)
@@ -683,6 +684,9 @@ def _run_gtk(config: AgentConfig) -> int:
             export_button = Gtk.Button(label="⇩ Export")
             export_button.connect("clicked", self._export_protocol)
             bar.append(export_button)
+            copy_button = Gtk.Button(label="⧉ Kopieren")
+            copy_button.connect("clicked", self._copy_current)
+            bar.append(copy_button)
             self.speak_button = Gtk.Button(label="🔊 Vorlesen")
             self.speak_button.connect("clicked", self._speak_current)
             bar.append(self.speak_button)
@@ -869,6 +873,13 @@ def _run_gtk(config: AgentConfig) -> int:
                 f"Datei: {result['path']}\n"
                 f"Ereignisse: {result['event_count']}"
             )
+
+        def _copy_current(self, *_args: object) -> None:
+            text = self.current.get_text().strip()
+            display = Gdk.Display.get_default()
+            if not text or display is None:
+                return
+            display.get_clipboard().set_text(text)
 
         def _close_log_window(self, *_args: object) -> bool:
             self.log_window = None
