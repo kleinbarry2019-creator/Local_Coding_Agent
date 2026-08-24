@@ -288,7 +288,7 @@ def test_python_execution():
         name
     )
 
-    assert result["exit_code"] == 0
+    assert result["exit_code"] == 0, result
     assert (
         "V50_EXEC_OK"
         in result["stdout"]
