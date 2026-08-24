@@ -197,6 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     app.add_argument("--project", type=_project_path, metavar="PATH")
     app.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    desktop = commands.add_parser(
+        "install-desktop",
+        help="install the user-local ACB application launcher",
+        description="Install an offline ACB launcher in the current user's application menu.",
+    )
+    desktop.add_argument("--project", type=_project_path, metavar="PATH")
+    desktop.add_argument("--state-dir", type=_state_path, metavar="PATH")
     learn = commands.add_parser(
         "learn",
         help="research trusted AI and security feeds",
@@ -239,7 +246,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         is_doctor = namespace.command == "doctor"
-        is_runtime = namespace.command in {"run", "resume", "ui", "app", "learn"}
+        is_runtime = namespace.command in {
+            "run", "resume", "ui", "app", "install-desktop", "learn"
+        }
         runtime_command = is_runtime
         if not is_doctor and not is_runtime:
             raise _CliArgumentError
@@ -265,6 +274,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             from autonomous_agent.app import launch
 
             return launch(config)
+        if namespace.command == "install-desktop":
+            from autonomous_agent.desktop import install_desktop_entry
+
+            sys.stdout.write(f"{install_desktop_entry()}\n")
+            return 0
         if namespace.command == "learn":
             from autonomous_agent.core.learning import LearningService
 

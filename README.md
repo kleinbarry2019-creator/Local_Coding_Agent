@@ -107,11 +107,15 @@ acb app
 ```
 
 Für einen Eintrag im lokalen Anwendungsmenü kann die mitgelieferte Desktop-
-Definition installiert werden:
+Definition auch direkt über ACB installiert werden:
 
 ```bash
-install -D packaging/acb.desktop ~/.local/share/applications/acb.desktop
+acb install-desktop
 ```
+
+Der Eintrag wird ausschließlich im Benutzerkonto unter
+`~/.local/share/applications/acb.desktop` angelegt; Root-Rechte und Netzwerk sind
+nicht erforderlich.
 
 Die Desktop-App öffnet keinen Netzwerkdienst. Auf Linux wird sie mit dem lokalen
 GTK-System gestartet, zeigt den Arbeitsbereich und den Aufgabenverlauf an und
