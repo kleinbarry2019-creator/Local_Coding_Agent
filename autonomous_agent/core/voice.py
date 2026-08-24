@@ -111,6 +111,14 @@ class VoiceService:
             or normalized_text.startswith(f"{normalized_phrase} ")
         )
 
+    @staticmethod
+    def remove_wake_phrase(text: str, phrase: str) -> str:
+        """Remove a leading configured wake phrase from typed or transcribed text."""
+        if not VoiceService.wake_phrase_matches(text, phrase):
+            return text
+        phrase_length = len(phrase)
+        return text[phrase_length:].lstrip(" \t,;:!?-–—")
+
 
 def _first_available(names: tuple[str, ...]) -> str | None:
     for name in names:

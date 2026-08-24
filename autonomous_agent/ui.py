@@ -192,7 +192,8 @@ class RuntimeTaskController:
         return self.voice.wake_phrase_matches(text, self.preferences().wake_phrase)
 
     def submit(self, goal: str) -> UiTask:
-        normalized = GoalNormalizer().normalize(goal)
+        clean_goal = self.voice.remove_wake_phrase(goal, self.preferences().wake_phrase)
+        normalized = GoalNormalizer().normalize(clean_goal)
         enforce_task_access(self.onboarding_status(), normalized.kind)
         request_id = f"request-{uuid.uuid4().hex}"
         task = UiTask(
@@ -204,7 +205,7 @@ class RuntimeTaskController:
         with self._lock:
             self._tasks[request_id] = task
             self._trim_tasks()
-        self._executor.submit(self._run_task, request_id, goal)
+        self._executor.submit(self._run_task, request_id, clean_goal)
         return task
 
     def retry(self, request_id: str) -> UiTask:

@@ -34,3 +34,6 @@ def test_wake_phrase_matching_is_local_and_tolerates_punctuation() -> None:
     assert VoiceService.wake_phrase_matches("Hey Kumpel, starte", "Hey Kumpel")
     assert VoiceService.wake_phrase_matches("HEY KUMPEL", "Hey Kumpel")
     assert not VoiceService.wake_phrase_matches("Hallo Kumpel", "Hey Kumpel")
+    assert VoiceService.remove_wake_phrase(
+        "Hey Kumpel, erstelle notes.txt", "Hey Kumpel"
+    ) == "erstelle notes.txt"
