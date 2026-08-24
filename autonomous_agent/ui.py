@@ -460,6 +460,30 @@ class AcbUiServer:
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> dict[str, object]:
         return self._controller.add_feedback(session_id, rating, comment).to_dict()
 
+    def accounts(self) -> list[dict[str, object]]:
+        return [account.to_public_dict() for account in self._controller.learning.store.accounts()]
+
+    def create_account(
+        self,
+        username: str,
+        password: str,
+        security_question: str = "",
+        security_answer: str = "",
+    ) -> dict[str, object]:
+        account = self._controller.create_account(
+            username,
+            password,
+            security_question=security_question,
+            security_answer=security_answer,
+        )
+        return account.to_public_dict()
+
+    def reset_password(
+        self, username: str, security_answer: str, new_password: str
+    ) -> dict[str, object] | None:
+        account = self._controller.reset_password(username, security_answer, new_password)
+        return None if account is None else account.to_public_dict()
+
 
 class _AcbHttpServer(ThreadingHTTPServer):
     allow_reuse_address = True
@@ -501,6 +525,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
                 return
             self._send_json(HTTPStatus.OK, self._app().preferences())
+            return
+        if path == "/api/account":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, {"accounts": self._app().accounts()})
             return
         if path == "/api/onboarding":
             if not self._authorized():
@@ -581,6 +611,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/feedback",
             "/api/undo",
             "/api/voice/speak",
+            "/api/account",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -595,6 +626,43 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "preferences are invalid")
                 return
             self._send_json(HTTPStatus.OK, updated)
+            return
+        if path == "/api/account":
+            action = payload.get("action")
+            try:
+                if action == "create":
+                    username = payload.get("username")
+                    password = payload.get("password")
+                    question = payload.get("security_question", "")
+                    answer = payload.get("security_answer", "")
+                    if not all(isinstance(item, str) for item in (username, password, question, answer)):
+                        raise ValueError("account fields are invalid")
+                    username = cast(str, username)
+                    password = cast(str, password)
+                    question = cast(str, question)
+                    answer = cast(str, answer)
+                    result: Mapping[str, object] | None = self._app().create_account(
+                        username, password, question, answer
+                    )
+                elif action == "reset-password":
+                    username = payload.get("username")
+                    answer = payload.get("security_answer")
+                    new_password = payload.get("new_password")
+                    if not all(isinstance(item, str) for item in (username, answer, new_password)):
+                        raise ValueError("recovery fields are invalid")
+                    username = cast(str, username)
+                    answer = cast(str, answer)
+                    new_password = cast(str, new_password)
+                    result = self._app().reset_password(username, answer, new_password)
+                    if result is None:
+                        self._send_error_json(HTTPStatus.FORBIDDEN, "recovery verification failed")
+                        return
+                else:
+                    raise ValueError("account action is invalid")
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "account request is invalid")
+                return
+            self._send_json(HTTPStatus.OK, result or {})
             return
         if path == "/api/onboarding":
             action = payload.get("action")

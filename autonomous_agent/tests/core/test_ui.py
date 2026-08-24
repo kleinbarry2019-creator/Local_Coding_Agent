@@ -358,3 +358,51 @@ def test_ui_real_http_e2e_executes_and_persists_task(tmp_path: Path) -> None:
         assert completion["completed"] is True
     finally:
         restarted.shutdown()
+
+
+def test_ui_http_account_recovery_never_returns_credentials(tmp_path: Path) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0)
+    thread = _start(server)
+    try:
+        status, created = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "create",
+                "username": "owner",
+                "password": "correct horse battery",
+                "security_question": "Lieblingsfarbe?",
+                "security_answer": "Blau",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert created["recovery_configured"] is True
+        assert "password_hash" not in str(created)
+        status, denied = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "reset-password",
+                "username": "owner",
+                "security_answer": "falsch",
+                "new_password": "new correct password",
+            },
+            token=server.token,
+        )
+        assert status == 403
+        assert "recovery" in str(denied["error"])
+        status, reset = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "reset-password",
+                "username": "owner",
+                "security_answer": "blau",
+                "new_password": "new correct password",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert reset["username"] == "owner"
+        assert "password_hash" not in str(reset)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
