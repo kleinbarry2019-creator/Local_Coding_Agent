@@ -111,7 +111,7 @@ def test_help_exposes_only_phase_one_surface(
     assert cli.main(["--help"]) == 0
 
     output = capsys.readouterr()
-    assert "usage: agent" in output.out
+    assert "usage: acb" in output.out
     assert "doctor" in output.out
     assert output.err == ""
 
@@ -145,7 +145,7 @@ def test_invalid_arguments_return_two_without_process_exit_or_echo(
 
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: invalid command-line arguments.\n"
+    assert output.err == "acb: invalid command-line arguments.\n"
     assert "unrestricted-root" not in output.err
     assert "relative/state" not in output.err
     assert "relative/project" not in output.err
@@ -239,7 +239,7 @@ def test_configured_unrestricted_root_is_rejected_before_doctor(
 
     assert cli.main(["doctor"]) == 2
     assert called is False
-    assert capsys.readouterr().err == "agent: configuration is invalid.\n"
+    assert capsys.readouterr().err == "acb: configuration is invalid.\n"
 
 
 def test_malformed_configuration_is_redacted(
@@ -256,7 +256,7 @@ def test_malformed_configuration_is_redacted(
     assert cli.main(["doctor"]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: configuration is invalid.\n"
+    assert output.err == "acb: configuration is invalid.\n"
     assert secret not in output.err
 
 
@@ -275,7 +275,7 @@ def test_declared_diagnostic_error_is_redacted(
     assert cli.main(["doctor"]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: diagnostics could not be initialized.\n"
+    assert output.err == "acb: diagnostics could not be initialized.\n"
     assert "/private/value" not in output.err
 
 
@@ -367,7 +367,7 @@ def test_hostile_non_report_is_internal_failure_without_bool_int_confusion(
     assert cli.main(["doctor", "--json"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
 
 
 def test_serialization_failure_is_redacted_and_emits_no_partial_json(
@@ -386,7 +386,7 @@ def test_serialization_failure_is_redacted_and_emits_no_partial_json(
     assert cli.main(["doctor", "--json"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
 
 
 @pytest.mark.parametrize(
@@ -423,7 +423,7 @@ def test_nested_probe_mutation_fails_closed_before_any_output(
 
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
 
@@ -454,7 +454,7 @@ def test_mutated_report_fields_fail_closed_before_rendering(
     assert cli.main(["doctor", "--json"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
 
@@ -482,7 +482,7 @@ def test_hostile_nested_mapping_and_accessor_are_redacted(
     assert cli.main(["doctor", "--json"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
 
@@ -512,7 +512,7 @@ def test_shadowed_report_callables_cannot_bypass_nested_canonicalization(
 
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
     report = _report()
@@ -532,7 +532,7 @@ def test_shadowed_report_callables_cannot_bypass_nested_canonicalization(
     assert cli.main(["doctor"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
 
@@ -551,7 +551,7 @@ def test_parser_construction_and_argv_copy_fail_inside_redacted_boundary(
     assert cli.main(_HostileArgv()) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
     def fail_parser() -> cli.argparse.ArgumentParser:
@@ -561,7 +561,7 @@ def test_parser_construction_and_argv_copy_fail_inside_redacted_boundary(
     assert cli.main(["doctor"]) == 3
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "agent: internal diagnostic failure.\n"
+    assert output.err == "acb: internal diagnostic failure.\n"
     assert "LEAKED_SECRET" not in output.out + output.err
 
 

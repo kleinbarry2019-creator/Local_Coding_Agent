@@ -58,6 +58,23 @@ def test_shared_registry_writes_and_reads_inside_scope(tmp_path: Path) -> None:
     }
 
 
+def test_shared_registry_creates_missing_parent_directories_safely(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    target = root / "nested" / "deeper" / "result.txt"
+    registry = ProjectToolRuntime(root).registry()
+
+    result = registry.execute(
+        "project.write-file",
+        {"path": str(target), "content": "nested"},
+        _context(root, (target,)),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert target.read_text(encoding="utf-8") == "nested"
+
+
 def test_shared_registry_denies_scope_mismatch(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     target = root / "result.txt"

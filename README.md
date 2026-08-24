@@ -1,6 +1,6 @@
-# Local Coding Agent
+# ACB – Autonome Computing Butler
 
-Local Coding Agent is a free, local-first coding and system agent. It combines
+ACB (Autonome Computing Butler) is a free, local-first coding and system agent. It combines
 the hardened V50 sandbox with the modular policy, typed-tool, persistent-state,
 audit, recovery, doctor, and Ollama foundation. Existing V50 behavior remains
 available while the installable CLI owns the consolidated runtime path.
@@ -23,21 +23,21 @@ environment:
 
 ```bash
 uv sync --frozen --group dev
-uv run agent doctor
+uv run acb doctor
 ```
 
-For a user-level `agent` command, install the checked-out package with uv:
+For a user-level `acb` command, install the checked-out package with uv:
 
 ```bash
 uv tool install .
-agent doctor
+acb doctor
 ```
 
 The default human report is grouped into system, development, local model,
 containment, and policy sections. A typical abbreviated result looks like:
 
 ```text
-Agent doctor: warning
+ACB – Autonome Computing Butler doctor: warning
 System:
   [PASS] doctor.python: Python is supported.
 Development:
@@ -53,7 +53,7 @@ Policy:
 Automation can request the deterministic schema-version-1 JSON document:
 
 ```bash
-agent doctor --json
+acb doctor --json
 python3 -m autonomous_agent doctor --json
 ```
 
@@ -65,9 +65,9 @@ SQLite state, executed through the shared policy/tool boundary, and then
 independently rechecked:
 
 ```bash
-agent run 'Erstelle `result.txt` mit dem Inhalt `verified`'
-agent run 'Run python3 -m pytest' --json
-agent resume session-0123456789abcdef
+acb run 'Erstelle `result.txt` mit dem Inhalt `verified`'
+acb run 'Run python3 -m pytest' --json
+acb resume session-0123456789abcdef
 ```
 
 Supported deterministic intents are file write/read/list, sandboxed process
@@ -117,10 +117,10 @@ configuration, and 3 means an unexpected internal diagnostic failure.
 explicitly for a future autonomous session without enabling agent execution:
 
 ```bash
-agent doctor --mode autonomous
+acb doctor --mode autonomous
 ```
 
-There is no unrestricted-root execution mode and `agent doctor` never executes
+There is no unrestricted-root execution mode and `acb doctor` never executes
 coding tasks. The free-only invariant is immutable:
 runtime model checks stay local through Ollama, and paid, metered, trial, or
 charge-capable providers cannot be enabled by configuration.
@@ -136,6 +136,9 @@ directories, SQLite/WAL files, sessions, or audit events. Its default paths are:
 An explicit absolute project can be inspected with `--project PATH`; an
 existing or future absolute state location can be inspected with `--state-dir
 PATH`. The paths are validated but never created by doctor.
+
+The `agent` command remains available as a compatibility alias for existing
+installations; `acb` is the canonical command and display name.
 
 ## Compatibility and design
 

@@ -25,7 +25,8 @@ decision for the autonomous runtime phase.
 
 ## Active architecture
 
-`agent run` and `agent resume` are the only installable task entry points. They
+`acb run` and `acb resume` are the canonical installable task entry points.
+The legacy `agent` command remains a compatibility alias. They
 flow through goal normalization, typed planning, audited core task state, the
 shared typed registry, bounded self-healing, and the central completion
 evaluator. `safe_agent_v50.py` remains a tested compatibility artifact. The old

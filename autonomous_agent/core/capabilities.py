@@ -168,18 +168,25 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
 
 
 def _find_executable(name: str, project_root: Path) -> Path | None:
-    candidates = (
-        project_root / ".venv" / "bin" / name,
+    project_candidate = project_root / ".venv" / "bin" / name
+    fixed_root_candidates = (
         Path("/usr/bin") / name,
         Path("/bin") / name,
         Path("/usr/local/bin") / name,
         Path("/home/linuxbrew/.linuxbrew/bin") / name,
     )
+    candidates = (project_candidate, *fixed_root_candidates)
     for candidate in candidates:
         try:
             path = candidate.resolve(strict=True)
             metadata = path.stat()
         except OSError:
+            continue
+        # A project-controlled .venv entry may be a symlink.  Never execute
+        # its resolved target on the host; only a regular file that remains
+        # inside the project may be probed in the sandbox.  A symlink to a
+        # trusted fixed root is rediscovered through that root below.
+        if candidate == project_candidate and not path.is_relative_to(project_root):
             continue
         if stat.S_ISREG(metadata.st_mode) and os.access(path, os.X_OK):
             return path

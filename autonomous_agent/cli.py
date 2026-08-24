@@ -29,11 +29,13 @@ from autonomous_agent.core.doctor import (
 from autonomous_agent.core.goals import GoalError
 from autonomous_agent.core.probes import ProbeError
 
-_INVALID_ARGUMENTS = "agent: invalid command-line arguments."
-_INVALID_CONFIGURATION = "agent: configuration is invalid."
-_DIAGNOSTIC_ERROR = "agent: diagnostics could not be initialized."
-_INTERNAL_ERROR = "agent: internal diagnostic failure."
-_RUNTIME_ERROR = "agent: task execution failed before verification."
+_CLI_NAME = "acb"
+_DISPLAY_NAME = "ACB – Autonome Computing Butler"
+_INVALID_ARGUMENTS = f"{_CLI_NAME}: invalid command-line arguments."
+_INVALID_CONFIGURATION = f"{_CLI_NAME}: configuration is invalid."
+_DIAGNOSTIC_ERROR = f"{_CLI_NAME}: diagnostics could not be initialized."
+_INTERNAL_ERROR = f"{_CLI_NAME}: internal diagnostic failure."
+_RUNTIME_ERROR = f"{_CLI_NAME}: task execution failed before verification."
 _MAX_PATH_BYTES = 4_096
 
 _GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -116,8 +118,8 @@ class _AgentArgumentParser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     """Build the complete and intentionally small phase-1 parser."""
     parser = _AgentArgumentParser(
-        prog="agent",
-        description="Free, local-first coding agent diagnostics.",
+        prog=_CLI_NAME,
+        description=f"{_DISPLAY_NAME}: free, local-first coding and system agent.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor = commands.add_parser(
@@ -341,7 +343,7 @@ def _render_json(report: DoctorReport) -> str:
 
 
 def _render_human(report: DoctorReport) -> str:
-    lines = [f"Agent doctor: {report.status.value}"]
+    lines = [f"{_DISPLAY_NAME} doctor: {report.status.value}"]
     assigned: set[str] = set()
     for title, names in _GROUPS:
         lines.append(f"{title}:")
@@ -383,7 +385,7 @@ def _render_runtime_human(result: object) -> str:
     if type(result) is not RuntimeResult:
         raise TypeError("runtime result is invalid")
     lines = [
-        f"Agent task: {result.status}",
+        f"{_DISPLAY_NAME} task: {result.status}",
         f"Session: {result.session_id}",
         f"Executed: {'yes' if result.completion.executed else 'no'}",
         f"Tested: {'yes' if result.completion.tested else 'no'}",

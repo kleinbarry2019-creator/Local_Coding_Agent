@@ -95,8 +95,12 @@ class ProjectPathResolver:
             raise RuntimeToolError("tool path escapes the project")
         self._reject_symlink_chain(lexical, allow_missing=allow_missing)
         if allow_missing and not lexical.exists():
-            resolved_parent = lexical.parent.resolve(strict=True)
-            resolved = resolved_parent / lexical.name
+            missing: list[str] = []
+            existing = lexical
+            while not existing.exists():
+                missing.append(existing.name)
+                existing = existing.parent
+            resolved = existing.resolve(strict=True).joinpath(*reversed(missing))
         else:
             resolved = lexical.resolve(strict=True)
         if not resolved.is_relative_to(self.project_root):
@@ -111,7 +115,7 @@ class ProjectPathResolver:
             try:
                 metadata = current.lstat()
             except FileNotFoundError:
-                if allow_missing and index == len(relative.parts) - 1:
+                if allow_missing:
                     return
                 raise RuntimeToolError("tool path parent does not exist") from None
             if stat.S_ISLNK(metadata.st_mode):
@@ -229,7 +233,7 @@ class ProjectToolRuntime:
         if len(payload) > _MAX_FILE_BYTES:
             raise RuntimeToolError("write content exceeds the byte limit")
         path = self.paths.resolve(request.path, allow_missing=True)
-        path.parent.mkdir(parents=False, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{path.name}.", dir=path.parent
         )

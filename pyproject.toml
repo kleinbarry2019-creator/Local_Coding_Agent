@@ -5,11 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "local-coding-agent"
 version = "50.8.0.dev1"
-description = "Free, local-first coding agent core"
+description = "ACB – Autonome Computing Butler: free, local-first coding and system agent"
 requires-python = ">=3.12,<3.15"
 dependencies = []
 
 [project.scripts]
+acb = "autonomous_agent.cli:main"
 agent = "autonomous_agent.cli:main"
 
 [dependency-groups]
@@ -26,7 +27,7 @@ dev = [
 packages = ["autonomous_agent"]
 
 [tool.pytest.ini_options]
-testpaths = ["autonomous_agent/tests"]
+testpaths = ["autonomous_agent/tests/core"]
 addopts = "-ra"
 
 [tool.ruff]

@@ -77,6 +77,29 @@ def test_project_local_tool_version_is_probed_inside_sandbox(
     assert not marker.exists()
 
 
+def test_project_local_symlink_to_untrusted_host_tool_is_not_executed(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = tmp_path / "host-marker"
+    executable = tmp_path / "evil"
+    executable.write_text(
+        f"#!/bin/sh\nprintf pwned > {marker}\nprintf '%s\\n' unsafe-version",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    project_tool = project / ".venv" / "bin" / "evil"
+    project_tool.parent.mkdir(parents=True)
+    project_tool.symlink_to(executable)
+
+    capability = CapabilityRegistry(project).discover("evil")
+
+    assert not capability.available
+    assert capability.version is None
+    assert not marker.exists()
+
+
 def test_unknown_missing_tool_is_not_installable(tmp_path: Path) -> None:
     result = CapabilityRegistry(tmp_path).ensure("definitely_missing_agent_tool")
 
