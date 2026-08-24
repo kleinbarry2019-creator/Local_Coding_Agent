@@ -245,7 +245,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _CliArgumentError:
         _write_error(_INVALID_ARGUMENTS)
         return 2
-    except (ConfigError, _ConfigurationBoundaryError):
+    except ConfigError as error:
+        _write_error(f"{_INVALID_CONFIGURATION} ({error.code}:{error.field})")
+        return 2
+    except _ConfigurationBoundaryError:
         _write_error(_INVALID_CONFIGURATION)
         return 2
     except ProbeError:
