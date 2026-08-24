@@ -31,7 +31,7 @@ REQUIRED_GATE_FRAGMENTS = {
         "uv==0.12.5",
         "uv sync --frozen --group dev",
         "sudo apt-get update",
-        "sudo apt-get install -y shellcheck shfmt",
+        "sudo apt-get install -y bubblewrap shellcheck shfmt",
         "./tools/release_check.sh",
     ),
 }
