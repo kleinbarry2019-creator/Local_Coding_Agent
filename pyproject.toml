@@ -37,4 +37,4 @@ line-length = 88
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["autonomous_agent.core", "autonomous_agent.cli"]
+packages = ["autonomous_agent.core", "autonomous_agent.cli", "autonomous_agent.ui"]

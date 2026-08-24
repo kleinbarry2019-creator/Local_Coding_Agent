@@ -36,6 +36,7 @@ _INVALID_CONFIGURATION = f"{_CLI_NAME}: configuration is invalid."
 _DIAGNOSTIC_ERROR = f"{_CLI_NAME}: diagnostics could not be initialized."
 _INTERNAL_ERROR = f"{_CLI_NAME}: internal diagnostic failure."
 _RUNTIME_ERROR = f"{_CLI_NAME}: task execution failed before verification."
+_UI_ERROR = f"{_CLI_NAME}: graphical interface could not be started."
 _MAX_PATH_BYTES = 4_096
 
 _GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -167,6 +168,26 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--json", action="store_true", help="emit compact JSON")
     resume.add_argument("--project", type=_project_path, metavar="PATH")
     resume.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    ui = commands.add_parser(
+        "ui",
+        help="start the local browser interface",
+        description="Start the loopback-only ACB browser interface.",
+    )
+    ui.add_argument("--project", type=_project_path, metavar="PATH")
+    ui.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    ui.add_argument("--host", type=_ui_host, default="127.0.0.1", metavar="HOST")
+    ui.add_argument(
+        "--port",
+        type=_ui_port,
+        default=8765,
+        metavar="PORT",
+        help="loopback port (default: 8765)",
+    )
+    ui.add_argument(
+        "--open",
+        action="store_true",
+        help="open the interface in the default browser",
+    )
     return parser
 
 
@@ -200,7 +221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         is_doctor = namespace.command == "doctor"
-        is_runtime = namespace.command in {"run", "resume"}
+        is_runtime = namespace.command in {"run", "resume", "ui"}
         runtime_command = is_runtime
         if not is_doctor and not is_runtime:
             raise _CliArgumentError
@@ -222,6 +243,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         _validate_effective_config(config)
+        if namespace.command == "ui":
+            import webbrowser
+
+            from autonomous_agent.ui import AcbUiServer
+
+            server = AcbUiServer(
+                config,
+                host=namespace.host,
+                port=namespace.port,
+            )
+            if namespace.open:
+                webbrowser.open(server.url)
+            sys.stdout.write(
+                f"{_DISPLAY_NAME} UI: {server.url}\n"
+                "Stop with Ctrl+C.\n"
+            )
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.shutdown()
+            return 0
         if is_doctor:
             registry = build_doctor_registry(config)
             raw_report = Doctor(config, registry, DEFAULT_PROBE_NAMES).run()
@@ -257,7 +301,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_error(_INVALID_ARGUMENTS)
         return 2
     except (ValueError, RuntimeError):
-        _write_error(_RUNTIME_ERROR if runtime_command else _INTERNAL_ERROR)
+        if namespace.command == "ui":
+            _write_error(_UI_ERROR)
+        else:
+            _write_error(_RUNTIME_ERROR if runtime_command else _INTERNAL_ERROR)
         return 3
     except Exception:  # noqa: BLE001 - final redacted process boundary
         _write_error(_INTERNAL_ERROR)
@@ -312,6 +359,25 @@ def _session_id(value: str) -> str:
     ):
         raise argparse.ArgumentTypeError("invalid session")
     return value
+
+
+def _ui_host(value: str) -> str:
+    from autonomous_agent.ui import validate_ui_host
+
+    try:
+        return validate_ui_host(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("invalid loopback host") from error
+
+
+def _ui_port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("invalid port") from error
+    if not 0 <= port <= 65_535:
+        raise argparse.ArgumentTypeError("invalid port")
+    return port
 
 
 def _validate_effective_config(config: object) -> None:

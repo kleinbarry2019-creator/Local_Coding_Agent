@@ -82,6 +82,21 @@ The agent process itself refuses to act as a permanent root process.
 the action was really executed, and a public-boundary E2E recheck matches the
 original request. A successful process exit by itself is only one criterion.
 
+## Grafische Oberfläche
+
+ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und
+Acceptance-Criteria. Sie verwendet exakt denselben Autonomy-Runtime-, State-
+und Recovery-Layer wie die CLI und bindet ausschließlich an Loopback:
+
+```bash
+acb ui --project /absolute/path/to/project --open
+```
+
+Ohne `--open` zeigt ACB die lokale Adresse an; sie kann dann im Browser geöffnet
+werden. Der Standard ist `http://127.0.0.1:8765/`. Jeder Schreibauftrag benötigt
+ein zufälliges Sitzungstoken, das nur der lokal ausgelieferten Oberfläche bekannt
+ist. Netzwerkzugriff auf die UI wird nicht akzeptiert.
+
 Example (shown on multiple lines here only for readability):
 
 ```json
