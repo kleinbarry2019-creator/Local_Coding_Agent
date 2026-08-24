@@ -67,6 +67,10 @@ class _Runtime(Protocol):
 
     def resume(self, session_id: str) -> RuntimeResult: ...
 
+    def undo(self, session_id: str, step: int = 1) -> dict[str, object]: ...
+
+    def audit_status(self) -> dict[str, object]: ...
+
 
 @dataclass
 class UiTask:
@@ -228,6 +232,12 @@ class RuntimeTaskController:
         if record.completion is not None:
             document["completion"] = dict(record.completion)
         return document
+
+    def undo(self, session_id: str, step: int = 1) -> dict[str, object]:
+        return self.runtime.undo(session_id, step)
+
+    def audit_status(self) -> dict[str, object]:
+        return self.runtime.audit_status()
 
     def _run_task(self, request_id: str, goal: str) -> None:
         self._execute(request_id, goal, lambda: self.runtime.run(goal))
@@ -398,6 +408,12 @@ class AcbUiServer:
     def feedback(self, limit: int = 50) -> list[dict[str, object]]:
         return [item.to_dict() for item in self._controller.feedback_items(limit)]
 
+    def undo(self, session_id: str, step: int = 1) -> dict[str, object]:
+        return self._controller.undo(session_id, step)
+
+    def audit_status(self) -> dict[str, object]:
+        return self._controller.audit_status()
+
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> dict[str, object]:
         return self._controller.add_feedback(session_id, rating, comment).to_dict()
 
@@ -463,6 +479,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/audit":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().audit_status())
+            return
         if path.startswith("/api/tasks/"):
             request_id = path.removeprefix("/api/tasks/")
             if not _REQUEST_ID_PATTERN.fullmatch(request_id):
@@ -492,7 +514,13 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
             return
-        if path not in {"/api/tasks", "/api/preferences", "/api/onboarding", "/api/feedback"}:
+        if path not in {
+            "/api/tasks",
+            "/api/preferences",
+            "/api/onboarding",
+            "/api/feedback",
+            "/api/undo",
+        }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
             return
         payload = self._read_json()
@@ -536,6 +564,18 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "feedback is invalid")
                 return
             self._send_json(HTTPStatus.OK, feedback)
+            return
+        if path == "/api/undo":
+            session_id = payload.get("session_id")
+            step = payload.get("step", 1)
+            try:
+                if not isinstance(session_id, str) or type(step) is not int:
+                    raise ValueError("undo shape is invalid")
+                result = self._app().undo(session_id, step)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "undo is invalid or unavailable")
+                return
+            self._send_json(HTTPStatus.OK, result)
             return
         goal = payload.get("goal")
         if type(goal) is not str or not goal.strip():

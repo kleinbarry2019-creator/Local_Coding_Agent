@@ -60,6 +60,21 @@ def test_runtime_completes_only_after_independent_file_readback(tmp_path: Path) 
     assert runtime.audit.verify().ok
 
 
+def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runtime = AutonomyRuntime(config)
+    result = runtime.run("Erstelle `undo-me.txt` mit dem Inhalt `temporary`")
+    target = config.paths.project_root / "undo-me.txt"
+    assert target.exists()
+
+    undone = runtime.undo(result.session_id)
+
+    assert undone["restored"] is True
+    assert undone["audit_ok"] is True
+    assert not target.exists()
+    assert runtime.audit_status()["ok"] is True
+
+
 def test_runtime_rejects_state_inside_project(tmp_path: Path) -> None:
     config = _config(tmp_path)
     unsafe = tmp_path / "project" / ".state"

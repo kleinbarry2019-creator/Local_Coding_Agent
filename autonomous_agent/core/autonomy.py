@@ -413,6 +413,37 @@ class AutonomyRuntime:
             initial_attempts=record.attempts,
         )
 
+    def undo(self, session_id: str, step: int = 1) -> dict[str, object]:
+        """Restore one of the last five durable mutation checkpoints."""
+        if type(step) is not int or not 1 <= step <= 5:
+            raise ValueError("undo step must be between 1 and 5")
+        checkpoints = self.tasks.list_checkpoints(
+            session_id, statuses=frozenset({"discarded"}), limit=5
+        )
+        if len(checkpoints) < step:
+            raise ValueError("requested undo step is not available")
+        checkpoint = checkpoints[step - 1]
+        result = self.checkpoints.restore(checkpoint)
+        verification = self.audit.verify()
+        return {
+            "session_id": session_id,
+            "step": step,
+            "checkpoint_id": result.checkpoint_id,
+            "restored": result.restored,
+            "diagnostic": result.diagnostic,
+            "audit_ok": verification.ok,
+            "remaining_undo": max(0, len(checkpoints) - step),
+        }
+
+    def audit_status(self) -> dict[str, object]:
+        verification = self.audit.verify()
+        return {
+            "ok": verification.ok,
+            "code": verification.code,
+            "sequence": verification.sequence,
+            "head_hash": verification.head_hash,
+        }
+
     def _execute(
         self,
         session_id: str,

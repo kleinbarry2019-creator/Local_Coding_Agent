@@ -328,6 +328,15 @@ def test_ui_real_http_e2e_executes_and_persists_task(tmp_path: Path) -> None:
         assert completion["completed"] is True
         assert (tmp_path / "project" / "ui-result.txt").read_text() == "verified"
         session_id = task["session_id"]
+        status, undone = _post_json(
+            f"{server.url}api/undo",
+            {"session_id": session_id, "step": 1},
+            token=server.token,
+        )
+        assert status == 200
+        assert undone["restored"] is True
+        assert undone["audit_ok"] is True
+        assert not (tmp_path / "project" / "ui-result.txt").exists()
     finally:
         server.shutdown()
         thread.join(timeout=2)

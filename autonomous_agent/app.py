@@ -141,6 +141,8 @@ def _run_gtk(config: AgentConfig) -> int:
             self.preference_status: Any = None
             self.preference_controls: dict[str, Any] = {}
             self.onboarding_status_view: Any = None
+            self.undo_button: Any = None
+            self.audit_button: Any = None
             self.research_thread: threading.Thread | None = None
             self.recovered = self.controller.recover_pending()
 
@@ -618,6 +620,13 @@ def _run_gtk(config: AgentConfig) -> int:
             subtitle = Gtk.Label(label="Autonome Computing Butler")
             subtitle.add_css_class("subtitle")
             bar.append(subtitle)
+            self.undo_button = Gtk.Button(label="↶ Rückgängig")
+            self.undo_button.set_sensitive(False)
+            self.undo_button.connect("clicked", self._undo_last)
+            bar.append(self.undo_button)
+            self.audit_button = Gtk.Button(label="Audit prüfen")
+            self.audit_button.connect("clicked", self._show_audit)
+            bar.append(self.audit_button)
             offline = Gtk.Label(label="● OFFLINE · LOKAL")
             offline.set_hexpand(True)
             offline.set_xalign(1)
@@ -685,10 +694,45 @@ def _run_gtk(config: AgentConfig) -> int:
             )
             if active is None:
                 self.send.set_sensitive(True)
+                latest_completed = next(
+                    (item for item in reversed(self.controller.tasks())
+                     if item.status == "completed" and item.session_id),
+                    None,
+                )
+                if self.undo_button is not None:
+                    self.undo_button.set_sensitive(latest_completed is not None)
             else:
                 self.current.set_text(f"{active.goal}\nStatus: {active.status}")
             self._refresh_learning()
             return True
+
+        def _undo_last(self, *_args: object) -> None:
+            completed = next(
+                (item for item in reversed(self.controller.tasks())
+                 if item.status == "completed" and item.session_id),
+                None,
+            )
+            if completed is None or completed.session_id is None:
+                return
+            try:
+                result = self.controller.undo(completed.session_id)
+            except (TypeError, ValueError, RuntimeError):
+                self.current.set_text("Rückgängig nicht verfügbar; der Audit-Status bleibt unverändert.")
+                return
+            self.current.set_text(
+                "Letzte Änderung rückgängig gemacht.\n"
+                f"Checkpoint: {result['checkpoint_id']}\n"
+                f"Audit: {'gültig' if result['audit_ok'] else 'prüfen'}"
+            )
+
+        def _show_audit(self, *_args: object) -> None:
+            result = self.controller.audit_status()
+            self.current.set_text(
+                "Audit-Prüfung\n"
+                f"Status: {'gültig' if result['ok'] else 'ungültig'}\n"
+                f"Sequenz: {result['sequence']}\n"
+                f"Code: {result['code']}"
+            )
 
         def _refresh_learning(self) -> None:
             status = self.controller.learning_status()

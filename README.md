@@ -181,6 +181,12 @@ Offline-Sprachadapter melden. Nach einem abgeschlossenen Auftrag kann eine
 Bewertung von 1 bis 10 mit Kommentar lokal gespeichert werden; sie verändert
 keinen Audit- oder Task-State.
 
+Die Desktop-Kopfzeile bietet zusätzlich `Audit prüfen` und `Rückgängig`. Die
+Rückgängig-Funktion verwendet die vorhandenen, verifizierten Checkpoints der
+Runtime und kann bis zu fünf noch verfügbare Mutationsschritte eines Auftrags
+einzeln zurückrollen. Jeder Rückrollvorgang wird erneut gegen die Audit-Kette
+geprüft; ein unklarer oder beschädigter Checkpoint wird nicht angewendet.
+
 Example (shown on multiple lines here only for readability):
 
 ```json
