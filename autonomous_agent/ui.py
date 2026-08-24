@@ -188,6 +188,9 @@ class RuntimeTaskController:
     def speak(self, text: str) -> SpeechResult:
         return self.voice.speak(text)
 
+    def wake_phrase_matches(self, text: str) -> bool:
+        return self.voice.wake_phrase_matches(text, self.preferences().wake_phrase)
+
     def submit(self, goal: str) -> UiTask:
         normalized = GoalNormalizer().normalize(goal)
         enforce_task_access(self.onboarding_status(), normalized.kind)
@@ -503,6 +506,9 @@ class AcbUiServer:
     def speak(self, text: str) -> dict[str, object]:
         return self._controller.speak(text).to_dict()
 
+    def wake_phrase_matches(self, text: str) -> dict[str, object]:
+        return {"matched": self._controller.wake_phrase_matches(text)}
+
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> dict[str, object]:
         return self._controller.add_feedback(session_id, rating, comment).to_dict()
 
@@ -667,6 +673,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/feedback",
             "/api/undo",
             "/api/voice/speak",
+            "/api/voice/wake",
             "/api/account",
             "/api/audit/export",
         }:
@@ -785,6 +792,13 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "speech request is invalid")
                 return
             self._send_json(HTTPStatus.OK, result)
+            return
+        if path == "/api/voice/wake":
+            text = payload.get("text")
+            if not isinstance(text, str):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "wake phrase text is invalid")
+                return
+            self._send_json(HTTPStatus.OK, self._app().wake_phrase_matches(text))
             return
         goal = payload.get("goal")
         if type(goal) is not str or not goal.strip():

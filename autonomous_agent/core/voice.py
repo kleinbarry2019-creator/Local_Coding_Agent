@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess  # nosec B404 - fixed local voice executable only
+import unicodedata
 from dataclasses import dataclass
 
 MAX_SPEECH_BYTES = 8_192
@@ -98,12 +99,29 @@ class VoiceService:
             "spoken" if completed.returncode == 0 else "output-process-failed",
         )
 
+    @staticmethod
+    def wake_phrase_matches(text: str, phrase: str) -> bool:
+        """Match a configured local wake phrase without recording or networking."""
+        if type(text) is not str or type(phrase) is not str:
+            return False
+        normalized_text = _normalize_phrase(text)
+        normalized_phrase = _normalize_phrase(phrase)
+        return bool(normalized_phrase) and (
+            normalized_text == normalized_phrase
+            or normalized_text.startswith(f"{normalized_phrase} ")
+        )
+
 
 def _first_available(names: tuple[str, ...]) -> str | None:
     for name in names:
         if shutil.which(name) is not None:
             return name
     return None
+
+
+def _normalize_phrase(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join("".join(char for char in normalized if char.isalnum() or char.isspace()).split())
 
 
 __all__ = ["SpeechResult", "VoiceService", "VoiceStatus"]

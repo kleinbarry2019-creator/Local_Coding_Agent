@@ -28,3 +28,9 @@ def test_voice_reports_missing_output(monkeypatch) -> None:
     result = VoiceService().speak("Hallo ACB")
     assert result.started is False
     assert result.diagnostic == "output-engine-unavailable"
+
+
+def test_wake_phrase_matching_is_local_and_tolerates_punctuation() -> None:
+    assert VoiceService.wake_phrase_matches("Hey Kumpel, starte", "Hey Kumpel")
+    assert VoiceService.wake_phrase_matches("HEY KUMPEL", "Hey Kumpel")
+    assert not VoiceService.wake_phrase_matches("Hallo Kumpel", "Hey Kumpel")
