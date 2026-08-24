@@ -895,7 +895,12 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
             ) from None
         if canonical in seen:
             continue
-        root = _ApprovedRoot(canonical, canonical, Path("/"), frozenset({0}))
+        root = _ApprovedRoot(
+            canonical,
+            canonical,
+            Path("/"),
+            frozenset({0, os.getuid()}),
+        )
         try:
             _validate_directory_chain(
                 root.validation_start,
