@@ -55,18 +55,31 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+try:
+    from autonomous_agent.runtime_paths import (
+        build_runtime_paths,
+        ensure_runtime_directories,
+        migrate_legacy_runtime_files,
+    )
+except ModuleNotFoundError:
+    from runtime_paths import (  # type: ignore[no-redef]
+        build_runtime_paths,
+        ensure_runtime_directories,
+        migrate_legacy_runtime_files,
+    )
 
 VERSION = 50
 
 ROOT = Path(__file__).resolve().parent
-RUNTIME = ROOT / "runtime"
+RUNTIME_PATHS = build_runtime_paths(ROOT)
+RUNTIME = RUNTIME_PATHS.runtime_root
 
-STATE_FILE = ROOT / "agent_state.json"
-STATE_BACKUP = ROOT / "agent_state.json.bak"
-STATE_HASH = ROOT / "agent_state.sha256"
+STATE_FILE = RUNTIME_PATHS.state_file
+STATE_BACKUP = RUNTIME_PATHS.state_backup
+STATE_HASH = RUNTIME_PATHS.state_hash
 
-AUDIT_FILE = ROOT / "audit_log.jsonl"
-AUDIT_HEAD_FILE = ROOT / "audit_head.sha256"
+AUDIT_FILE = RUNTIME_PATHS.audit_file
+AUDIT_HEAD_FILE = RUNTIME_PATHS.audit_head
 
 MAX_STATE_BYTES = 16384
 MAX_AUDIT_BYTES = 1048576
@@ -277,6 +290,14 @@ def state_digest(state):
     ).hexdigest()
 
 
+def prepare_runtime_storage():
+    ensure_runtime_directories(RUNTIME_PATHS)
+    return migrate_legacy_runtime_files(
+        RUNTIME_PATHS,
+        legacy_root=ROOT,
+    )
+
+
 def atomic_write(path, data):
     path.parent.mkdir(
         parents=True,
@@ -332,6 +353,7 @@ def verify_state_hash(state):
 
 
 def save_state(state):
+    prepare_runtime_storage()
     validate_state(state)
 
     encoded = json.dumps(
@@ -389,6 +411,7 @@ def load_one_state(path):
 
 
 def load_state():
+    prepare_runtime_storage()
     current = load_one_state(
         STATE_FILE
     )
@@ -486,6 +509,7 @@ def bounded_audit_details(details):
 
 
 def audit(event, details):
+    prepare_runtime_storage()
     entry = {
         "timestamp": datetime.datetime.now(
             datetime.timezone.utc
@@ -2537,6 +2561,12 @@ Release cleanup:
 - bounded response handling
 - bounded file enumeration
 - bounded path handling
+
+Runtime isolation:
+- centralized V50 path ownership
+- isolated state, audit, snapshot, and cache directories
+- non-destructive legacy state migration
+- fail-closed symlink protection for runtime storage
 
 V48 release:
 - bounded model responses
