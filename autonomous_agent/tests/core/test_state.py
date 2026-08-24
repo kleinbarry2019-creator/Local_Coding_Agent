@@ -265,6 +265,22 @@ def test_unexpected_schema_object_is_schema_drift(
     _assert_schema_drift_is_rejected(store)
 
 
+def test_changed_table_check_constraint_is_schema_drift(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.initialize()
+    with store.connection() as connection:
+        connection.execute("DROP TABLE config_snapshots")
+        connection.execute(
+            """CREATE TABLE config_snapshots (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(session_id),
+                config_json TEXT NOT NULL CHECK(length(config_json) <= 1),
+                created_at TEXT NOT NULL
+            )"""
+        )
+
+    _assert_schema_drift_is_rejected(store)
+
+
 def test_failed_migration_rolls_back_and_leaves_prior_schema_usable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

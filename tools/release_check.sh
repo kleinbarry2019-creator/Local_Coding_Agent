@@ -16,16 +16,20 @@ cd -- "${REPOSITORY_ROOT}"
 
 echo "=== LOCAL CODING AGENT RELEASE CHECK ==="
 
+check_clean_worktree() {
+	# Ignore rules cover documented generated output such as dist/. Every tracked
+	# change and every non-ignored untracked path remains release-fatal.
+	local worktree_status
+	worktree_status="$(git status --short --untracked-files=all)"
+	if [[ -n "${worktree_status}" ]]; then
+		printf '%s\n' "${worktree_status}"
+		echo "ERROR: release checks require a clean worktree" >&2
+		exit 1
+	fi
+}
+
 echo "[1/11] Clean worktree"
-# Repository ignore rules cover documented generated build output such as dist/.
-# Every tracked change and every non-ignored untracked path remains release-fatal.
-WORKTREE_STATUS="$(git status --short --untracked-files=all)"
-readonly WORKTREE_STATUS
-if [[ -n "${WORKTREE_STATUS}" ]]; then
-	printf '%s\n' "${WORKTREE_STATUS}"
-	echo "ERROR: release checks require a clean worktree" >&2
-	exit 1
-fi
+check_clean_worktree
 
 echo "[2/11] Legacy V50 gate"
 ./autonomous_agent/tools/test_all_v50.sh
@@ -37,16 +41,16 @@ python3 -m unittest \
 	autonomous_agent.tests.test_recovery_schema
 
 echo "[4/11] Core tests"
-uv run pytest autonomous_agent/tests/core
+uv run --frozen pytest autonomous_agent/tests/core
 
 echo "[5/11] Ruff"
-uv run ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/tests/core
+uv run --frozen ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/tests/core
 
 echo "[6/11] MyPy"
-uv run mypy autonomous_agent/core autonomous_agent/cli.py
+uv run --frozen mypy autonomous_agent/core autonomous_agent/cli.py
 
 echo "[7/11] Bandit"
-uv run bandit -q -r autonomous_agent/core autonomous_agent/cli.py
+uv run --frozen bandit -q -r autonomous_agent/core autonomous_agent/cli.py
 
 echo "[8/11] Shell quality"
 shellcheck tools/release_check.sh autonomous_agent/tools/test_all_v50.sh
@@ -65,7 +69,7 @@ python3 -m compileall \
 	autonomous_agent/cli.py
 
 echo "[10/11] Build package"
-uv build
+uv build --offline --no-build-isolation
 
 echo "[11/11] Release files and diff"
 test -f autonomous_agent/BUILD_INFO_V50.txt
@@ -85,6 +89,7 @@ else
 fi
 
 git diff --check
+check_clean_worktree
 
 echo
 echo "=== RELEASE CHECK PASSED ==="

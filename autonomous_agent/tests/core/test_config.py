@@ -378,6 +378,19 @@ def test_project_config_symlink_is_rejected(project: Path) -> None:
     assert raised.value.field == "project_file"
 
 
+def test_oversized_project_config_is_rejected_before_toml_parsing(
+    project: Path,
+) -> None:
+    project_file = project / ".local-agent.toml"
+    project_file.write_bytes(b"#" + (b"x" * 1_048_576))
+
+    with pytest.raises(ConfigError) as raised:
+        load_config(cwd=project, home=project.parent, environ={})
+
+    assert raised.value.code == "config_too_large"
+    assert raised.value.field == "project_file"
+
+
 def test_load_config_rejects_group_writable_global_file(project: Path) -> None:
     config_file = _write_global(project.parent, "")
     config_file.chmod(0o620)

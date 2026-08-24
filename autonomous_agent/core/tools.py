@@ -145,7 +145,11 @@ def _decode_dataclass_with_payload[InputT](
     if not isinstance(raw, Mapping):
         raise _SchemaError("invalid_value", "input must be a mapping")
     try:
+        if len(raw) > limits.max_items:
+            raise _SchemaError("too_many_items", "input has too many items")
         document = dict(raw)
+    except _SchemaError:
+        raise
     except Exception as error:
         raise _SchemaError("invalid_value", "input mapping is unreadable") from error
     _validate_document(document, limits, limits.max_input_bytes, "input")

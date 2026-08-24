@@ -1454,6 +1454,50 @@ def test_verification_detects_mutation_deletion_and_competing_links(
     assert verification.code == expected_code
 
 
+def test_verification_rejects_deep_persisted_json_without_parser_exception(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    deeply_nested = ("[" * 2_000) + "0" + ("]" * 2_000)
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE events SET payload_json = ? WHERE sequence = 1",
+            (deeply_nested,),
+        )
+
+    verification = AuditLog(store).verify()
+
+    assert not verification.ok
+    assert verification.code == "hash_mismatch"
+
+
+def test_verification_rejects_oversized_json_before_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _start(AuditLog(store), tmp_path)
+    oversized = '{"status":"' + ("x" * 1_048_576) + '"}'
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE events SET payload_json = ? WHERE sequence = 1",
+            (oversized,),
+        )
+    original_loads = events_module.json.loads
+
+    def bounded_loads(value: str, *args: Any, **kwargs: Any) -> Any:
+        if len(value.encode("utf-8")) > 1_048_576:
+            pytest.fail("oversized persisted JSON reached json.loads")
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(events_module.json, "loads", bounded_loads)
+
+    verification = AuditLog(store).verify()
+
+    assert not verification.ok
+    assert verification.code == "hash_mismatch"
+
+
 def test_verification_detects_reordered_sequences(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _start(AuditLog(store), tmp_path)

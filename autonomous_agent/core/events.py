@@ -1370,6 +1370,10 @@ def _verify_row(
             False, "hash_mismatch", expected_sequence - 1, previous_hash
         )
     try:
+        if len(payload_json.encode("utf-8")) > _MAX_CANONICAL_BYTES:
+            raise EventError(
+                "invalid_event", "persisted payload exceeds the byte limit"
+            )
         parsed_payload = json.loads(payload_json)
         if not isinstance(parsed_payload, dict):
             raise TypeError
@@ -1377,7 +1381,13 @@ def _verify_row(
             event_type, parsed_payload, sensitive_values
         )
         canonical_payload = _canonical_json(sanitized_payload)
-    except (json.JSONDecodeError, TypeError, EventError):
+    except (
+        json.JSONDecodeError,
+        UnicodeEncodeError,
+        RecursionError,
+        TypeError,
+        EventError,
+    ):
         return AuditVerification(
             False, "hash_mismatch", expected_sequence - 1, previous_hash
         )

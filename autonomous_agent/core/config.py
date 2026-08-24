@@ -15,6 +15,7 @@ from typing import Any, cast
 
 _APP_DIRECTORY = "local-coding-agent"
 _PROJECT_CONFIG_NAME = ".local-agent.toml"
+_MAX_CONFIG_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -395,6 +396,12 @@ def _read_toml(
             raise ConfigError(
                 "unsafe_config_file", field, "must be a regular non-symlink file"
             )
+        if metadata.st_size > _MAX_CONFIG_BYTES:
+            raise ConfigError(
+                "config_too_large",
+                field,
+                "must not exceed the configuration byte limit",
+            )
         if require_owner_control and (
             metadata.st_uid != os.getuid()
             or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
@@ -773,11 +780,14 @@ def _global_config_file(home: Path, environ: Mapping[str, str]) -> Path:
     if config_home is None:
         config_base = home / ".config"
     else:
-        config_base = _validated_absolute_path(Path(config_home), "XDG_CONFIG_HOME")
+        config_base = _validated_xdg_base(
+            Path(config_home), home, "XDG_CONFIG_HOME"
+        )
     return config_base / _APP_DIRECTORY / "config.toml"
 
 
 def _validate_global_config(config_file: Path) -> None:
+    _validate_trusted_directory_chain(config_file.parent, "config_file")
     try:
         metadata = config_file.lstat()
     except FileNotFoundError:
@@ -830,8 +840,17 @@ def _state_root(
     state_home = environ.get("XDG_STATE_HOME")
     if state_home is None:
         return home / ".local" / "state" / _APP_DIRECTORY
-    state_base = _validated_absolute_path(Path(state_home), "XDG_STATE_HOME")
+    state_base = _validated_xdg_base(Path(state_home), home, "XDG_STATE_HOME")
     return state_base / _APP_DIRECTORY
+
+
+def _validated_xdg_base(path: Path, home: Path, field: str) -> Path:
+    base = _validated_absolute_path(path, field)
+    if base != home and not base.is_relative_to(home):
+        raise ConfigError(
+            "unsafe_path", field, "must remain beneath the canonical home"
+        )
+    return base
 
 
 def _validated_absolute_path(path: Path, field: str) -> Path:
@@ -853,20 +872,39 @@ def _resolve_existing_directory(path: Path, field: str) -> Path:
 
 
 def _validate_state_path(state_root: Path) -> None:
-    current = Path(state_root.anchor)
-    for component in state_root.parts[1:]:
+    _validate_trusted_directory_chain(state_root, "state_root")
+
+
+def _validate_trusted_directory_chain(path: Path, field: str) -> None:
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
         current /= component
         try:
             metadata = current.lstat()
         except FileNotFoundError:
             return
         except OSError as error:
-            raise ConfigError("invalid_path", "state_root", str(error)) from error
+            raise ConfigError("invalid_path", field, str(error)) from error
         if stat.S_ISLNK(metadata.st_mode):
-            raise ConfigError("unsafe_path", "state_root", "must not contain symlinks")
+            raise ConfigError("unsafe_path", field, "must not contain symlinks")
         if not stat.S_ISDIR(metadata.st_mode):
             raise ConfigError(
-                "unsafe_path", "state_root", "must not contain non-directory components"
+                "unsafe_path", field, "must not contain non-directory components"
+            )
+        owner_is_trusted = metadata.st_uid in {0, os.getuid()}
+        writable_by_others = bool(
+            metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        )
+        protected_shared_root = bool(
+            metadata.st_uid == 0 and metadata.st_mode & stat.S_ISVTX
+        )
+        if not owner_is_trusted or (
+            writable_by_others and not protected_shared_root
+        ):
+            raise ConfigError(
+                "unsafe_path",
+                field,
+                "must not contain an untrusted writable ancestor",
             )
 
 

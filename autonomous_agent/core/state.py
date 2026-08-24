@@ -49,7 +49,7 @@ CREATE TABLE config_snapshots (
 # Migration SQL is immutable after release. Its exact UTF-8 bytes are checksummed.
 _MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _MIGRATION_1_SQL),)
 
-type _CatalogObject = tuple[str, str, str]
+type _CatalogObject = tuple[str, str, str, str]
 type _ColumnSignature = tuple[int, str, str, int, str | None, int, int]
 type _IndexColumnSignature = tuple[int, int, str | None, int, str | None, int]
 type _IndexSignature = tuple[int, str, int, tuple[_IndexColumnSignature, ...]]
@@ -514,13 +514,13 @@ def _expected_schema_signature(
 
 def _schema_signature(connection: sqlite3.Connection) -> _SchemaSignature:
     catalog = tuple(
-        (str(row[0]), str(row[1]), str(row[2]))
+        (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
         for row in connection.execute(
             """
-            SELECT type, name, tbl_name
+            SELECT type, name, tbl_name, COALESCE(sql, '')
             FROM main.sqlite_schema
             WHERE name NOT GLOB 'sqlite_*'
-            ORDER BY type, name, tbl_name
+            ORDER BY type, name, tbl_name, sql
             """
         )
     )
@@ -536,7 +536,7 @@ def _schema_signature(connection: sqlite3.Connection) -> _SchemaSignature:
     }
     tables = tuple(
         _table_signature(connection, name, table_options)
-        for object_type, name, _table_name in catalog
+        for object_type, name, _table_name, _sql in catalog
         if object_type == "table"
     )
     return _SchemaSignature(catalog=catalog, tables=tables)

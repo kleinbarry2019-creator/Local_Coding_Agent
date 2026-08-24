@@ -12,14 +12,14 @@ REQUIRED_GATE_FRAGMENTS = {
         "autonomous_agent.tests.test_runtime_paths",
         "autonomous_agent.tests.test_recovery_storage",
         "autonomous_agent.tests.test_recovery_schema",
-        "uv run pytest autonomous_agent/tests/core",
-        "uv run ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/tests/core",
-        "uv run mypy autonomous_agent/core autonomous_agent/cli.py",
-        "uv run bandit -q -r autonomous_agent/core autonomous_agent/cli.py",
+        "uv run --frozen pytest autonomous_agent/tests/core",
+        "uv run --frozen ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/tests/core",
+        "uv run --frozen mypy autonomous_agent/core autonomous_agent/cli.py",
+        "uv run --frozen bandit -q -r autonomous_agent/core autonomous_agent/cli.py",
         "shellcheck tools/release_check.sh autonomous_agent/tools/test_all_v50.sh",
         "shfmt -d tools/release_check.sh autonomous_agent/tools/test_all_v50.sh",
         "python3 -m compileall",
-        "uv build",
+        "uv build --offline --no-build-isolation",
         "test -f autonomous_agent/BUILD_INFO_V50.txt",
         "test -f autonomous_agent/release/V50_COMMIT.txt",
         "test -f autonomous_agent/release/V50_BUILD_TIME.txt",
@@ -73,6 +73,7 @@ def test_canonical_release_script_has_exact_ordered_offline_gate() -> None:
     assert script.index("git status --short") < script.index(
         "./autonomous_agent/tools/test_all_v50.sh"
     )
+    assert script.count("check_clean_worktree") == 3
     for forbidden in FORBIDDEN_OFFLINE_GATE_FRAGMENTS:
         assert forbidden not in script
 

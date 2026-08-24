@@ -317,6 +317,29 @@ def test_decode_rejects_input_byte_string_and_total_item_overflow(
         decode_dataclass(raw, expected_type, limits)
 
 
+def test_decode_rejects_oversized_mapping_before_iterating_it() -> None:
+    class OversizedMapping(dict[str, object]):
+        iterated = False
+
+        def __len__(self) -> int:
+            return 1_001
+
+        def __iter__(self) -> Any:
+            self.iterated = True
+            raise AssertionError("oversized mapping must not be iterated")
+
+        def keys(self) -> Any:
+            self.iterated = True
+            raise AssertionError("oversized mapping must not expose keys")
+
+    raw = OversizedMapping(value="safe")
+
+    with pytest.raises(ValueError):
+        decode_dataclass(raw, ExampleInput, SchemaLimits(max_items=1_000))
+
+    assert not raw.iterated
+
+
 def test_decode_rejects_excessive_recursive_depth() -> None:
     with pytest.raises(ValueError):
         decode_dataclass(

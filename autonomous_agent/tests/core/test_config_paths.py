@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from autonomous_agent.core import config as config_module
 from autonomous_agent.core.config import ConfigError, resolve_paths
 
 
@@ -73,6 +74,40 @@ def test_xdg_bases_define_config_and_state_locations(tmp_path: Path) -> None:
     assert paths.state_root == state_home / "local-coding-agent"
 
 
+def test_xdg_config_home_outside_canonical_home_fails_closed(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outside = tmp_path / "hostile-project-config"
+
+    with pytest.raises(ConfigError) as raised:
+        resolve_paths(
+            cwd=home,
+            home=home,
+            environ={"XDG_CONFIG_HOME": str(outside)},
+        )
+
+    assert raised.value.field == "XDG_CONFIG_HOME"
+
+
+def test_xdg_state_home_outside_canonical_home_fails_closed(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outside = tmp_path / "hostile-project-state"
+
+    with pytest.raises(ConfigError) as raised:
+        resolve_paths(
+            cwd=home,
+            home=home,
+            environ={"XDG_STATE_HOME": str(outside)},
+        )
+
+    assert raised.value.field == "XDG_STATE_HOME"
+
+
 def test_cli_state_override_takes_precedence_over_global_override(
     tmp_path: Path,
 ) -> None:
@@ -126,6 +161,22 @@ def test_state_path_with_non_directory_component_fails_closed(tmp_path: Path) ->
             cwd=tmp_path,
             home=tmp_path,
             environ={"XDG_STATE_HOME": str(component / "child")},
+        )
+
+
+def test_state_path_with_untrusted_existing_ancestor_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_home = tmp_path / "attacker-controlled"
+    state_home.mkdir()
+    monkeypatch.setattr(os, "getuid", lambda: state_home.stat().st_uid + 1)
+    monkeypatch.setattr(config_module, "_validate_global_config", lambda _path: None)
+
+    with pytest.raises(ConfigError, match="state_root"):
+        resolve_paths(
+            cwd=tmp_path,
+            home=tmp_path,
+            environ={"XDG_STATE_HOME": str(state_home)},
         )
 
 
