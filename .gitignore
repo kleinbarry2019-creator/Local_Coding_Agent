@@ -7,6 +7,10 @@ runtime/
 !docs/v50/baseline/
 !docs/v50/baseline/*.log
 .aider.*
+.worktrees/
+.venv/
+dist/
+*.egg-info/
 Modelfile-*
 autonomous_agent/agent_state.json
 autonomous_agent/agent_state.json.bak
@@ -20,3 +24,10 @@ test_agent_output.txt
 __pycache__/
 agent_state.json
 agent_memory.json
+agent_audit.json
+agent_history.json
+agent_state_backup.json
+agent_state.before_*.json
+autonomous_agent/state/*
+!autonomous_agent/state/README.md
+autonomous_agent/runtime/

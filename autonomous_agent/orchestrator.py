@@ -22,7 +22,12 @@ class AgentOrchestrator:
         self.state["status"] = "running"
 
         if self.state_manager:
-            self.state_manager.save()
+
+            if self.state.get("recovery_event"):
+                self.state_manager.save_snapshot("after-recovery")
+
+            self.state_manager.save_snapshot("before-run")
+            self.state_manager.save(snapshot=False)
 
         if self.planner:
             plan = self.planner.create_plan(goal)
@@ -30,11 +35,19 @@ class AgentOrchestrator:
 
             if self.engine:
                 for step in plan:
+                    if self.state_manager:
+                        self.state_manager.save_snapshot(
+                            f"before-step-{step.action}"
+                        )
+
                     result = self.engine.execute(step)
                     self.state["last_result"] = result
 
                     if self.state_manager:
-                        self.state_manager.save()
+                        self.state_manager.save_snapshot(
+                            f"after-step-{step.action}"
+                        )
+                        self.state_manager.save(snapshot=False)
 
         if self.memory:
             self.memory.store(
@@ -45,7 +58,8 @@ class AgentOrchestrator:
         self.state["status"] = "completed"
 
         if self.state_manager:
-            self.state_manager.save()
+            self.state_manager.save_snapshot("run-completed")
+            self.state_manager.save(snapshot=False)
 
         return self.state
 

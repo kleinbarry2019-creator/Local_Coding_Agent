@@ -11,7 +11,7 @@
 
 - [ ] Define V50 architecture changes
 - [ ] Add regression test baseline
-- [ ] Review runtime state handling
+- [x] Review and isolate runtime state handling
 
 ## Phase 2 - Safety
 
