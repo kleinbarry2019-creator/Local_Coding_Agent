@@ -400,6 +400,13 @@ def test_ui_real_http_e2e_executes_and_persists_task(tmp_path: Path) -> None:
         assert (tmp_path / "project" / str(protocol["path"])).is_file()
         assert (tmp_path / "project" / "ui-result.txt").read_text() == "verified"
         session_id = task["session_id"]
+        status, sessions, _ = _get_json(
+            f"{server.url}api/sessions", token=server.token
+        )
+        assert status == 200
+        assert any(
+            item["session_id"] == session_id for item in sessions["sessions"]
+        )
         status, undone = _post_json(
             f"{server.url}api/undo",
             {"session_id": session_id, "step": 1},

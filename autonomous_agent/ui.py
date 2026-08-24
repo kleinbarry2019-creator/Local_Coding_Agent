@@ -289,20 +289,13 @@ class RuntimeTaskController:
         record = self.runtime.tasks.load_task(session_id)
         if record is None:
             return None
-        document: dict[str, object] = {
-            "session_id": record.session_id,
-            "original_goal": record.original_goal,
-            "status": record.status,
-            "current_step": record.current_step,
-            "attempts": record.attempts,
-            "created_at": record.created_at,
-            "updated_at": record.updated_at,
-        }
-        if record.failure_fingerprint is not None:
-            document["failure_fingerprint"] = record.failure_fingerprint
-        if record.completion is not None:
-            document["completion"] = dict(record.completion)
-        return document
+        return _session_document(record)
+
+    def persisted_sessions(self, limit: int = 50) -> list[dict[str, object]]:
+        records = self.runtime.tasks.list_tasks(
+            limit=max(1, min(limit, MAX_TASK_RECORDS))
+        )
+        return [_session_document(record) for record in records]
 
     def undo(self, session_id: str, step: int = 1) -> dict[str, object]:
         return self.runtime.undo(session_id, step)
@@ -481,6 +474,9 @@ class AcbUiServer:
 
     def persisted_session(self, session_id: str) -> dict[str, object] | None:
         return self._controller.persisted_session(session_id)
+
+    def persisted_sessions(self, limit: int = 50) -> list[dict[str, object]]:
+        return self._controller.persisted_sessions(limit)
 
     def preferences(self) -> dict[str, object]:
         return self._controller.preferences().to_dict()
@@ -673,6 +669,14 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
                 return
             self._send_json(HTTPStatus.OK, self._app().voice_status())
+            return
+        if path == "/api/sessions":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(
+                HTTPStatus.OK, {"sessions": self._app().persisted_sessions()}
+            )
             return
         if path.startswith("/api/tasks/"):
             if not self._authorized():
@@ -980,6 +984,23 @@ def _copy_task(task: UiTask) -> UiTask:
         remaining_steps=task.remaining_steps,
         estimated_remaining_seconds=task.estimated_remaining_seconds,
     )
+
+
+def _session_document(record: TaskRecord) -> dict[str, object]:
+    document: dict[str, object] = {
+        "session_id": record.session_id,
+        "original_goal": record.original_goal,
+        "status": record.status,
+        "current_step": record.current_step,
+        "attempts": record.attempts,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+    if record.failure_fingerprint is not None:
+        document["failure_fingerprint"] = record.failure_fingerprint
+    if record.completion is not None:
+        document["completion"] = dict(record.completion)
+    return document
 
 
 def _timestamp() -> str:
