@@ -153,6 +153,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.feedback_status: Any = None
             self.feedback_session: str | None = None
             self.research_thread: threading.Thread | None = None
+            self.persisted_history = self.controller.persisted_sessions()
             self.recovered = self.controller.recover_pending()
 
         def do_activate(self) -> None:
@@ -242,6 +243,9 @@ def _run_gtk(config: AgentConfig) -> int:
             self._install_css(Gdk, Gtk)
             if self.controller.onboarding_status().phase == "ready":
                 self.stack.set_visible_child_name("tasks")
+            for session in reversed(self.persisted_history):
+                if session.get("status") in {"completed", "failed"}:
+                    self._show_persisted_session(session)
             for task in self.recovered:
                 self._show_task(task, recovered=True)
             GLib.timeout_add(400, self._refresh)
@@ -782,6 +786,18 @@ def _run_gtk(config: AgentConfig) -> int:
             label.set_xalign(0)
             row.set_child(label)
             self.history.prepend(row)
+
+        def _show_persisted_session(self, session: dict[str, object]) -> None:
+            if self.history is None:
+                return
+            status = str(session.get("status", "unknown"))
+            goal = str(session.get("original_goal", ""))
+            row = Gtk.ListBoxRow()
+            label = Gtk.Label(label=f"{status} · {goal}")
+            label.set_wrap(True)
+            label.set_xalign(0)
+            row.set_child(label)
+            self.history.append(row)
 
         def _refresh(self) -> bool:
             tasks = self.controller.tasks()
