@@ -26,12 +26,14 @@ from autonomous_agent.core.doctor import (
     build_doctor_registry,
     canonicalize_doctor_report,
 )
+from autonomous_agent.core.goals import GoalError
 from autonomous_agent.core.probes import ProbeError
 
 _INVALID_ARGUMENTS = "agent: invalid command-line arguments."
 _INVALID_CONFIGURATION = "agent: configuration is invalid."
 _DIAGNOSTIC_ERROR = "agent: diagnostics could not be initialized."
 _INTERNAL_ERROR = "agent: internal diagnostic failure."
+_RUNTIME_ERROR = "agent: task execution failed before verification."
 _MAX_PATH_BYTES = 4_096
 
 _GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -146,11 +148,29 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="{monitored,autonomous}",
         help="select the trusted diagnostic policy mode",
     )
+    run = commands.add_parser(
+        "run",
+        help="execute and verify one autonomous local task",
+        description="Execute a bounded local task and require completion evidence.",
+    )
+    run.add_argument("goal", help="simple coding or system task in natural language")
+    run.add_argument("--json", action="store_true", help="emit compact JSON")
+    run.add_argument("--project", type=_project_path, metavar="PATH")
+    run.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    resume = commands.add_parser(
+        "resume",
+        help="resume or inspect a persisted autonomous task",
+    )
+    resume.add_argument("session_id", type=_session_id, metavar="SESSION")
+    resume.add_argument("--json", action="store_true", help="emit compact JSON")
+    resume.add_argument("--project", type=_project_path, metavar="PATH")
+    resume.add_argument("--state-dir", type=_state_path, metavar="PATH")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI without terminating the caller process."""
+    runtime_command = False
     try:
         parser = build_parser()
         arguments = None if argv is None else list(argv)
@@ -177,7 +197,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 3
 
     try:
-        if namespace.command != "doctor":
+        is_doctor = namespace.command == "doctor"
+        is_runtime = namespace.command in {"run", "resume"}
+        runtime_command = is_runtime
+        if not is_doctor and not is_runtime:
             raise _CliArgumentError
         config = load_config(
             cwd=Path.cwd(),
@@ -189,15 +212,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             cli=CliOverrides(
                 project_root=namespace.project,
                 state_root=namespace.state_dir,
-                mode=namespace.mode,
+                mode=(
+                    namespace.mode
+                    if is_doctor
+                    else ExecutionMode.AUTONOMOUS
+                ),
             ),
         )
         _validate_effective_config(config)
-        registry = build_doctor_registry(config)
-        raw_report = Doctor(config, registry, DEFAULT_PROBE_NAMES).run()
-        report = _canonical_report(raw_report)
-        rendered = _render_json(report) if namespace.json else _render_human(report)
-        exit_code = 0 if report.status is DoctorStatus.HEALTHY else 1
+        if is_doctor:
+            registry = build_doctor_registry(config)
+            raw_report = Doctor(config, registry, DEFAULT_PROBE_NAMES).run()
+            report = _canonical_report(raw_report)
+            rendered = _render_json(report) if namespace.json else _render_human(report)
+            exit_code = 0 if report.status is DoctorStatus.HEALTHY else 1
+        else:
+            # Keep doctor strictly zero-write and free of state imports.
+            from autonomous_agent.core.autonomy import AutonomyRuntime
+
+            runtime = AutonomyRuntime(config)
+            result = (
+                runtime.run(namespace.goal)
+                if namespace.command == "run"
+                else runtime.resume(namespace.session_id)
+            )
+            rendered = (
+                _render_runtime_json(result)
+                if namespace.json
+                else _render_runtime_human(result)
+            )
+            exit_code = 0 if result.completion.completed else 1
     except _CliArgumentError:
         _write_error(_INVALID_ARGUMENTS)
         return 2
@@ -207,6 +251,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ProbeError:
         _write_error(_DIAGNOSTIC_ERROR)
         return 2
+    except GoalError:
+        _write_error(_INVALID_ARGUMENTS)
+        return 2
+    except (ValueError, RuntimeError):
+        _write_error(_RUNTIME_ERROR if runtime_command else _INTERNAL_ERROR)
+        return 3
     except Exception:  # noqa: BLE001 - final redacted process boundary
         _write_error(_INTERNAL_ERROR)
         return 3
@@ -249,6 +299,17 @@ def _execution_mode(value: str) -> ExecutionMode:
     if value == ExecutionMode.AUTONOMOUS.value:
         return ExecutionMode.AUTONOMOUS
     raise argparse.ArgumentTypeError("invalid mode")
+
+
+def _session_id(value: str) -> str:
+    if (
+        type(value) is not str
+        or not value.startswith("session-")
+        or len(value) > 128
+        or not all(character.isalnum() or character == "-" for character in value)
+    ):
+        raise argparse.ArgumentTypeError("invalid session")
+    return value
 
 
 def _validate_effective_config(config: object) -> None:
@@ -304,6 +365,34 @@ def _render_human(report: DoctorReport) -> str:
             f"  [PASS] mode: {report.mode}",
             "  [PASS] free-only: enabled",
         )
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_runtime_json(result: object) -> str:
+    from autonomous_agent.core.autonomy import RuntimeResult
+
+    if type(result) is not RuntimeResult:
+        raise TypeError("runtime result is invalid")
+    return json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def _render_runtime_human(result: object) -> str:
+    from autonomous_agent.core.autonomy import RuntimeResult
+
+    if type(result) is not RuntimeResult:
+        raise TypeError("runtime result is invalid")
+    lines = [
+        f"Agent task: {result.status}",
+        f"Session: {result.session_id}",
+        f"Executed: {'yes' if result.completion.executed else 'no'}",
+        f"Tested: {'yes' if result.completion.tested else 'no'}",
+        f"E2E verified: {'yes' if result.completion.e2e_verified else 'no'}",
+        "Acceptance criteria:",
+    ]
+    lines.extend(
+        f"  [{'PASS' if item.passed else 'FAIL'}] {item.criterion_id}: {item.evidence}"
+        for item in result.completion.criteria
     )
     return "\n".join(lines) + "\n"
 

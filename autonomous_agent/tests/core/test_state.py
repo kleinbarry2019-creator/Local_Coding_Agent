@@ -43,6 +43,8 @@ CREATE TABLE config_snapshots (
 );
 """
 
+MIGRATION_2_SQL = state_module._MIGRATIONS[1][1]
+
 
 def _store(tmp_path: Path, *, busy_timeout_s: float = 2.0) -> CoreStateStore:
     state_root = tmp_path / "state"
@@ -92,6 +94,9 @@ def test_fresh_creation_has_exact_schema_and_owner_only_files(tmp_path: Path) ->
             "sessions",
             "events",
             "config_snapshots",
+            "tasks",
+            "checkpoints",
+            "capabilities",
         }
         for suffix in ("-wal", "-shm"):
             sidecar = Path(f"{store.database_path}{suffix}")
@@ -132,7 +137,10 @@ def test_migration_records_exact_sql_checksum_in_order(tmp_path: Path) -> None:
             "SELECT version, checksum FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [(1, hashlib.sha256(MIGRATION_1_SQL.encode()).hexdigest())]
+    assert rows == [
+        (1, hashlib.sha256(MIGRATION_1_SQL.encode()).hexdigest()),
+        (2, hashlib.sha256(MIGRATION_2_SQL.encode()).hexdigest()),
+    ]
 
 
 def test_changed_migration_checksum_is_detected(tmp_path: Path) -> None:
@@ -157,7 +165,7 @@ def test_out_of_order_migration_record_is_detected(tmp_path: Path) -> None:
         connection.execute(
             """
             INSERT INTO schema_migrations(version, checksum, applied_at)
-            VALUES (3, ?, '2026-08-18T10:00:00Z')
+            VALUES (4, ?, '2026-08-18T10:00:00Z')
             """,
             ("1" * 64,),
         )
@@ -286,13 +294,13 @@ def test_failed_migration_rolls_back_and_leaves_prior_schema_usable(
 ) -> None:
     store = _store(tmp_path)
     store.initialize()
-    migration_2 = """CREATE TABLE migration_probe (value TEXT NOT NULL);
+    migration_3 = """CREATE TABLE migration_probe (value TEXT NOT NULL);
 CREATE TABLE sessions (duplicate INTEGER);
 """
     monkeypatch.setattr(
         state_module,
         "_MIGRATIONS",
-        ((1, MIGRATION_1_SQL), (2, migration_2)),
+        ((1, MIGRATION_1_SQL), (2, MIGRATION_2_SQL), (3, migration_3)),
     )
 
     with pytest.raises(StateError) as raised:
@@ -307,7 +315,7 @@ CREATE TABLE sessions (duplicate INTEGER);
             "SELECT name FROM sqlite_master WHERE name = 'migration_probe'"
         ).fetchone()
         _insert_session(connection, "still-usable")
-    assert applied == [(1,)]
+    assert applied == [(1,), (2,)]
     assert probe is None
     assert store.load_session("still-usable") is not None
 

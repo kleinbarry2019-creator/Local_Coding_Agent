@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "local-coding-agent"
-version = "50.7.0.dev1"
+version = "50.8.0.dev1"
 description = "Free, local-first coding agent core"
 requires-python = ">=3.12,<3.15"
 dependencies = []

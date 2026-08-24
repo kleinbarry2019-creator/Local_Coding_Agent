@@ -1,9 +1,9 @@
 # Local Coding Agent
 
-Local Coding Agent is a free, local-first foundation for a high-quality coding
-agent. Phase 1 provides one new end-user workflow: a stateless readiness check
-for the local development, containment, and Ollama stack. Existing V50 behavior
-remains available and unchanged.
+Local Coding Agent is a free, local-first coding and system agent. It combines
+the hardened V50 sandbox with the modular policy, typed-tool, persistent-state,
+audit, recovery, doctor, and Ollama foundation. Existing V50 behavior remains
+available while the installable CLI owns the consolidated runtime path.
 
 ## Requirements
 
@@ -57,6 +57,31 @@ agent doctor --json
 python3 -m autonomous_agent doctor --json
 ```
 
+## Autonomous tasks
+
+Simple German or English requests can be executed in autonomous mode. Every
+request is normalized into explicit acceptance criteria, persisted in the core
+SQLite state, executed through the shared policy/tool boundary, and then
+independently rechecked:
+
+```bash
+agent run 'Erstelle `result.txt` mit dem Inhalt `verified`'
+agent run 'Run python3 -m pytest' --json
+agent resume session-0123456789abcdef
+```
+
+Supported deterministic intents are file write/read/list, sandboxed process
+execution, and allowlisted external-tool installation. Processes run without a
+shell in a networkless Bubblewrap sandbox. Missing executable capabilities are
+detected automatically. Installation is restricted to a fixed tool/package
+catalog, uses a short-lived action digest, spawns at most one non-interactive
+privileged child when needed, and verifies the installed executable/version.
+The agent process itself refuses to act as a permanent root process.
+
+`completed` is emitted only when every derived acceptance criterion passes,
+the action was really executed, and a public-boundary E2E recheck matches the
+original request. A successful process exit by itself is only one criterion.
+
 Example (shown on multiple lines here only for readability):
 
 ```json
@@ -95,8 +120,8 @@ explicitly for a future autonomous session without enabling agent execution:
 agent doctor --mode autonomous
 ```
 
-Phase 1 deliberately has no unrestricted-root execution mode and `agent
-doctor` does not execute coding tasks. The free-only invariant is immutable:
+There is no unrestricted-root execution mode and `agent doctor` never executes
+coding tasks. The free-only invariant is immutable:
 runtime model checks stay local through Ollama, and paid, metered, trial, or
 charge-capable providers cannot be enabled by configuration.
 
@@ -114,9 +139,9 @@ PATH`. The paths are validated but never created by doctor.
 
 ## Compatibility and design
 
-The new package and console script are additive. Legacy `safe_agent_v50.py`,
-its state, recovery behavior, tests, and release artifacts remain compatible;
-phase 1 does not redirect the legacy entry point or migrate its data.
+Legacy `safe_agent_v50.py`, its state, recovery behavior, tests, and release
+artifacts remain compatible. The active installable CLI uses the modular core;
+legacy scripts are compatibility surfaces, not a second active runtime.
 
 The current contracts and rollout are documented in the
 [phase-1 design](docs/superpowers/specs/2026-08-18-core-foundation-design.md) and

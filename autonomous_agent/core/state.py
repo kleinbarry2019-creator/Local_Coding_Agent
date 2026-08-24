@@ -46,8 +46,42 @@ CREATE TABLE config_snapshots (
 );
 """
 
+_MIGRATION_2_SQL = """CREATE TABLE tasks (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(session_id),
+    original_goal TEXT NOT NULL,
+    normalized_goal_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    current_step INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    failure_fingerprint TEXT,
+    completion_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+    step_id TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE capabilities (
+    name TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    executable TEXT,
+    source TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    verified_at TEXT NOT NULL
+);
+"""
+
 # Migration SQL is immutable after release. Its exact UTF-8 bytes are checksummed.
-_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _MIGRATION_1_SQL),)
+_MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (1, _MIGRATION_1_SQL),
+    (2, _MIGRATION_2_SQL),
+)
 
 type _CatalogObject = tuple[str, str, str, str]
 type _ColumnSignature = tuple[int, str, str, int, str | None, int, int]

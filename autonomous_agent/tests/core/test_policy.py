@@ -162,7 +162,7 @@ def _recovery(
         ("autonomous_outside", DecisionKind.DENY, "invalid_scope"),
         ("autonomous_symlink", DecisionKind.DENY, "invalid_scope"),
         ("autonomous_mount", DecisionKind.DENY, "invalid_scope"),
-        ("autonomous_elevation", DecisionKind.DENY, "elevation_forbidden"),
+        ("autonomous_elevation", DecisionKind.DENY, "authority_unavailable"),
         ("unrestricted_claim", DecisionKind.DENY, "authority_unavailable"),
         ("destructive_without_recovery", DecisionKind.DENY, "recovery_required"),
         ("ambiguous", DecisionKind.DENY, "incomplete_request"),
@@ -704,16 +704,17 @@ def test_ambiguous_metadata_denies_before_doctor_allowance(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("elevation", "destructive", "expected_code"),
+    ("elevation", "destructive", "expected_kind", "expected_code"),
     [
-        (True, False, "elevation_forbidden"),
-        (False, True, "recovery_required"),
+        (True, False, DecisionKind.ALLOW, "authority_grant"),
+        (False, True, DecisionKind.DENY, "recovery_required"),
     ],
 )
 def test_hard_denials_precede_monitored_network_confirmation(
     tmp_path: Path,
     elevation: bool,
     destructive: bool,
+    expected_kind: DecisionKind,
     expected_code: str,
 ) -> None:
     root = tmp_path / "project"
@@ -734,7 +735,7 @@ def test_hard_denials_precede_monitored_network_confirmation(
 
     decision = evaluate_policy(request, context)
 
-    assert decision.kind is DecisionKind.DENY
+    assert decision.kind is expected_kind
     assert decision.code == expected_code
 
 
@@ -756,7 +757,7 @@ def test_non_doctor_read_without_a_target_is_incomplete(tmp_path: Path) -> None:
     assert decision.code == "incomplete_request"
 
 
-def test_evidence_dataclasses_do_not_enable_phase_one_system_actions(
+def test_matching_authority_and_recovery_enable_scoped_system_actions(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
@@ -776,8 +777,8 @@ def test_evidence_dataclasses_do_not_enable_phase_one_system_actions(
 
     decision = evaluate_policy(request, context)
 
-    assert decision.kind is DecisionKind.DENY
-    assert decision.code == "authority_unavailable"
+    assert decision.kind is DecisionKind.ALLOW
+    assert decision.code == "authority_grant"
 
 
 def test_empty_scope_cannot_authorize_an_autonomous_process(tmp_path: Path) -> None:
@@ -935,8 +936,8 @@ def test_non_utc_aware_evidence_is_compared_by_instant(tmp_path: Path) -> None:
 
     decision = evaluate_policy(request, context)
 
-    assert decision.kind is DecisionKind.DENY
-    assert decision.code == "authority_unavailable"
+    assert decision.kind is DecisionKind.ALLOW
+    assert decision.code == "authority_grant"
 
 
 def test_authority_must_cover_every_requested_capability(tmp_path: Path) -> None:

@@ -69,6 +69,15 @@ _TOOL_FAILED_EVENT_FIELDS = frozenset(
     }
 )
 _AUDIT_RECOVERED_EVENT_FIELDS = frozenset({"action", "code", "recovered_sequence"})
+_TASK_EVENT_FIELDS = frozenset(
+    {"status", "step_index", "attempts", "outcome", "completion"}
+)
+_CHECKPOINT_EVENT_FIELDS = frozenset({"checkpoint_id", "step_id", "status"})
+_CAPABILITY_EVENT_FIELDS = frozenset({"name", "kind", "source", "available"})
+_TASK_STATUSES = frozenset(
+    {"pending", "running", "recovering", "blocked", "failed", "completed"}
+)
+_CHECKPOINT_STATUSES = frozenset({"created", "restored", "discarded"})
 _CONFIG_TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
@@ -698,7 +707,13 @@ def _state_mutation_authorizer(
         sqlite3.SQLITE_INSERT,
         sqlite3.SQLITE_UPDATE,
         sqlite3.SQLITE_DELETE,
-    } and argument_one not in {"sessions", "config_snapshots"}:
+    } and argument_one not in {
+        "sessions",
+        "config_snapshots",
+        "tasks",
+        "checkpoints",
+        "capabilities",
+    }:
         return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_OK
 
@@ -853,6 +868,12 @@ def _sanitize_event_payload(
         return _sanitize_tool_failed(payload, sensitive_values)
     if event_type == "audit.recovered":
         return _sanitize_audit_recovered(payload, sensitive_values)
+    if event_type == "task.updated":
+        return _sanitize_task_event(payload, sensitive_values)
+    if event_type == "checkpoint.updated":
+        return _sanitize_checkpoint_event(payload, sensitive_values)
+    if event_type == "capability.verified":
+        return _sanitize_capability_event(payload, sensitive_values)
     raise EventError("redaction_failed", "the event type has no persistence allowlist")
 
 
@@ -941,6 +962,86 @@ def _sanitize_audit_recovered(
         "action": action,
         "code": code,
         "recovered_sequence": recovered_sequence,
+    }
+
+
+def _sanitize_task_event(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _TASK_EVENT_FIELDS)
+    if "status" not in selected or "step_index" not in selected:
+        raise EventError("redaction_failed", "the task event payload is incomplete")
+    result: dict[str, _JsonValue] = {
+        "status": _enum_text(
+            selected["status"], _TASK_STATUSES, sensitive_values, "task status"
+        )
+    }
+    for name in ("step_index", "attempts"):
+        if name in selected:
+            value = selected[name]
+            if type(value) is not int or value < 0:
+                raise EventError("redaction_failed", f"task {name} is invalid")
+            result[name] = value
+    if "outcome" in selected:
+        result["outcome"] = _identifier_text(
+            selected["outcome"],
+            sensitive_values,
+            "task outcome",
+            _MAX_IDENTIFIER_BYTES,
+        )
+    if "completion" in selected:
+        completion = selected["completion"]
+        if type(completion) is not bool:
+            raise EventError("redaction_failed", "task completion is invalid")
+        result["completion"] = completion
+    return {name: result[name] for name in sorted(result)}
+
+
+def _sanitize_checkpoint_event(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _CHECKPOINT_EVENT_FIELDS)
+    if set(selected) != _CHECKPOINT_EVENT_FIELDS:
+        raise EventError("redaction_failed", "checkpoint event payload is incomplete")
+    return {
+        "checkpoint_id": _identifier_text(
+            selected["checkpoint_id"],
+            sensitive_values,
+            "checkpoint id",
+            _MAX_IDENTIFIER_BYTES,
+        ),
+        "status": _enum_text(
+            selected["status"],
+            _CHECKPOINT_STATUSES,
+            sensitive_values,
+            "checkpoint status",
+        ),
+        "step_id": _identifier_text(
+            selected["step_id"], sensitive_values, "step id", _MAX_IDENTIFIER_BYTES
+        ),
+    }
+
+
+def _sanitize_capability_event(
+    payload: Mapping[str, object], sensitive_values: Sequence[str]
+) -> dict[str, _JsonValue]:
+    selected = _select_known_fields(payload, _CAPABILITY_EVENT_FIELDS)
+    if set(selected) != _CAPABILITY_EVENT_FIELDS:
+        raise EventError("redaction_failed", "capability event payload is incomplete")
+    available = selected["available"]
+    if type(available) is not bool:
+        raise EventError("redaction_failed", "capability availability is invalid")
+    return {
+        "available": available,
+        "kind": _identifier_text(
+            selected["kind"], sensitive_values, "capability kind", _MAX_IDENTIFIER_BYTES
+        ),
+        "name": _identifier_text(
+            selected["name"], sensitive_values, "capability name", _MAX_IDENTIFIER_BYTES
+        ),
+        "source": _identifier_text(
+            selected["source"], sensitive_values, "capability source", _MAX_IDENTIFIER_BYTES
+        ),
     }
 
 

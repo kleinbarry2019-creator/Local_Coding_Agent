@@ -1,3 +1,3 @@
 """Local Coding Agent package."""
 
-__version__ = "50.7.0.dev1"
+__version__ = "50.8.0.dev1"

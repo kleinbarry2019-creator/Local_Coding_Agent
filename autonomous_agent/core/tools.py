@@ -75,6 +75,7 @@ class ExecutionContext:
     policy: PolicyContext
     deadline_monotonic: float
     schema_limits: SchemaLimits
+    session_id: str = "phase-1-tools"
 
 
 class ToolStatus(str, Enum):
@@ -121,6 +122,7 @@ class ToolSpec[InputT, OutputT]:
     default_timeout_s: float
     max_output_bytes: int
     handler: Callable[[InputT, ExecutionContext], OutputT]
+    target_resolver: Callable[[InputT], tuple[Path, ...]] | None = None
 
 
 def decode_dataclass[InputT](
@@ -221,7 +223,7 @@ class ToolRegistry:
             decoded, payload = _decode_dataclass_with_payload(
                 raw_input, spec.input_type, limits
             )
-            request = _policy_request(spec, payload)
+            request = _policy_request(spec, decoded, payload, context)
         except _SchemaError:
             return _result(
                 started,
@@ -361,6 +363,26 @@ class ToolRegistry:
             data=data,
         )
 
+    def policy_request(
+        self,
+        name: str,
+        raw_input: Mapping[str, object],
+        context: ExecutionContext,
+    ) -> PolicyRequest:
+        """Build the exact request digest for a trusted authority provider."""
+        if type(name) is not str or name not in self._specs:
+            raise ValueError("tool is not registered")
+        if not _valid_context(context):
+            raise ValueError("execution context is invalid")
+        spec = self._specs[name]
+        try:
+            decoded, payload = _decode_dataclass_with_payload(
+                raw_input, spec.input_type, context.schema_limits
+            )
+            return _policy_request(spec, decoded, payload, context)
+        except _SchemaError as error:
+            raise ValueError("tool input is invalid") from error
+
 
 def _require_limits(limits: object) -> SchemaLimits:
     if type(limits) is not SchemaLimits:
@@ -382,6 +404,9 @@ def _valid_context(context: object) -> bool:
         type(context) is ExecutionContext
         and type(context.policy) is PolicyContext
         and type(context.schema_limits) is SchemaLimits
+        and type(context.session_id) is str
+        and bool(context.session_id)
+        and context.session_id.strip() == context.session_id
         and _finite_number(context.deadline_monotonic)
     )
 
@@ -437,6 +462,8 @@ def _validate_spec(spec: object) -> None:
         raise ValueError("tool output cap must be a positive integer")
     if not callable(spec.handler):
         raise TypeError("tool handler must be callable")
+    if spec.target_resolver is not None and not callable(spec.target_resolver):
+        raise TypeError("tool target resolver must be callable")
     _validate_dataclass_type(spec.input_type)
     _validate_dataclass_type(spec.output_type)
     _validate_classification(spec)
@@ -759,7 +786,9 @@ def _bounded_serialized_bytes(
 
 def _policy_request(
     spec: ToolSpec[object, object],
+    decoded: object,
     payload: bytes,
+    context: ExecutionContext,
 ) -> PolicyRequest:
     digest = hashlib.sha256(
         spec.name.encode("utf-8")
@@ -768,12 +797,19 @@ def _policy_request(
         + b"\x00"
         + payload
     ).hexdigest()
+    requested_targets = (
+        () if spec.target_resolver is None else spec.target_resolver(decoded)
+    )
+    if type(requested_targets) is not tuple or not all(
+        isinstance(target, Path) for target in requested_targets
+    ):
+        raise _SchemaError("invalid_targets", "tool targets are invalid")
     return PolicyRequest(
-        session_id="phase-1-tools",
+        session_id=context.session_id,
         request_id=digest,
         capabilities=spec.capabilities,
         side_effect=spec.side_effect,
-        requested_targets=(),
+        requested_targets=requested_targets,
         network=spec.network,
         privilege_elevation=spec.requires_elevation,
         destructive=(

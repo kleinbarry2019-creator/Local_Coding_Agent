@@ -775,6 +775,14 @@ def resolve_paths(
     )
 
 
+def ensure_state_root(config: AgentConfig) -> Path:
+    """Create the already-resolved state root through the secure path walker."""
+    if type(config) is not AgentConfig:
+        raise TypeError("config must be AgentConfig")
+    _create_state_path(config.paths.state_root)
+    return config.paths.state_root
+
+
 def _global_config_file(home: Path, environ: Mapping[str, str]) -> Path:
     config_home = environ.get("XDG_CONFIG_HOME")
     if config_home is None:

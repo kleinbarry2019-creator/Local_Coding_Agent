@@ -174,9 +174,30 @@ def evaluate_policy(
             context,
         )
 
+    authority_required = (
+        request.side_effect in {SideEffect.SYSTEM, SideEffect.DESTRUCTIVE}
+        or request.destructive
+        or request.privilege_elevation
+    )
+    recovery_required = request.destructive or (
+        request.side_effect is SideEffect.DESTRUCTIVE
+    )
+    now = datetime.now(UTC)
+    authority_valid = _authority_matches(request, context, now)
+    if authority_required and not authority_valid:
+        return _decision(
+            DecisionKind.DENY,
+            "authority_unavailable",
+            "A fresh action-scoped authority grant is unavailable.",
+            request,
+            context,
+        )
+
     network_confirmation: str | None = None
     if request.network is NetworkKind.OUTBOUND:
-        if context.mode is ExecutionMode.AUTONOMOUS:
+        if context.mode is ExecutionMode.AUTONOMOUS and not (
+            authority_required and authority_valid
+        ):
             return _decision(
                 DecisionKind.DENY,
                 "network_forbidden",
@@ -197,33 +218,6 @@ def evaluate_policy(
             )
         network_confirmation = "Unregistered network access requires confirmation."
 
-    if request.privilege_elevation:
-        return _decision(
-            DecisionKind.DENY,
-            "elevation_forbidden",
-            "Privilege elevation is forbidden.",
-            request,
-            context,
-        )
-
-    authority_required = request.side_effect in {
-        SideEffect.SYSTEM,
-        SideEffect.DESTRUCTIVE,
-    } or request.destructive
-    recovery_required = request.destructive or (
-        request.side_effect is SideEffect.DESTRUCTIVE
-    )
-
-    now = datetime.now(UTC)
-    if authority_required and not _authority_matches(request, context, now):
-        return _decision(
-            DecisionKind.DENY,
-            "authority_unavailable",
-            "A fresh action-scoped authority grant is unavailable.",
-            request,
-            context,
-        )
-
     if recovery_required and not _recovery_matches(request, context, now):
         return _decision(
             DecisionKind.DENY,
@@ -235,9 +229,9 @@ def evaluate_policy(
 
     if authority_required:
         return _decision(
-            DecisionKind.DENY,
-            "authority_unavailable",
-            "Phase 1 has no provider that can authorize system actions.",
+            DecisionKind.ALLOW,
+            "authority_grant",
+            "The action is covered by a fresh action-scoped authority grant.",
             request,
             context,
         )

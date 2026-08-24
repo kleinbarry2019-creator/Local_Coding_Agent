@@ -1836,9 +1836,10 @@ def _unix_http_server(socket_path: Path) -> Iterator[None]:
 
 
 def test_loopback_accepts_validated_unix_socket() -> None:
-    with tempfile.TemporaryDirectory(
-        prefix=".probe-test-", dir=Path.cwd()
-    ) as directory:
+    # AF_UNIX paths are commonly limited to 108 bytes. Keep the socket fixture
+    # independent of the checkout depth while the production validator still
+    # verifies the absolute owner-controlled path.
+    with tempfile.TemporaryDirectory(prefix=".probe-test-", dir="/tmp") as directory:
         socket_path = Path(directory) / "ollama.sock"
         with _unix_http_server(socket_path):
             response = get_loopback_json(
@@ -1850,9 +1851,7 @@ def test_loopback_accepts_validated_unix_socket() -> None:
 
 
 def test_loopback_rejects_symlinked_unix_socket() -> None:
-    with tempfile.TemporaryDirectory(
-        prefix=".probe-test-", dir=Path.cwd()
-    ) as directory:
+    with tempfile.TemporaryDirectory(prefix=".probe-test-", dir="/tmp") as directory:
         root = Path(directory)
         target = root / "target.sock"
         link = root / "link.sock"
