@@ -191,10 +191,18 @@ class RuntimeTaskController:
         return self.voice.speak(text)
 
     def wake_phrase_matches(self, text: str) -> bool:
-        return self.voice.wake_phrase_matches(text, self.preferences().wake_phrase)
+        preferences = self.preferences()
+        if not preferences.voice_input or not preferences.wake_phrase_enabled:
+            return False
+        return self.voice.wake_phrase_matches(text, preferences.wake_phrase)
 
     def submit(self, goal: str) -> UiTask:
-        clean_goal = self.voice.remove_wake_phrase(goal, self.preferences().wake_phrase)
+        preferences = self.preferences()
+        clean_goal = (
+            self.voice.remove_wake_phrase(goal, preferences.wake_phrase)
+            if preferences.voice_input and preferences.wake_phrase_enabled
+            else goal
+        )
         normalized = GoalNormalizer().normalize(clean_goal)
         enforce_task_access(self.onboarding_status(), normalized.kind)
         request_id = f"request-{uuid.uuid4().hex}"
@@ -520,6 +528,7 @@ class AcbUiServer:
             {
                 "voice_input_enabled": preferences.voice_input,
                 "voice_output_enabled": preferences.voice_output,
+                "wake_phrase_enabled": preferences.wake_phrase_enabled,
                 "wake_phrase": preferences.wake_phrase,
             }
         )

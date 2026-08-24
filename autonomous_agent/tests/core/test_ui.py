@@ -287,7 +287,13 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert status == 202
         status, preferences = _post_json(
             f"{server.url}api/preferences",
-            {"theme": "light", "simple_language": True, "nickname": "Alex"},
+            {
+                "theme": "light",
+                "simple_language": True,
+                "nickname": "Alex",
+                "voice_input": True,
+                "wake_phrase_enabled": True,
+            },
             token=server.token,
         )
         assert status == 200
@@ -298,8 +304,30 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
             f"{server.url}api/voice", token=server.token
         )
         assert voice_status == 200
+        assert voice["voice_input_enabled"] is True
         assert voice["voice_output_enabled"] is False
+        assert voice["wake_phrase_enabled"] is True
         assert isinstance(voice["wake_phrase"], str)
+        status, wake = _post_json(
+            f"{server.url}api/voice/wake",
+            {"text": "Hey ACB, starte"},
+            token=server.token,
+        )
+        assert status == 200
+        assert wake == {"matched": True}
+        status, _ = _post_json(
+            f"{server.url}api/preferences",
+            {"voice_input": False},
+            token=server.token,
+        )
+        assert status == 200
+        status, wake = _post_json(
+            f"{server.url}api/voice/wake",
+            {"text": "Hey ACB, starte"},
+            token=server.token,
+        )
+        assert status == 200
+        assert wake == {"matched": False}
         status, onboarding = _post_json(
             f"{server.url}api/onboarding", {"action": "start-trial"}, token=server.token
         )
