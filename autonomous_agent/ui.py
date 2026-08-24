@@ -207,6 +207,13 @@ class RuntimeTaskController:
         self._executor.submit(self._run_task, request_id, goal)
         return task
 
+    def retry(self, request_id: str) -> UiTask:
+        """Requeue only a failed or rejected task using its original goal."""
+        task = self.task(request_id)
+        if task is None or task.status not in {"failed", "rejected"}:
+            raise ValueError("only failed or rejected tasks can be retried")
+        return self.submit(task.goal)
+
     def recover_pending(self) -> tuple[UiTask, ...]:
         """Resume tasks interrupted while pending, running, or recovering."""
         records = self.runtime.tasks.list_tasks(
@@ -449,6 +456,9 @@ class AcbUiServer:
     def submit(self, goal: str) -> UiTask:
         return self._controller.submit(goal)
 
+    def retry(self, request_id: str) -> UiTask:
+        return self._controller.retry(request_id)
+
     def recover_pending(self) -> tuple[UiTask, ...]:
         return self._controller.recover_pending()
 
@@ -665,6 +675,18 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if not self._authorized():
             self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+            return
+        if path.startswith("/api/tasks/") and path.endswith("/retry"):
+            request_id = path.removeprefix("/api/tasks/").removesuffix("/retry")
+            if not _REQUEST_ID_PATTERN.fullmatch(request_id):
+                self._send_error_json(HTTPStatus.NOT_FOUND, "task not found")
+                return
+            try:
+                task = self._app().retry(request_id)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "task cannot be retried")
+                return
+            self._send_json(HTTPStatus.ACCEPTED, task.to_dict())
             return
         if path not in {
             "/api/tasks",

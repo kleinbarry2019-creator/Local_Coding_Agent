@@ -142,6 +142,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.preference_controls: dict[str, Any] = {}
             self.onboarding_status_view: Any = None
             self.undo_button: Any = None
+            self.retry_button: Any = None
             self.audit_button: Any = None
             self.log_window: Any = None
             self.speak_button: Any = None
@@ -699,6 +700,10 @@ def _run_gtk(config: AgentConfig) -> int:
             self.undo_button.set_sensitive(False)
             self.undo_button.connect("clicked", self._undo_last)
             bar.append(self.undo_button)
+            self.retry_button = Gtk.Button(label="↻ Wiederholen")
+            self.retry_button.set_sensitive(False)
+            self.retry_button.connect("clicked", self._retry_last)
+            bar.append(self.retry_button)
             self.audit_button = Gtk.Button(label="Audit prüfen")
             self.audit_button.connect("clicked", self._show_audit)
             bar.append(self.audit_button)
@@ -792,6 +797,13 @@ def _run_gtk(config: AgentConfig) -> int:
                 )
                 if self.undo_button is not None:
                     self.undo_button.set_sensitive(latest_completed is not None)
+                latest_failed = next(
+                    (item for item in reversed(self.controller.tasks())
+                     if item.status in {"failed", "rejected"}),
+                    None,
+                )
+                if self.retry_button is not None:
+                    self.retry_button.set_sensitive(latest_failed is not None)
             else:
                 self.current.set_text(
                     f"{active.goal}\nStatus: {active.status} · "
@@ -844,6 +856,21 @@ def _run_gtk(config: AgentConfig) -> int:
                 f"Checkpoint: {result['checkpoint_id']}\n"
                 f"Audit: {'gültig' if result['audit_ok'] else 'prüfen'}"
             )
+
+        def _retry_last(self, *_args: object) -> None:
+            failed = next(
+                (item for item in reversed(self.controller.tasks())
+                 if item.status in {"failed", "rejected"}),
+                None,
+            )
+            if failed is None:
+                return
+            try:
+                task = self.controller.retry(failed.request_id)
+            except (TypeError, ValueError, RuntimeError):
+                self.current.set_text("Wiederholung ist nicht verfügbar.")
+                return
+            self._show_task(task, recovered=False)
 
         def _show_audit(self, *_args: object) -> None:
             result = self.controller.audit_status()
