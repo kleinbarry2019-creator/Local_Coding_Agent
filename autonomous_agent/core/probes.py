@@ -913,7 +913,16 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
 
     prefix = _DEFAULT_HOMEBREW_PREFIX
     if prefix is not None and prefix.exists():
-        canonical_prefix = _validated_homebrew_prefix(prefix)
+        try:
+            canonical_prefix = _validated_homebrew_prefix(prefix)
+        except ProbeError:
+            # Homebrew is optional.  If the fixed system roots already
+            # provide a trusted execution source, ignore an unsafe optional
+            # Homebrew tree; retain the strict failure when it is the only
+            # configured source.
+            if approved:
+                return tuple(approved)
+            raise
         bin_root = canonical_prefix / "bin"
         try:
             canonical_bin = bin_root.resolve(strict=True)
