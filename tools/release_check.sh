@@ -44,13 +44,13 @@ echo "[4/11] Core tests"
 uv run --frozen pytest autonomous_agent/tests/core
 
 echo "[5/11] Ruff"
-uv run --frozen ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/ui.py autonomous_agent/tests/core
+uv run --frozen ruff check autonomous_agent/core autonomous_agent/cli.py autonomous_agent/ui.py autonomous_agent/app.py autonomous_agent/tests/core
 
 echo "[6/11] MyPy"
 uv run --frozen mypy autonomous_agent/core autonomous_agent/cli.py autonomous_agent/ui.py
 
 echo "[7/11] Bandit"
-uv run --frozen bandit -q -r autonomous_agent/core autonomous_agent/cli.py autonomous_agent/ui.py
+uv run --frozen bandit -q -r autonomous_agent/core autonomous_agent/cli.py autonomous_agent/ui.py autonomous_agent/app.py
 
 echo "[8/11] Shell quality"
 shellcheck tools/release_check.sh autonomous_agent/tools/test_all_v50.sh
@@ -67,7 +67,8 @@ python3 -m compileall \
 	autonomous_agent/recovery_governance.py \
 	autonomous_agent/core \
 	autonomous_agent/cli.py \
-	autonomous_agent/ui.py
+	autonomous_agent/ui.py \
+	autonomous_agent/app.py
 
 echo "[10/11] Build package"
 uv build --offline --no-build-isolation
