@@ -29,6 +29,7 @@ def test_cli_run_executes_and_reports_verified_completion(
     )
 
     output = capsys.readouterr()
+    assert output.out, f"CLI emitted no JSON; stderr={output.err!r}"
     document = json.loads(output.out)
     assert exit_code == 0
     assert output.err == ""
@@ -59,7 +60,9 @@ def test_cli_run_returns_nonzero_when_real_command_fails(
         ]
     )
 
-    document = json.loads(capsys.readouterr().out)
+    output = capsys.readouterr()
+    assert output.out, f"CLI emitted no JSON; stderr={output.err!r}"
+    document = json.loads(output.out)
     assert exit_code == 1
     assert document["status"] == "failed"
     assert document["completion"]["completed"] is False
