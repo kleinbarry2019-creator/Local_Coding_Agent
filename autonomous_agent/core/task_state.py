@@ -333,18 +333,24 @@ class TaskStateStore:
             raise ValueError("checkpoint list limit is invalid")
         if not statuses or not statuses.issubset({"created", "discarded", "restored"}):
             raise ValueError("checkpoint status filter is invalid")
-        placeholders = ",".join("?" for _ in statuses)
         query = (
             "SELECT checkpoint_id, step_id, manifest_json, status, created_at "
-            "FROM checkpoints WHERE session_id = ? AND status IN ("
-            + placeholders
-            + ") ORDER BY created_at DESC LIMIT ?"
+            "FROM checkpoints WHERE session_id = ? AND "
+            "(status = ? OR status = ? OR status = ?) "
+            "ORDER BY created_at DESC"
         )
-        parameters: tuple[object, ...] = (session_id, *sorted(statuses), limit)
+        parameters: tuple[object, ...] = (
+            session_id,
+            "created",
+            "discarded",
+            "restored",
+        )
         with self.store.connection() as connection:
             rows = connection.execute(query, parameters).fetchall()
         records: list[CheckpointRecord] = []
         for row in rows:
+            if str(row[3]) not in statuses:
+                continue
             try:
                 manifest = json.loads(str(row[2]))
             except (TypeError, json.JSONDecodeError) as error:
@@ -361,6 +367,8 @@ class TaskStateStore:
                     created_at=str(row[4]),
                 )
             )
+            if len(records) >= limit:
+                break
         return tuple(records)
 
 
