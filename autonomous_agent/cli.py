@@ -37,6 +37,7 @@ _DIAGNOSTIC_ERROR = f"{_CLI_NAME}: diagnostics could not be initialized."
 _INTERNAL_ERROR = f"{_CLI_NAME}: internal diagnostic failure."
 _RUNTIME_ERROR = f"{_CLI_NAME}: task execution failed before verification."
 _UI_ERROR = f"{_CLI_NAME}: graphical interface could not be started."
+_APP_ERROR = f"{_CLI_NAME}: desktop application could not be started."
 _MAX_PATH_BYTES = 4_096
 
 _GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -188,6 +189,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="open the interface in the default browser",
     )
+    app = commands.add_parser(
+        "app",
+        help="start the offline desktop application",
+        description="Start the installed, offline-capable ACB desktop application.",
+    )
+    app.add_argument("--project", type=_project_path, metavar="PATH")
+    app.add_argument("--state-dir", type=_state_path, metavar="PATH")
     return parser
 
 
@@ -221,7 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         is_doctor = namespace.command == "doctor"
-        is_runtime = namespace.command in {"run", "resume", "ui"}
+        is_runtime = namespace.command in {"run", "resume", "ui", "app"}
         runtime_command = is_runtime
         if not is_doctor and not is_runtime:
             raise _CliArgumentError
@@ -243,6 +251,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         _validate_effective_config(config)
+        if namespace.command == "app":
+            from autonomous_agent.app import launch
+
+            return launch(config)
         if namespace.command == "ui":
             import webbrowser
 
@@ -303,6 +315,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ValueError, RuntimeError):
         if namespace.command == "ui":
             _write_error(_UI_ERROR)
+        elif namespace.command == "app":
+            _write_error(_APP_ERROR)
         else:
             _write_error(_RUNTIME_ERROR if runtime_command else _INTERNAL_ERROR)
         return 3

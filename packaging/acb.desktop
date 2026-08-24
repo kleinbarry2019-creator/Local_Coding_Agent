@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ACB – Autonome Computing Butler
+Comment=Lokaler Offline-Agent für Coding- und Systemaufgaben
+Exec=acb app
+Terminal=false
+Categories=Development;Utility;
+Keywords=ACB;Agent;Offline;Coding;

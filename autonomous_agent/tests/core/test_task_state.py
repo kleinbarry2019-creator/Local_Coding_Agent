@@ -74,6 +74,24 @@ def test_task_state_survives_restart_and_only_completes_with_evidence(
     assert audit.verify().ok
 
 
+def test_task_list_exposes_recoverable_sessions_in_update_order(
+    tmp_path: Path,
+) -> None:
+    _store, _audit, tasks = _runtime(tmp_path)
+    tasks.create_task(
+        "session-task",
+        "Write result.txt",
+        {"kind": "write-file", "target": "result.txt"},
+        ({"step_id": "step-1", "tool": "project.write-file"},),
+    )
+    tasks.transition("session-task", status="running", current_step=0, attempts=1)
+
+    listed = tasks.list_tasks(statuses=frozenset({"pending", "running"}))
+
+    assert [item.session_id for item in listed] == ["session-task"]
+    assert listed[0].status == "running"
+
+
 def test_checkpoint_state_is_audited(tmp_path: Path) -> None:
     _store, audit, tasks = _runtime(tmp_path)
     tasks.create_task(
