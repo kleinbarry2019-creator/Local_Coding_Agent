@@ -440,9 +440,21 @@ def _run_gtk(config: AgentConfig) -> int:
             password.set_placeholder_text("Passwort (mindestens 10 Zeichen)")
             password.set_visibility(False)
             page.append(password)
+            security_question = Gtk.Entry()
+            security_question.set_placeholder_text("Sicherheitsfrage (optional, 3–200 Zeichen)")
+            page.append(security_question)
+            security_answer = Gtk.Entry()
+            security_answer.set_placeholder_text("Antwort auf die Sicherheitsfrage")
+            security_answer.set_visibility(False)
+            page.append(security_answer)
             create = Gtk.Button(label="Lokales Konto anlegen")
             create.set_halign(Gtk.Align.START)
-            create.connect("clicked", lambda *_args: self._create_account(username, password))
+            create.connect(
+                "clicked",
+                lambda *_args: self._create_account(
+                    username, password, security_question, security_answer
+                ),
+            )
             page.append(create)
             self.account_status = Gtk.Label(label="Noch kein lokales Konto angelegt.")
             self.account_status.set_xalign(0)
@@ -874,15 +886,25 @@ def _run_gtk(config: AgentConfig) -> int:
             finally:
                 self.research_thread = None
 
-        def _create_account(self, username: Any, password: Any) -> None:
+        def _create_account(
+            self,
+            username: Any,
+            password: Any,
+            security_question: Any,
+            security_answer: Any,
+        ) -> None:
             try:
                 account = self.controller.create_account(
-                    username.get_text().strip(), password.get_text()
+                    username.get_text().strip(),
+                    password.get_text(),
+                    security_question=security_question.get_text().strip(),
+                    security_answer=security_answer.get_text(),
                 )
             except ValueError:
                 self.account_status.set_text("Konto konnte nicht angelegt werden. Prüfe Benutzername und Passwort.")
                 return
             password.set_text("")
+            security_answer.set_text("")
             self.controller.complete_onboarding()
             self.account_status.set_text(
                 f"Konto {account.username} lokal angelegt. Geräte-ID: {account.device_id}"

@@ -308,11 +308,28 @@ class RuntimeTaskController:
     def research_now(self) -> dict[str, object]:
         return self.learning.research_now()
 
-    def create_account(self, username: str, password: str) -> UserAccount:
-        return self.learning.create_account(username, password)
+    def create_account(
+        self,
+        username: str,
+        password: str,
+        *,
+        security_question: str = "",
+        security_answer: str = "",
+    ) -> UserAccount:
+        return self.learning.create_account(
+            username,
+            password,
+            security_question=security_question,
+            security_answer=security_answer,
+        )
 
     def authenticate(self, username: str, password: str) -> UserAccount | None:
         return self.learning.authenticate(username, password)
+
+    def reset_password(
+        self, username: str, security_answer: str, new_password: str
+    ) -> UserAccount | None:
+        return self.learning.reset_password(username, security_answer, new_password)
 
     def sync_manifest(self) -> dict[str, object]:
         return self.learning.sync_manifest()

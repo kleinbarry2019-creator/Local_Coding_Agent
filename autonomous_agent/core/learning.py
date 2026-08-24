@@ -26,7 +26,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET  # nosec B405 - DTD/entity declarations are rejected below
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from http.client import HTTPMessage
 from pathlib import Path
@@ -159,6 +159,9 @@ class UserAccount:
     sync_scope: str
     password_salt: str
     password_hash: str
+    security_question: str = ""
+    security_answer_salt: str = ""
+    security_answer_hash: str = ""
 
     def to_public_dict(self) -> dict[str, object]:
         """Return an account document safe for the GUI and future sync."""
@@ -169,6 +172,7 @@ class UserAccount:
             "created_at": self.created_at,
             "device_id": self.device_id,
             "sync_scope": self.sync_scope,
+            "recovery_configured": bool(self.security_question and self.security_answer_hash),
         }
 
 
@@ -273,6 +277,22 @@ class LearningStore:
             ):
                 raise ValueError("username already exists")
             self._write_list("accounts.json", [asdict_account(account), *raw])
+
+    def update_account(self, account: UserAccount) -> None:
+        """Atomically replace one account without exposing credential material."""
+        with self._lock:
+            raw = self._read_list("accounts.json")
+            replaced = False
+            updated: list[object] = []
+            for value in raw:
+                if isinstance(value, dict) and value.get("account_id") == account.account_id:
+                    updated.append(asdict_account(account))
+                    replaced = True
+                else:
+                    updated.append(value)
+            if not replaced:
+                raise ValueError("account does not exist")
+            self._write_list("accounts.json", updated)
 
     def metadata(self) -> dict[str, object]:
         value = self._read("meta.json", {})
@@ -531,14 +551,41 @@ class LearningService:
             )
         )
 
-    def create_account(self, username: str, password: str, *, role: str = "owner") -> UserAccount:
+    def create_account(
+        self,
+        username: str,
+        password: str,
+        *,
+        role: str = "owner",
+        security_question: str = "",
+        security_answer: str = "",
+    ) -> UserAccount:
         if not _USERNAME.fullmatch(username) or type(password) is not str or not 10 <= len(password) <= 256:
             raise ValueError("account credentials are invalid")
         if role not in {"owner", "operator"}:
             raise ValueError("account role is invalid")
+        question = security_question.strip()
+        answer = security_answer.strip()
+        if question and not 3 <= len(question) <= 200:
+            raise ValueError("security question is invalid")
+        if bool(question) != bool(answer) or answer and not 3 <= len(answer) <= 256:
+            raise ValueError("security answer is invalid")
         salt = secrets.token_bytes(16)
         password_hash = hashlib.scrypt(
             password.encode("utf-8"), salt=salt, n=16_384, r=8, p=1, dklen=32
+        )
+        answer_salt = secrets.token_bytes(16) if answer else b""
+        answer_hash = (
+            hashlib.scrypt(
+                answer.casefold().encode("utf-8"),
+                salt=answer_salt,
+                n=16_384,
+                r=8,
+                p=1,
+                dklen=32,
+            )
+            if answer
+            else b""
         )
         metadata = self.store.metadata()
         account = UserAccount(
@@ -550,9 +597,55 @@ class LearningService:
             sync_scope="local-first",
             password_salt=salt.hex(),
             password_hash=password_hash.hex(),
+            security_question=question,
+            security_answer_salt=answer_salt.hex(),
+            security_answer_hash=answer_hash.hex(),
         )
         self.store.add_account(account)
         return account
+
+    def reset_password(
+        self, username: str, security_answer: str, new_password: str
+    ) -> UserAccount | None:
+        """Reset a password only when the stored recovery answer verifies."""
+        if type(security_answer) is not str or type(new_password) is not str:
+            return None
+        if not 10 <= len(new_password) <= 256:
+            return None
+        for account in self.store.accounts():
+            if account.username.casefold() != username.casefold():
+                continue
+            if not account.security_answer_hash or not account.security_answer_salt:
+                return None
+            try:
+                actual = hashlib.scrypt(
+                    security_answer.strip().casefold().encode("utf-8"),
+                    salt=bytes.fromhex(account.security_answer_salt),
+                    n=16_384,
+                    r=8,
+                    p=1,
+                    dklen=32,
+                ).hex()
+            except (TypeError, ValueError):
+                return None
+            if not secrets.compare_digest(actual, account.security_answer_hash):
+                return None
+            salt = secrets.token_bytes(16)
+            updated = replace(
+                account,
+                password_salt=salt.hex(),
+                password_hash=hashlib.scrypt(
+                    new_password.encode("utf-8"),
+                    salt=salt,
+                    n=16_384,
+                    r=8,
+                    p=1,
+                    dklen=32,
+                ).hex(),
+            )
+            self.store.update_account(updated)
+            return updated
+        return None
 
     def authenticate(self, username: str, password: str) -> UserAccount | None:
         for account in self.store.accounts():
@@ -762,6 +855,9 @@ def asdict_account(account: UserAccount) -> dict[str, object]:
         "sync_scope": account.sync_scope,
         "password_salt": account.password_salt,
         "password_hash": account.password_hash,
+        "security_question": account.security_question,
+        "security_answer_salt": account.security_answer_salt,
+        "security_answer_hash": account.security_answer_hash,
     }
 
 
@@ -801,6 +897,9 @@ def _account_from_dict(value: dict[str, object]) -> UserAccount:
         account_id=str(value["account_id"]), username=str(value["username"]), role=str(value["role"]),
         created_at=str(value["created_at"]), device_id=str(value["device_id"]), sync_scope=str(value["sync_scope"]),
         password_salt=str(value["password_salt"]), password_hash=str(value["password_hash"]),
+        security_question=str(value.get("security_question", "")),
+        security_answer_salt=str(value.get("security_answer_salt", "")),
+        security_answer_hash=str(value.get("security_answer_hash", "")),
     )
 
 

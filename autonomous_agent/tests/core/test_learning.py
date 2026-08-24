@@ -111,6 +111,24 @@ def test_accounts_store_hashes_and_exposes_only_public_sync_manifest(tmp_path: P
         service.create_account("owner", "another password")
 
 
+def test_account_recovery_requires_security_answer_and_rehashes_password(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    account = service.create_account(
+        "owner",
+        "correct horse battery",
+        security_question="Lieblingsfarbe?",
+        security_answer="Blau",
+    )
+    assert account.to_public_dict()["recovery_configured"] is True
+    assert service.reset_password("owner", "falsch", "new correct password") is None
+    updated = service.reset_password("owner", "blau", "new correct password")
+    assert updated is not None
+    assert service.authenticate("owner", "correct horse battery") is None
+    assert service.authenticate("owner", "new correct password") == updated
+
+
 def test_completed_task_review_is_persisted_as_improvement(tmp_path: Path) -> None:
     service = _service(tmp_path, network_enabled=False)
     service.review_task(
