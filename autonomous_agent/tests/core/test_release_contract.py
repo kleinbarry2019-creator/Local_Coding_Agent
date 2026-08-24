@@ -32,7 +32,8 @@ REQUIRED_GATE_FRAGMENTS = {
         "uv==0.12.5",
         "uv sync --frozen --group dev",
         "sudo apt-get update",
-        "sudo apt-get install -y bubblewrap shellcheck shfmt",
+        "sudo apt-get install -y apparmor bubblewrap shellcheck shfmt",
+        "sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
         "./tools/release_check.sh",
     ),
 }

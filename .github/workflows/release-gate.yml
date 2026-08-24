@@ -34,8 +34,11 @@ jobs:
       - name: Install locked development dependencies
         run: uv sync --frozen --group dev
 
-      - name: Install shell quality tools
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap shellcheck shfmt
+      - name: Install release tools
+        run: sudo apt-get update && sudo apt-get install -y apparmor bubblewrap shellcheck shfmt
+
+      - name: Enable the Ubuntu Bubblewrap user-namespace profile
+        run: sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
 
       - name: Run canonical release gate
         run: ./tools/release_check.sh
