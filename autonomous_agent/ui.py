@@ -489,6 +489,9 @@ class AcbUiServer:
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
 
+    def sync_manifest(self) -> dict[str, object]:
+        return self._controller.sync_manifest()
+
     def preferences(self) -> dict[str, object]:
         return self._controller.preferences().to_dict()
 
@@ -663,6 +666,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
                 return
             self._send_json(HTTPStatus.OK, self._app().learning_snapshot())
+            return
+        if path == "/api/sync/manifest":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().sync_manifest())
             return
         if path == "/api/audit":
             if not self._authorized():

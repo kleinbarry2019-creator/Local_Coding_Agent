@@ -323,6 +323,12 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert {"status", "knowledge", "suggestions", "self_updates"} <= set(
             learning
         )
+        status, manifest, _ = _get_json(
+            f"{server.url}api/sync/manifest", token=server.token
+        )
+        assert status == 200
+        assert manifest["sync_scope"] == "local-first; explicit future pairing required"
+        assert "password_hash" not in str(manifest)
         status, wake = _post_json(
             f"{server.url}api/voice/wake",
             {"text": "Hey ACB, starte"},
