@@ -896,12 +896,18 @@ def _approved_executable_roots() -> tuple[_ApprovedRoot, ...]:
         if canonical in seen:
             continue
         root = _ApprovedRoot(canonical, canonical, Path("/"), frozenset({0}))
-        _validate_directory_chain(
-            root.validation_start,
-            canonical,
-            root.allowed_owners,
-            "untrusted_executable_root",
-        )
+        try:
+            _validate_directory_chain(
+                root.validation_start,
+                canonical,
+                root.allowed_owners,
+                "untrusted_executable_root",
+            )
+        except ProbeError:
+            # A host may expose one optional executable root with unsafe
+            # ownership/mode.  Ignore that root and continue with the fixed
+            # roots that pass validation; never relax its checks.
+            continue
         seen.add(canonical)
         approved.append(root)
 
