@@ -20,11 +20,33 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+from autonomous_agent.core.goals import GoalKind
 from autonomous_agent.core.preferences import ProfileStore, UserPreferences
 
 MAX_FEEDBACK = 200
 MAX_COMMENT = 2_000
 MAX_FILE_BYTES = 512_000
+
+
+class TaskAccessError(PermissionError):
+    """A bounded user-facing denial for onboarding and trial restrictions."""
+
+
+def enforce_task_access(status: OnboardingStatus, kind: GoalKind) -> None:
+    """Apply the first-run safety boundary before work enters the executor.
+
+    The welcome state remains usable for read-only/project tasks so a user can
+    try ACB without an account.  During the limited trial, process execution
+    and tool installation stay disabled; after expiry, no task is accepted
+    until a local account is completed.  This is deliberately independent of
+    GTK so the same rule protects the loopback API and embedded callers.
+    """
+    if status.phase == "account-required":
+        raise TaskAccessError("Die Testphase ist abgelaufen; richte zuerst ein lokales Konto ein.")
+    if status.phase == "trial" and kind in {GoalKind.RUN_COMMAND, GoalKind.INSTALL_TOOL}:
+        raise TaskAccessError(
+            "In der Testphase sind Prozessausführung und Tool-Installation deaktiviert."
+        )
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from autonomous_agent.core.autonomy import AutonomyRuntime, RuntimeResult
 from autonomous_agent.core.config import AgentConfig
-from autonomous_agent.core.goals import GoalError
+from autonomous_agent.core.goals import GoalError, GoalNormalizer
 from autonomous_agent.core.learning import (
     ImprovementSuggestion,
     KnowledgeItem,
@@ -35,12 +35,14 @@ from autonomous_agent.core.user_experience import (
     OnboardingService,
     OnboardingStatus,
     ResponseContext,
+    TaskAccessError,
     TaskFeedback,
     TaskFeedbackStore,
     VoiceCapability,
     build_response_context,
     detect_assistive_hints,
     detect_voice_capabilities,
+    enforce_task_access,
 )
 from autonomous_agent.core.voice import SpeechResult, VoiceService, VoiceStatus
 
@@ -177,6 +179,8 @@ class RuntimeTaskController:
         return self.voice.speak(text)
 
     def submit(self, goal: str) -> UiTask:
+        normalized = GoalNormalizer().normalize(goal)
+        enforce_task_access(self.onboarding_status(), normalized.kind)
         request_id = f"request-{uuid.uuid4().hex}"
         task = UiTask(
             request_id=request_id,
@@ -615,6 +619,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             task = self._app().submit(goal)
+        except TaskAccessError as error:
+            self._send_error_json(HTTPStatus.FORBIDDEN, str(error))
+            return
+        except GoalError:
+            self._send_error_json(HTTPStatus.BAD_REQUEST, "goal is invalid or unsupported")
+            return
         except Exception:  # noqa: BLE001 - do not disclose local paths
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "task rejected")
             return

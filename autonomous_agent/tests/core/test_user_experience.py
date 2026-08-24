@@ -4,13 +4,16 @@ from pathlib import Path
 
 import pytest
 
+from autonomous_agent.core.goals import GoalKind
 from autonomous_agent.core.preferences import ProfileStore
 from autonomous_agent.core.user_experience import (
     OnboardingService,
+    TaskAccessError,
     TaskFeedbackStore,
     build_response_context,
     detect_assistive_hints,
     detect_voice_capabilities,
+    enforce_task_access,
 )
 
 
@@ -26,6 +29,15 @@ def test_onboarding_trial_and_completion_are_bounded(tmp_path: Path) -> None:
 def test_onboarding_rejects_unreasonable_trial(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         OnboardingService(ProfileStore(tmp_path)).start_trial(days=31)
+
+
+def test_trial_policy_blocks_privileged_work_but_allows_project_tasks(tmp_path: Path) -> None:
+    status = OnboardingService(ProfileStore(tmp_path)).start_trial()
+    enforce_task_access(status, GoalKind.WRITE_FILE)
+    with pytest.raises(TaskAccessError):
+        enforce_task_access(status, GoalKind.RUN_COMMAND)
+    with pytest.raises(TaskAccessError):
+        enforce_task_access(status, GoalKind.INSTALL_TOOL)
 
 
 def test_response_context_reflects_profile(tmp_path: Path) -> None:

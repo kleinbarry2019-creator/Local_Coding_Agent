@@ -281,6 +281,11 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         )
         assert status == 200
         assert onboarding["phase"] == "trial"
+        status, denied_trial = _post_json(
+            f"{server.url}api/tasks", {"goal": "run echo restricted"}, token=server.token
+        )
+        assert status == 403
+        assert "Testphase" in str(denied_trial["error"])
         request_id = accepted["request_id"]
         assert isinstance(request_id, str)
         for _ in range(50):
