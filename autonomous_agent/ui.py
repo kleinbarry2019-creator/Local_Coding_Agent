@@ -186,6 +186,8 @@ class RuntimeTaskController:
         return self.voice.status()
 
     def speak(self, text: str) -> SpeechResult:
+        if not self.preferences().voice_output:
+            return SpeechResult(False, None, "voice-output-disabled-by-preference")
         return self.voice.speak(text)
 
     def wake_phrase_matches(self, text: str) -> bool:

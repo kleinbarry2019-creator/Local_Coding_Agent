@@ -239,6 +239,19 @@ def test_controller_resumes_persisted_interrupted_work(tmp_path: Path) -> None:
         controller.close()
 
 
+def test_controller_honors_disabled_voice_output_preference(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(
+        _config(tmp_path), runtime=cast(_Runtime, _FakeRuntime())
+    )
+    try:
+        controller.update_preferences({"voice_output": False})
+        result = controller.speak("Hallo ACB")
+        assert result.started is False
+        assert result.diagnostic == "voice-output-disabled-by-preference"
+    finally:
+        controller.close()
+
+
 def test_ui_http_boundary_requires_token_and_serves_security_headers(
     tmp_path: Path,
 ) -> None:
