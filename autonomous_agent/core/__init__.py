@@ -16,21 +16,9 @@ from autonomous_agent.core.doctor import (
     ProbeStatus,
     build_doctor_registry,
 )
-from autonomous_agent.core.preferences import (
-    KNOWLEDGE_LEVELS,
-    PRONOUN_MODES,
-    RESPONSE_STYLES,
-    THEMES,
-    ProfileStore,
-    UserPreferences,
-)
 
 __all__ = [
     "DEFAULT_PROBE_NAMES",
-    "KNOWLEDGE_LEVELS",
-    "PRONOUN_MODES",
-    "RESPONSE_STYLES",
-    "THEMES",
     "AgentConfig",
     "CliOverrides",
     "ConfigError",
@@ -40,8 +28,6 @@ __all__ = [
     "ExecutionMode",
     "ProbeResult",
     "ProbeStatus",
-    "ProfileStore",
-    "UserPreferences",
     "build_doctor_registry",
     "load_config",
 ]
