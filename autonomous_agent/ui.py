@@ -536,6 +536,11 @@ class AcbUiServer:
                 "voice_output_active": (
                     preferences.voice_output and bool(status["output_available"])
                 ),
+                "wake_phrase_active": (
+                    preferences.voice_input
+                    and preferences.wake_phrase_enabled
+                    and bool(status["input_available"])
+                ),
             }
         )
         return status

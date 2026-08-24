@@ -309,6 +309,7 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert voice["wake_phrase_enabled"] is True
         assert voice["voice_input_active"] is bool(voice["input_available"])
         assert voice["voice_output_active"] is False
+        assert voice["wake_phrase_active"] is bool(voice["input_available"])
         assert isinstance(voice["wake_phrase"], str)
         status, experience, _ = _get_json(
             f"{server.url}api/experience", token=server.token
