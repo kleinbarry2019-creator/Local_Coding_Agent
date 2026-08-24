@@ -106,6 +106,13 @@ uv tool install .
 acb app
 ```
 
+Für einen Eintrag im lokalen Anwendungsmenü kann die mitgelieferte Desktop-
+Definition installiert werden:
+
+```bash
+install -D packaging/acb.desktop ~/.local/share/applications/acb.desktop
+```
+
 Die Desktop-App öffnet keinen Netzwerkdienst. Auf Linux wird sie mit dem lokalen
 GTK-System gestartet, zeigt den Arbeitsbereich und den Aufgabenverlauf an und
 setzt beim Neustart alle persistent als `pending`, `running` oder `recovering`
