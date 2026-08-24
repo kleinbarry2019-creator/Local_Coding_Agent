@@ -35,9 +35,10 @@ def launch(config: AgentConfig) -> int:
     """Launch the desktop app, re-executing in the host GTK Python if needed."""
     if _gtk_available():
         return _run_gtk(config)
-    if Path(_SYSTEM_PYTHON).is_file() and Path(sys.executable).resolve() != Path(
-        _SYSTEM_PYTHON
-    ).resolve():
+    # UV/venv interpreters may resolve to the same system binary while still
+    # lacking PyGObject on their import path. Compare the executable spelling
+    # so the host GTK interpreter is used when the packaged tool is launched.
+    if Path(_SYSTEM_PYTHON).is_file() and Path(sys.executable) != Path(_SYSTEM_PYTHON):
         package_parent = str(Path(__file__).resolve().parent.parent)
         environment = dict(os.environ)
         existing_path = environment.get("PYTHONPATH")
