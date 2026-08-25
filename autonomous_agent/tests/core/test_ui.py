@@ -410,6 +410,11 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert health == {"name": UI_NAME, "status": "ok", "runtime": "ready"}
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert "default-src 'self'" in headers["Content-Security-Policy"]
+        with urlopen(server.url, timeout=2) as response:
+            html = response.read().decode("utf-8")
+        assert 'id="preferences-form"' in html
+        assert 'id="save-preferences"' in html
+        assert "allow_network_research" in html
 
         status, denied = _post_json(
             f"{server.url}api/tasks", {"goal": "list files"}, token=None
@@ -445,6 +450,22 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert preferences["theme"] == "light"
         assert preferences["simple_language"] is True
         assert server.preferences()["nickname"] == "Alex"
+        status, updated_preferences = _post_json(
+            f"{server.url}api/preferences",
+            {
+                "theme": "dark",
+                "response_style": "detailed",
+                "knowledge_level": "developer",
+                "gendered_language": True,
+                "allow_network_research": False,
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert updated_preferences["theme"] == "dark"
+        assert updated_preferences["response_style"] == "detailed"
+        assert updated_preferences["knowledge_level"] == "developer"
+        assert updated_preferences["allow_network_research"] is False
         voice_status, voice, _ = _get_json(
             f"{server.url}api/voice", token=server.token
         )
