@@ -7,11 +7,16 @@ import pytest
 
 from autonomous_agent.core.autonomy import (
     AutonomyRuntime,
+    CompletionEvaluator,
     FailureAnalysis,
+    FailureAnalyzer,
     FailureCategory,
+    PlanStep,
     RepairAction,
     Replanner,
+    StepKind,
 )
+from autonomous_agent.core.capabilities import CapabilityRegistry
 from autonomous_agent.core.config import (
     AgentConfig,
     ConfigError,
@@ -19,6 +24,7 @@ from autonomous_agent.core.config import (
     ResolvedPaths,
     ResourceLimits,
 )
+from autonomous_agent.core.goals import GoalNormalizer
 
 
 def _config(tmp_path: Path) -> AgentConfig:
@@ -121,6 +127,57 @@ def test_exit_zero_is_required_but_not_sufficient_without_e2e(tmp_path: Path) ->
     assert not result.completion.completed
     assert not result.completion.e2e_verified
     assert any(output.get("success") is False for output in result.outputs)
+    assert result.problem_solving
+    assert result.problem_solving[0]["category"] == "command-failed"
+
+
+def test_completion_uses_latest_verified_observation_after_a_replan(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    goal = GoalNormalizer().normalize("Write `replanned.txt` with content stable")
+    (config.paths.project_root / "replanned.txt").write_text(
+        "stable", encoding="utf-8"
+    )
+    report = CompletionEvaluator().evaluate(
+        goal,
+        config.paths.project_root,
+        (
+            {"step_id": "step-write", "success": False, "status": "error"},
+            {
+                "step_id": "step-write",
+                "success": True,
+                "status": "ok",
+                "data": {"written": True},
+            },
+        ),
+        CapabilityRegistry(config.paths.project_root),
+    )
+    assert report.completed
+
+
+def test_failure_analyzer_extracts_missing_command_and_recovery_options() -> None:
+    step = PlanStep(
+        "step-process",
+        StepKind.TOOL,
+        "project.run-process",
+        {"argv": ["bash", "-lc", "missing-tool --version"]},
+        Path("/tmp/project"),
+        True,
+    )
+    analysis = FailureAnalyzer().analyze(
+        step,
+        {
+            "success": False,
+            "status": "error",
+            "diagnostic_code": "process_failed",
+            "data": {
+                "exit_code": 127,
+                "stderr": "bash: missing-tool: command not found",
+            },
+        },
+    )
+    assert analysis.category is FailureCategory.DEPENDENCY_MISSING
+    assert analysis.missing_capability == "missing-tool"
+    assert "verify-capability" in analysis.candidate_actions
 
 
 def test_real_sandbox_command_is_e2e_verified(tmp_path: Path) -> None:

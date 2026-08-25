@@ -82,6 +82,14 @@ The agent process itself refuses to act as a permanent root process.
 the action was really executed, and a public-boundary E2E recheck matches the
 original request. A successful process exit by itself is only one criterion.
 
+The problem-solving trace classifies failures by cause, records bounded
+evidence, and lists safe recovery strategies in the result field
+`problem_solving`. When a `command not found` error is detected, ACB first
+verifies or provisions the trusted capability and retries the affected step.
+Mutating steps are rolled back through checkpoints before retries. The final
+evaluator uses the last verified observation of a repaired step, while failed
+intermediate attempts remain available for diagnosis.
+
 ## Grafische Oberfläche
 
 ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und

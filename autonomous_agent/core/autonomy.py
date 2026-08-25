@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -68,6 +69,9 @@ class FailureAnalysis:
     category: FailureCategory
     root_cause: str
     retryable: bool
+    evidence: tuple[str, ...] = ()
+    missing_capability: str | None = None
+    candidate_actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,7 @@ class RuntimeResult:
     status: str
     completion: CompletionReport
     outputs: tuple[Mapping[str, object], ...]
+    problem_solving: tuple[Mapping[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -120,6 +125,7 @@ class RuntimeResult:
             "status": self.status,
             "completion": self.completion.to_dict(),
             "outputs": [dict(item) for item in self.outputs],
+            "problem_solving": [dict(item) for item in self.problem_solving],
         }
 
 
@@ -202,6 +208,8 @@ class Planner:
 class FailureAnalyzer:
     def analyze(self, step: PlanStep, result: Mapping[str, object]) -> FailureAnalysis:
         category = self.classify(step, result)
+        evidence = _failure_evidence(result)
+        missing_capability = _missing_capability(step, result)
         causes = {
             FailureCategory.DEPENDENCY_MISSING: "trusted capability unavailable after provisioning",
             FailureCategory.POLICY_DENIED: "policy evidence did not authorize the requested action",
@@ -210,10 +218,30 @@ class FailureAnalyzer:
             FailureCategory.TOOL_FAILED: "tool handler failed at its trusted boundary",
             FailureCategory.LOOP_DETECTED: "the same failure fingerprint repeated",
         }
+        if missing_capability is not None:
+            causes[FailureCategory.DEPENDENCY_MISSING] = (
+                f"required executable is unavailable: {missing_capability}"
+            )
+        actions = {
+            FailureCategory.DEPENDENCY_MISSING: ("verify-capability", "retry-step"),
+            FailureCategory.POLICY_DENIED: ("inspect-policy-scope", "stop-safely"),
+            FailureCategory.TIMEOUT: ("retry-with-bounded-deadline", "rollback-if-mutating"),
+            FailureCategory.COMMAND_FAILED: ("inspect-command-evidence", "stop-safely"),
+            FailureCategory.TOOL_FAILED: ("retry-once", "rollback-if-mutating"),
+            FailureCategory.LOOP_DETECTED: ("stop-repeated-failure", "preserve-evidence"),
+        }
         return FailureAnalysis(
             category=category,
             root_cause=causes[category],
-            retryable=category in {FailureCategory.TIMEOUT, FailureCategory.TOOL_FAILED},
+            retryable=category
+            in {
+                FailureCategory.DEPENDENCY_MISSING,
+                FailureCategory.TIMEOUT,
+                FailureCategory.TOOL_FAILED,
+            },
+            evidence=evidence,
+            missing_capability=missing_capability,
+            candidate_actions=actions[category],
         )
 
     def classify(self, step: PlanStep, result: Mapping[str, object]) -> FailureCategory:
@@ -226,6 +254,8 @@ class FailureAnalyzer:
         if step.kind is StepKind.ENSURE_CAPABILITY:
             return FailureCategory.DEPENDENCY_MISSING
         data = result.get("data")
+        if isinstance(data, Mapping) and _missing_capability(step, result) is not None:
+            return FailureCategory.DEPENDENCY_MISSING
         if isinstance(data, Mapping) and data.get("exit_code") not in {None, 0}:
             return FailureCategory.COMMAND_FAILED
         if diagnostic == "internal_error":
@@ -277,11 +307,16 @@ class CompletionEvaluator:
         outputs: tuple[Mapping[str, object], ...],
         capabilities: CapabilityRegistry,
     ) -> CompletionReport:
+        effective_outputs = _effective_outputs(outputs)
         results = tuple(
-            self._evaluate_criterion(item, goal, project_root, outputs, capabilities)
+            self._evaluate_criterion(
+                item, goal, project_root, effective_outputs, capabilities
+            )
             for item in goal.acceptance_criteria
         )
-        executed = bool(outputs) and all(item.get("success") is True for item in outputs)
+        executed = bool(effective_outputs) and all(
+            item.get("success") is True for item in effective_outputs
+        )
         e2e = any(
             item.criterion_id == "e2e" and item.passed for item in results
         )
@@ -506,6 +541,7 @@ class AutonomyRuntime:
         outputs: list[Mapping[str, object]] = list(initial_outputs)
         loops = LoopDetector()
         attempts = initial_attempts
+        problem_solving: list[Mapping[str, object]] = []
         for index in range(start_step, len(plan)):
             step = plan[index]
             checkpoint = (
@@ -515,6 +551,7 @@ class AutonomyRuntime:
                 else None
             )
             succeeded = False
+            recovery_attempted = False
             for _attempt in range(3):
                 attempts += 1
                 self.tasks.transition(
@@ -531,10 +568,65 @@ class AutonomyRuntime:
                     break
                 analysis = self.failures.analyze(step, output)
                 fingerprint = loops.observe(step, analysis.category, output)
+                problem_solving.append(
+                    {
+                        "phase": "diagnosis",
+                        "step_id": step.step_id,
+                        "category": analysis.category.value,
+                        "root_cause": analysis.root_cause,
+                        "evidence": list(analysis.evidence),
+                        "candidate_actions": list(analysis.candidate_actions),
+                    }
+                )
+                if (
+                    step.kind is StepKind.TOOL
+                    and analysis.missing_capability is not None
+                    and not recovery_attempted
+                ):
+                    recovery_attempted = True
+                    recovery_step = PlanStep(
+                        step_id=f"recover-capability-{analysis.missing_capability}",
+                        kind=StepKind.ENSURE_CAPABILITY,
+                        tool=analysis.missing_capability,
+                        arguments={"name": analysis.missing_capability},
+                        target=self.config.paths.project_root,
+                        mutates=False,
+                    )
+                    recovery_output = self._execute_step(session_id, recovery_step)
+                    outputs.append(recovery_output)
+                    recovery_ok = recovery_output.get("success") is True
+                    problem_solving.append(
+                        {
+                            "phase": "replan",
+                            "step_id": step.step_id,
+                            "strategy": "provision-missing-capability",
+                            "capability": analysis.missing_capability,
+                            "outcome": "verified" if recovery_ok else "unavailable",
+                        }
+                    )
+                    if recovery_ok:
+                        self.tasks.transition(
+                            session_id,
+                            status="recovering",
+                            current_step=index,
+                            attempts=attempts,
+                            failure_fingerprint=fingerprint,
+                            outcome="capability-provisioned-retry",
+                        )
+                        continue
                 repair = self.replanner.decide(
                     analysis,
                     repeated=loops.repeated(fingerprint),
                     mutation_started=checkpoint is not None,
+                )
+                problem_solving.append(
+                    {
+                        "phase": "replan",
+                        "step_id": step.step_id,
+                        "strategy": repair.value,
+                        "outcome": "continue" if repair is not RepairAction.STOP else "stop",
+                        "reason": analysis.root_cause,
+                    }
                 )
                 self.tasks.transition(
                     session_id,
@@ -571,7 +663,13 @@ class AutonomyRuntime:
                     completion=report.to_dict(),
                     outcome="verified-failure",
                 )
-                return RuntimeResult(session_id, "failed", report, tuple(outputs))
+                return RuntimeResult(
+                    session_id,
+                    "failed",
+                    report,
+                    tuple(outputs),
+                    tuple(problem_solving),
+                )
             self.tasks.transition(
                 session_id,
                 status="running",
@@ -594,7 +692,13 @@ class AutonomyRuntime:
             completion=report.to_dict(),
             outcome="verified-complete" if report.completed else "completion-rejected",
         )
-        return RuntimeResult(session_id, status, report, tuple(outputs))
+        return RuntimeResult(
+            session_id,
+            status,
+            report,
+            tuple(outputs),
+            tuple(problem_solving),
+        )
 
     def _execute_step(self, session_id: str, step: PlanStep) -> Mapping[str, object]:
         if step.kind is StepKind.ENSURE_CAPABILITY:
@@ -695,6 +799,79 @@ def _tool_output(step: PlanStep, result: ToolResult) -> Mapping[str, object]:
         "duration_ms": result.duration_ms,
         "data": None if result.data is None else dict(result.data),
     }
+
+
+def _failure_evidence(result: Mapping[str, object]) -> tuple[str, ...]:
+    """Extract bounded, non-secret diagnostics for explainable recovery."""
+    evidence: list[str] = []
+    diagnostic_code = result.get("diagnostic_code")
+    if isinstance(diagnostic_code, str) and diagnostic_code:
+        evidence.append(f"diagnostic:{diagnostic_code[:80]}")
+    data = result.get("data")
+    if isinstance(data, Mapping):
+        exit_code = data.get("exit_code")
+        if type(exit_code) is int:
+            evidence.append(f"exit-code:{exit_code}")
+        for name in ("stderr", "stdout"):
+            value = data.get(name)
+            if isinstance(value, str) and value.strip():
+                compact = " ".join(value.split())[:240]
+                evidence.append(f"{name}:{compact}")
+    return tuple(evidence[:6])
+
+
+def _effective_outputs(
+    outputs: tuple[Mapping[str, object], ...],
+) -> tuple[Mapping[str, object], ...]:
+    """Keep the last observation for each step after bounded retries/replans."""
+    latest: dict[str, tuple[int, Mapping[str, object]]] = {}
+    unkeyed: list[tuple[int, Mapping[str, object]]] = []
+    for index, output in enumerate(outputs):
+        step_id = output.get("step_id")
+        if not isinstance(step_id, str) or not step_id:
+            unkeyed.append((index, output))
+            continue
+        latest[step_id] = (index, output)
+    selected = [*unkeyed, *latest.values()]
+    selected.sort(key=lambda item: item[0])
+    return tuple(item[1] for item in selected)
+
+
+def _missing_capability(
+    step: PlanStep, result: Mapping[str, object]
+) -> str | None:
+    """Identify a safe executable candidate from a command-not-found result."""
+    if step.kind is StepKind.ENSURE_CAPABILITY:
+        return step.tool
+    data = result.get("data")
+    parts: list[str] = []
+    if isinstance(data, Mapping):
+        for name in ("stderr", "stdout"):
+            value = data.get(name)
+            if isinstance(value, str):
+                parts.append(value)
+        exit_code = data.get("exit_code")
+        if exit_code == 127:
+            parts.append("exit-code-127")
+    diagnostic = result.get("diagnostic")
+    if isinstance(diagnostic, str):
+        parts.append(diagnostic)
+    text = "\n".join(parts)
+    match = re.search(
+        r"(?:^|[:\s])([A-Za-z0-9][A-Za-z0-9._+-]{0,63}):\s*(?:command not found|not found)"
+        r"|(?:command not found[: ]+|not found[: ]+|No such file or directory[: ]*)"
+        r"([A-Za-z0-9][A-Za-z0-9._+-]{0,63})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    candidate = match.group(1) or match.group(2)
+    if candidate is None:
+        return None
+    if candidate in {"command", "file", "directory"}:
+        return None
+    return candidate
 
 
 def _goal_document(goal: NormalizedGoal) -> dict[str, object]:
