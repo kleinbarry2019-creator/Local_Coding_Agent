@@ -59,6 +59,31 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Plane und setze eine Zero-Trust-Netzwerkarchitektur mit mTLS und Policy-as-Code um",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Führe eine vollständige Web-Sicherheitsanalyse mit DAST und Threat Modeling durch",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Entwickle einen sicheren Betriebssystemkern mit Scheduler und Sandboxing",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Automatisiere eine containerisierte Multi-Cluster-Infrastruktur mit Service Mesh",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Implementiere eine wissenschaftliche GPU-Simulation mit numerischer Validierung",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
