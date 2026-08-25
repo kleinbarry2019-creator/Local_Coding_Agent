@@ -417,6 +417,7 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert "allow_network_research" in html
         assert 'id="account-form"' in html
         assert 'id="account-create"' in html
+        assert 'id="account-reset"' in html
 
         status, denied = _post_json(
             f"{server.url}api/tasks", {"goal": "list files"}, token=None
@@ -590,6 +591,29 @@ def test_browser_ui_account_create_and_authenticate(tmp_path: Path) -> None:
                 "action": "authenticate",
                 "username": "browser-user",
                 "password": "correct-horse-battery",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert authenticated["username"] == "browser-user"
+        status, reset = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "reset-password",
+                "username": "browser-user",
+                "security_answer": "blau",
+                "new_password": "new-correct-horse",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert reset["username"] == "browser-user"
+        status, authenticated = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "authenticate",
+                "username": "browser-user",
+                "password": "new-correct-horse",
             },
             token=server.token,
         )
