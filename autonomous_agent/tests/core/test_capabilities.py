@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from autonomous_agent.core.capabilities import CapabilityRegistry
 from autonomous_agent.core.config import ExecutionMode, ResourceLimits
 from autonomous_agent.core.policy import (
@@ -111,16 +113,36 @@ def test_missing_qemu_is_researched_against_trusted_catalog(tmp_path: Path) -> N
     research = CapabilityRegistry(tmp_path).research("qemu-system-x86_64")
 
     if Path("/run/ostree-booted").is_file():
-        assert not research.supported
-        assert research.source == "host-profile"
+        assert research.supported
+        assert research.source == "trusted-catalog"
         assert research.manager == "rpm-ostree"
         assert research.package == "qemu-system-x86-core"
-        assert "rpm-ostree" in research.rationale
+        assert "reboot" in research.rationale
     else:
         assert research.supported
         assert research.source == "trusted-catalog"
         assert research.manager in {"apt", "dnf", "brew"}
         assert research.package
+
+
+def test_immutable_qemu_install_reports_reboot_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not Path("/run/ostree-booted").is_file():
+        pytest.skip("immutable-host behavior is not applicable")
+    registry = CapabilityRegistry(tmp_path)
+    if registry.discover("qemu-system-x86_64").available:
+        pytest.skip("qemu is already available")
+    monkeypatch.setattr(
+        "autonomous_agent.core.capabilities.PrivilegedSystemExecutor.install",
+        lambda _self, _recipe: 0,
+    )
+
+    result = registry.ensure("qemu-system-x86_64")
+
+    assert not result.installed
+    assert result.reboot_required
+    assert result.diagnostic == "installed-reboot-required"
 
 
 def test_system_tool_requires_exact_action_scoped_authority(tmp_path: Path) -> None:

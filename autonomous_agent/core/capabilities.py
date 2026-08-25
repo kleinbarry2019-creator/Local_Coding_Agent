@@ -27,7 +27,11 @@ _TRUSTED_CATALOG: Mapping[str, Mapping[str, str]] = MappingProxyType(
         # Fedora's qemu-system-x86-core and Debian's qemu-system-x86 packages
         # provide the trusted x86_64 QEMU executable used by the VM preflight.
         "qemu-system-x86_64": MappingProxyType(
-            {"apt": "qemu-system-x86", "dnf": "qemu-system-x86-core"}
+            {
+                "apt": "qemu-system-x86",
+                "dnf": "qemu-system-x86-core",
+                "rpm-ostree": "qemu-system-x86-core",
+            }
         ),
     }
 )
@@ -47,6 +51,7 @@ class InstallResult:
     installed: bool
     capability: Capability
     diagnostic: str
+    reboot_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,12 +107,20 @@ class CapabilityRegistry:
             return InstallResult(False, current, "untrusted-or-unsupported-tool")
         result = PrivilegedSystemExecutor().install(recipe)
         verified = self.discover(name)
+        reboot_required = (
+            result == 0
+            and recipe.manager == "rpm-ostree"
+            and not verified.available
+        )
         return InstallResult(
             result == 0 and verified.available,
             verified,
             "installed-and-verified"
             if result == 0 and verified.available
+            else "installed-reboot-required"
+            if reboot_required
             else "installation-or-verification-failed",
+            reboot_required=reboot_required,
         )
 
     def research(self, name: str) -> CapabilityResearch:
@@ -118,7 +131,7 @@ class CapabilityRegistry:
         if recipe is None:
             immutable = _is_immutable_host()
             rationale = (
-                "The host is immutable; package layering requires rpm-ostree and a planned reboot, so unattended dnf installation is refused."
+                "No trusted package manager is available for this host profile; autonomous installation is refused."
                 if immutable
                 else "No verified package recipe is available; autonomous installation is refused."
             )
@@ -126,13 +139,13 @@ class CapabilityRegistry:
                 name=name,
                 supported=False,
                 source="host-profile" if immutable else "trusted-catalog",
-                manager="rpm-ostree" if immutable else None,
-                package=(
-                    _TRUSTED_CATALOG[name].get("dnf")
-                    if immutable and name in _TRUSTED_CATALOG
-                    else None
-                ),
+                manager=None,
+                package=None,
                 rationale=rationale,
+            )
+        if recipe.manager == "rpm-ostree":
+            rationale = (
+                "The trusted rpm-ostree layer will be installed action-scoped; a reboot is required before the executable can be version-verified."
             )
         return CapabilityResearch(
             name=name,
@@ -140,7 +153,9 @@ class CapabilityRegistry:
             source="trusted-catalog",
             manager=recipe.manager,
             package=recipe.package,
-            rationale="A verified package recipe is available and will be version-probed after installation.",
+            rationale=rationale
+            if recipe.manager == "rpm-ostree"
+            else "A verified package recipe is available and will be version-probed after installation.",
         )
 
     def snapshot(self) -> tuple[Capability, ...]:
@@ -215,6 +230,12 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
         ("apt", Path("/usr/bin/apt-get"), ("install", "-y"), True),
         ("dnf", Path("/usr/bin/dnf"), ("install", "-y"), True),
         (
+            "rpm-ostree",
+            Path("/usr/bin/rpm-ostree"),
+            ("install", "--idempotent"),
+            True,
+        ),
+        (
             "brew",
             Path("/home/linuxbrew/.linuxbrew/bin/brew"),
             ("install",),
@@ -223,6 +244,8 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
     )
     for manager, executable, arguments, elevation in managers:
         if manager == "dnf" and _is_immutable_host():
+            continue
+        if manager == "rpm-ostree" and not _is_immutable_host():
             continue
         package = packages.get(manager)
         if package is not None and executable.is_file():

@@ -27,6 +27,7 @@ class EnsureToolOutput:
     research_source: str | None = None
     package_manager: str | None = None
     package: str | None = None
+    reboot_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ def register_system_tools(
             research_source=research.source,
             package_manager=research.manager,
             package=research.package,
+            reboot_required=result.reboot_required,
         )
 
     registry.register(

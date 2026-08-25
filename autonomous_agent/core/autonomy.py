@@ -804,6 +804,7 @@ class AutonomyRuntime:
                                 "source": research["research_source"],
                                 "package_manager": research.get("package_manager"),
                                 "package": research.get("package"),
+                                "reboot_required": research.get("reboot_required"),
                                 "outcome": (
                                     "available"
                                     if output.get("success") is True
@@ -1179,7 +1180,10 @@ def _capability_install_blocked(result: Mapping[str, object]) -> bool:
     data = result.get("data")
     if not isinstance(data, Mapping):
         return False
-    return data.get("diagnostic") == "untrusted-or-unsupported-tool" or (
+    return data.get("diagnostic") in {
+        "untrusted-or-unsupported-tool",
+        "installed-reboot-required",
+    } or (
         data.get("research_source") == "host-profile"
         and data.get("package_manager") == "rpm-ostree"
     )
