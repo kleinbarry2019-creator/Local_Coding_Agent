@@ -223,6 +223,18 @@ class Planner:
                     purpose="scan-project-text-for-bounded-security-findings",
                 ),
             )
+        if goal.kind is GoalKind.HOST_SECURITY_SCAN:
+            return (
+                PlanStep(
+                    "step-host-security-scan",
+                    StepKind.TOOL,
+                    "system.host-security-scan",
+                    {"project_root": str(root)},
+                    root,
+                    False,
+                    purpose="inspect-local-host-security-without-mutating-the-system",
+                ),
+            )
         if goal.kind is GoalKind.RUN_COMMAND:
             executable = goal.argv[0]
             return (
@@ -1550,6 +1562,14 @@ def _direct_e2e(
             data = item.get("data")
             if isinstance(data, Mapping) and isinstance(
                 data.get("files_scanned"), int
+            ) and isinstance(data.get("findings"), list):
+                return True
+        return False
+    if goal.kind is GoalKind.HOST_SECURITY_SCAN:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("checks"), list
             ) and isinstance(data.get("findings"), list):
                 return True
         return False

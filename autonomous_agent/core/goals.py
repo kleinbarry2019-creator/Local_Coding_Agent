@@ -25,6 +25,7 @@ class GoalKind(str, Enum):
     INSTALL_TOOL = "install-tool"
     VM_BUILD = "vm-build"
     SECURITY_SCAN = "security-scan"
+    HOST_SECURITY_SCAN = "host-security-scan"
     RESEARCH_TASK = "research-task"
 
 
@@ -70,6 +71,8 @@ class GoalNormalizer:
         lowered = goal.casefold()
         if self._is_security_scan_request(lowered):
             return self._security_scan(goal)
+        if self._is_host_security_request(lowered):
+            return self._host_security_scan(goal)
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
         if self._is_complex_research_request(lowered):
@@ -178,6 +181,39 @@ class GoalNormalizer:
             token in lowered for token in ("project", "projekt", "repo", "repository", "code")
         )
         return scan_intent and scope_hint and not _contains_word(
+            lowered,
+            ("fix", "behebe", "beheben", "implement", "implementiere", "apply", "anwenden"),
+        )
+
+    @staticmethod
+    def _is_host_security_request(lowered: str) -> bool:
+        security_intent = any(
+            token in lowered
+            for token in (
+                "systemsicherheit",
+                "system security",
+                "host security",
+                "netzwerksicherheit",
+                "network security",
+                "sicherheit des systems",
+            )
+        )
+        inspection_intent = any(
+            token in lowered
+            for token in (
+                "scan",
+                "prüfung",
+                "pruefung",
+                "audit",
+                "prüfe",
+                "pruefe",
+                "untersuche",
+                "ports",
+                "prozesse",
+                "processes",
+            )
+        )
+        return security_intent and inspection_intent and not _contains_word(
             lowered,
             ("fix", "behebe", "beheben", "implement", "implementiere", "apply", "anwenden"),
         )
@@ -765,6 +801,19 @@ class GoalNormalizer:
             GoalKind.SECURITY_SCAN,
             "Bounded project security scan",
             target=".",
+            criteria=(
+                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+                AcceptanceCriterion("findings", CriterionKind.OUTPUT_PRODUCED),
+                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
+
+    def _host_security_scan(self, goal: str) -> NormalizedGoal:
+        return _goal(
+            goal,
+            GoalKind.HOST_SECURITY_SCAN,
+            "Bounded host and network security check",
+            target="host",
             criteria=(
                 AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
                 AcceptanceCriterion("findings", CriterionKind.OUTPUT_PRODUCED),

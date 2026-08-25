@@ -389,6 +389,13 @@ def test_security_scan_is_a_read_only_first_class_goal() -> None:
     assert goal.target == "."
 
 
+def test_host_security_scan_is_separate_from_project_scan() -> None:
+    goal = GoalNormalizer().normalize("Prüfe die Systemsicherheit und offene Ports")
+
+    assert goal.kind is GoalKind.HOST_SECURITY_SCAN
+    assert goal.target == "host"
+
+
 @pytest.mark.parametrize(
     "goal_text",
     ["", "do something clever", "read ../../etc/passwd", "install ruff extra"],

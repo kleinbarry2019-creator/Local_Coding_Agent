@@ -125,6 +125,21 @@ def test_runtime_completes_security_scan_with_findings_evidence(tmp_path: Path) 
     assert result.outputs[0]["data"]["clean"] is False
 
 
+def test_runtime_completes_host_security_scan_without_mutation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    before = sorted(path.name for path in config.paths.project_root.iterdir())
+
+    result = AutonomyRuntime(config).run(
+        "Prüfe die Systemsicherheit und offene Ports"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert result.outputs[0]["step_id"] == "step-host-security-scan"
+    assert sorted(path.name for path in config.paths.project_root.iterdir()) == before
+
+
 def test_runtime_executes_explicit_command_with_verification_wording(
     tmp_path: Path,
 ) -> None:
