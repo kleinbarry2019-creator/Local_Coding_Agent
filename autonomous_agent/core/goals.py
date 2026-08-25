@@ -78,7 +78,10 @@ class GoalNormalizer:
             if self._is_ambitious_unknown_request(lowered):
                 return self._research_task(goal)
             return self._run(goal)
-        if _contains_word(lowered, ("create", "write", "erstelle", "schreibe")):
+        if _contains_word(
+            lowered,
+            ("create", "write", "erstelle", "erstellen", "schreibe", "anlegen", "erzeuge"),
+        ):
             try:
                 return self._write(goal)
             except GoalError:
@@ -424,7 +427,7 @@ class GoalNormalizer:
         return bool(
             re.search(
                 r"(?:could\s+you|can\s+you|please|kannst\s+du|bitte)"
-                r".*\b(?:run|execute|starte|führe|fuehre)\b",
+                r".*\b(?:run|execute|starte|starten|führe|fuehre|ausführen|ausfuehren)\b",
                 lowered,
             )
         )
@@ -520,16 +523,27 @@ class GoalNormalizer:
         return self._run_command(goal, _after_command_verb(goal))
 
     def _run_natural(self, goal: str) -> NormalizedGoal:
-        match = re.search(
-            r"\b(?:run|execute|starte|führe|fuehre)\b\s+(.+)",
+        before_verb = re.search(
+            r"(?:kannst\s+du|can\s+you|please|bitte)\s+"
+            r"(?:bitte\s+)?(.+?)\s+"
+            r"(?:ausführen|ausfuehren|starten)\b",
             goal,
             flags=re.IGNORECASE,
         )
-        if match is None:
+        match = re.search(
+            r"\b(?:run|execute|starte|starten|führe|fuehre)\b\s+(.+)",
+            goal,
+            flags=re.IGNORECASE,
+        )
+        if before_verb is not None:
+            command = before_verb.group(1)
+        elif match is not None:
+            command = match.group(1)
+        else:
             raise GoalError("natural run goal requires a command")
         command = re.split(
-            r"\s+(?:and|und)\s+(?:verify|prüfe|pruefe|teste|test)\b",
-            match.group(1),
+            r"\s+(?:and|und)\s+(?:verify|prüfe|pruefe|teste|test|das ergebnis)\b",
+            command,
             maxsplit=1,
             flags=re.IGNORECASE,
         )[0].strip()

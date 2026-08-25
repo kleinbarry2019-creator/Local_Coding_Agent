@@ -206,6 +206,27 @@ def test_polite_run_request_extracts_command_before_verification_text() -> None:
     assert goal.argv == ("python3", "-c", "print(42)")
 
 
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Kannst du bitte python3 -c 'print(42)' ausführen und das Ergebnis prüfen?",
+        "Kannst du python3 -c 'print(42)' starten und danach testen",
+    ],
+)
+def test_german_polite_run_variants_extract_command(goal_text: str) -> None:
+    goal = GoalNormalizer().normalize(goal_text)
+
+    assert goal.kind is GoalKind.RUN_COMMAND
+    assert goal.argv == ("python3", "-c", "print(42)")
+
+
+def test_german_create_variant_remains_a_write_goal() -> None:
+    goal = GoalNormalizer().normalize("Kannst du bitte `notes.txt` erstellen?")
+
+    assert goal.kind is GoalKind.WRITE_FILE
+    assert goal.target == "notes.txt"
+
+
 def test_write_derives_content_acceptance_criterion() -> None:
     goal = GoalNormalizer().normalize(
         "Erstelle `result.txt` mit dem Inhalt `verified`"
