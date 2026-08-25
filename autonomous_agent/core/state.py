@@ -360,7 +360,16 @@ def _validate_database_location(database_path: Path) -> None:
     package_root = Path(__file__).resolve().parents[1]
     forbidden_roots = [package_root]
     for candidate in package_root.parents:
-        if (candidate / ".git").exists():
+        # An installed package may live below a user's home directory that
+        # happens to contain an unrelated .git directory.  Only treat a
+        # parent as the source repository when its package and build metadata
+        # resolve back to this exact package root.
+        package_marker = (candidate / "autonomous_agent").resolve(strict=False)
+        if (
+            (candidate / ".git").exists()
+            and (candidate / "pyproject.toml").is_file()
+            and package_marker == package_root
+        ):
             forbidden_roots.append(candidate)
             break
     if any(database_path.is_relative_to(root) for root in forbidden_roots):

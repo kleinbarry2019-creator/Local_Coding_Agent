@@ -74,6 +74,21 @@ def _assert_schema_drift_is_rejected(store: CoreStateStore) -> None:
     assert raised.value.code == "schema_verification_failed"
 
 
+def test_installed_package_does_not_block_state_below_unrelated_home_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = tmp_path / "home" / ".local" / "share" / "tool" / "site-packages" / "autonomous_agent"
+    package_root.mkdir(parents=True)
+    fake_file = package_root / "core" / "state.py"
+    fake_file.parent.mkdir()
+    fake_file.touch()
+    (tmp_path / "home" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(state_module, "__file__", str(fake_file))
+
+    database = tmp_path / "home" / "acb-state" / "agent_core.sqlite3"
+    state_module._validate_database_location(database)
+
+
 def test_fresh_creation_has_exact_schema_and_owner_only_files(tmp_path: Path) -> None:
     store = _store(tmp_path)
 
