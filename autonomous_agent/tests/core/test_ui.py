@@ -274,6 +274,7 @@ def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -
                 "interests": "intern",
                 "store_personalization": False,
                 "store_task_history": False,
+                "store_chat_history": False,
             }
         )
         context = controller.response_context()
@@ -282,6 +283,11 @@ def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -
         assert controller.persisted_sessions() == []
         assert controller.persisted_session("session-0123456789abcdef0123456789abcdef") is None
         assert controller.recover_pending() == ()
+        assert controller.feedback_items() == ()
+        with pytest.raises(ValueError):
+            controller.add_feedback(
+                "session-0123456789abcdef0123456789abcdef", 10, "privat"
+            )
     finally:
         controller.close()
 

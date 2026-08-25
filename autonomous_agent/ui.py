@@ -195,9 +195,13 @@ class RuntimeTaskController:
         return detect_voice_capabilities()
 
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> TaskFeedback:
+        if not self.preferences().store_chat_history:
+            raise ValueError("chat history storage is disabled")
         return self.feedback.add(session_id, rating, comment)
 
     def feedback_items(self, limit: int = 50) -> tuple[TaskFeedback, ...]:
+        if not self.preferences().store_chat_history:
+            return ()
         return self.feedback.items(limit)
 
     def voice_status(self) -> VoiceStatus:
