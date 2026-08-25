@@ -415,6 +415,8 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert 'id="preferences-form"' in html
         assert 'id="save-preferences"' in html
         assert "allow_network_research" in html
+        assert 'id="account-form"' in html
+        assert 'id="account-create"' in html
 
         status, denied = _post_json(
             f"{server.url}api/tasks", {"goal": "list files"}, token=None
@@ -441,6 +443,13 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
                 "theme": "light",
                 "simple_language": True,
                 "nickname": "Alex",
+                "interests": "Robotics",
+                "age": 35,
+                "occupation": "Developer",
+                "gender_identity": "nonbinary",
+                "pronoun_mode": "custom",
+                "pronouns": "they/them",
+                "store_personalization": True,
                 "voice_input": True,
                 "wake_phrase_enabled": True,
             },
@@ -450,6 +459,7 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert preferences["theme"] == "light"
         assert preferences["simple_language"] is True
         assert server.preferences()["nickname"] == "Alex"
+        assert server.preferences()["gender_identity"] == "nonbinary"
         status, updated_preferences = _post_json(
             f"{server.url}api/preferences",
             {
@@ -546,6 +556,45 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         )
         assert status == 200
         assert feedback["rating"] == 9
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_browser_ui_account_create_and_authenticate(tmp_path: Path) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0)
+    thread = _start(server)
+    try:
+        status, created = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "create",
+                "username": "browser-user",
+                "password": "correct-horse-battery",
+                "security_question": "Lieblingsfarbe?",
+                "security_answer": "blau",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert created["username"] == "browser-user"
+        assert "password_hash" not in str(created)
+        status, accounts, _ = _get_json(
+            f"{server.url}api/account", token=server.token
+        )
+        assert status == 200
+        assert any(item["username"] == "browser-user" for item in accounts["accounts"])
+        status, authenticated = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "authenticate",
+                "username": "browser-user",
+                "password": "correct-horse-battery",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert authenticated["username"] == "browser-user"
     finally:
         server.shutdown()
         thread.join(timeout=2)
