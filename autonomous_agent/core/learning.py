@@ -848,28 +848,44 @@ class LearningService:
 
     def response_hint(self, user_id: str = "local-profile") -> str:
         """Return a conservative, explainable style hint learned from feedback."""
+        profile = self.response_hint_profile(user_id)
+        preferred = profile.get("preferred_hint")
+        return (
+            {
+                "more-detail": "mehr Details und Beispiele geben",
+                "simple-language": "einfacher und schrittweise formulieren",
+                "concise": "kürzer und direkter antworten",
+                "technical": "technischer und mit prüfbaren Details antworten",
+            }.get(preferred, "")
+            if isinstance(preferred, str)
+            else ""
+        )
+
+    def response_hint_profile(self, user_id: str = "local-profile") -> dict[str, object]:
+        """Describe the per-user feedback signal used for response adaptation."""
         if type(user_id) is not str or not user_id:
-            return ""
+            return {"user_id": "", "hints": {}, "preferred_hint": None, "confidence": 0.0}
         raw = self.store.metadata().get("feedback_hints_by_user", {})
         if not isinstance(raw, dict):
-            return ""
+            return {"user_id": user_id, "hints": {}, "preferred_hint": None, "confidence": 0.0}
         values = raw.get(user_id)
         if not isinstance(values, dict):
-            return ""
+            return {"user_id": user_id, "hints": {}, "preferred_hint": None, "confidence": 0.0}
         counts = {
             key: value
             for key, value in values.items()
             if isinstance(key, str) and type(value) is int and value > 0
         }
         if not counts:
-            return ""
+            return {"user_id": user_id, "hints": {}, "preferred_hint": None, "confidence": 0.0}
         hint = max(counts, key=lambda key: counts[key])
+        total = sum(counts.values())
         return {
-            "more-detail": "mehr Details und Beispiele geben",
-            "simple-language": "einfacher und schrittweise formulieren",
-            "concise": "kürzer und direkter antworten",
-            "technical": "technischer und mit prüfbaren Details antworten",
-        }.get(hint, "")
+            "user_id": user_id,
+            "hints": counts,
+            "preferred_hint": hint,
+            "confidence": round(counts[hint] / max(1, total), 3),
+        }
 
     def record_gate_result(
         self,

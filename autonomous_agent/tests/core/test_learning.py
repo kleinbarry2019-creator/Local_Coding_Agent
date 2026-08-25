@@ -228,6 +228,9 @@ def test_feedback_drives_per_user_response_hint(tmp_path: Path) -> None:
     )
     assert service.response_hint("account-a") == "einfacher und schrittweise formulieren"
     assert service.response_hint("account-b") == ""
+    profile = service.response_hint_profile("account-a")
+    assert profile["preferred_hint"] == "simple-language"
+    assert profile["confidence"] == 1.0
 
 
 def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:

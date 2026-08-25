@@ -479,6 +479,9 @@ class RuntimeTaskController:
                 item.to_dict()
                 for item in self.learning.store.experiences(50)
             ],
+            "personalization": self.learning.response_hint_profile(
+                self._active_account_id or "local-profile"
+            ),
             "suggestions": [item.to_dict() for item in self.suggestions(50)],
             "self_updates": [item.to_dict() for item in self.self_updates(50)],
         }
