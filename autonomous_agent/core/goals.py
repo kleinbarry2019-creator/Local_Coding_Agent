@@ -69,6 +69,10 @@ class GoalNormalizer:
         lowered = goal.casefold()
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
+        if self._is_complex_research_request(lowered):
+            return self._research_task(goal)
+        if self._is_standalone_research_request(lowered):
+            return self._research_task(goal, research_only=True)
         if _starts_with(lowered, ("install ", "installiere ")):
             return self._install(goal)
         if _starts_with(
@@ -78,6 +82,21 @@ class GoalNormalizer:
             if self._is_ambitious_unknown_request(lowered):
                 return self._research_task(goal)
             return self._run(goal)
+        if _contains_word(
+            lowered,
+            (
+                "analyze",
+                "analyse",
+                "analysiere",
+                "inspect",
+                "untersuche",
+                "understand",
+                "verstehe",
+            ),
+        ) and _contains_word(
+            lowered, ("write", "create", "erstelle", "erstellen", "schreibe")
+        ):
+            return self._research_task(goal)
         if _contains_word(
             lowered,
             ("create", "write", "erstelle", "erstellen", "schreibe", "anlegen", "erzeuge"),
@@ -92,7 +111,7 @@ class GoalNormalizer:
             return self._read(goal)
         if _contains_word(lowered, ("list", "liste", "auflisten")):
             return self._list(goal)
-        if _contains_word(
+        analyze_intent = _contains_word(
             lowered,
             (
                 "analyze",
@@ -103,14 +122,17 @@ class GoalNormalizer:
                 "understand",
                 "verstehe",
             ),
-        ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
+        )
+        if analyze_intent and _contains_word(
+            lowered, ("write", "create", "erstelle", "erstellen", "schreibe")
+        ):
+            return self._research_task(goal)
+        if analyze_intent and _contains_word(
+            lowered, ("project", "projekt", "repo", "repository", "code")
+        ):
             return self._analyze(goal)
         if self._is_natural_run_request(lowered):
             return self._run_natural(goal)
-        if self._is_standalone_research_request(lowered):
-            return self._research_task(goal, research_only=True)
-        if self._is_complex_research_request(lowered):
-            return self._research_task(goal)
         if self._is_ambitious_unknown_request(lowered):
             return self._research_task(goal)
         raise GoalError("goal is not a supported simple coding or system task")
@@ -151,18 +173,27 @@ class GoalNormalizer:
 
     @staticmethod
     def _is_standalone_research_request(lowered: str) -> bool:
-        return _contains_word(
+        if lowered in {"research", "recherche", "recherchiere"}:
+            return True
+        return lowered.startswith(
+            (
+                "research ",
+                "recherche ",
+                "recherchiere ",
+                "recherchen ",
+                "hintergrundrecherche ",
+                "deep research ",
+            )
+        ) or _contains_word(
             lowered,
             (
-                "recherchiere",
-                "recherche",
-                "recherchen",
-                "hintergrundrecherche",
-                "deep research",
-                "research",
                 "trusted sources",
                 "vertrauenswürdige quellen",
                 "vertrauenswuerdige quellen",
+                "research findings",
+                "research proposal",
+                "rechercheergebnisse",
+                "rechercheergebnis",
             ),
         )
 
