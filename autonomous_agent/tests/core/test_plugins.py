@@ -57,3 +57,14 @@ def test_catalog_rejects_entrypoint_escape(tmp_path: Path) -> None:
 
     assert record.status == "rejected"
     assert "entrypoint" in record.reason
+
+
+def test_catalog_rejects_symlinked_plugin_container(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / ".acb").symlink_to(outside, target_is_directory=True)
+
+    records = PluginCatalog(tmp_path).scan()
+
+    assert records[0].status == "rejected"
+    assert "symlink" in records[0].reason

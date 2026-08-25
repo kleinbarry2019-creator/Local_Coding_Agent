@@ -65,7 +65,17 @@ class PluginCatalog:
         self.plugin_root = self.project_root / ".acb" / "plugins"
 
     def scan(self) -> tuple[PluginRecord, ...]:
-        if not self.plugin_root.exists() or self.plugin_root.is_symlink():
+        container = self.plugin_root.parent
+        try:
+            if container.is_symlink() or self.plugin_root.is_symlink():
+                return (
+                    self._rejected(
+                        ".acb/plugins", "plugin directory symlink is not trusted"
+                    ),
+                )
+        except OSError:
+            return (self._rejected(".acb/plugins", "plugin directory is unreadable"),)
+        if not self.plugin_root.exists():
             return ()
         if not self.plugin_root.is_dir():
             return (self._rejected("plugins", "plugin directory is not a directory"),)
