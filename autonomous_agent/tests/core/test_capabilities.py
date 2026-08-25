@@ -194,3 +194,24 @@ def test_system_tool_requires_exact_action_scoped_authority(tmp_path: Path) -> N
     assert allowed.data is not None
     assert allowed.data["installed"] is True
     assert allowed.data["version"] is not None
+
+
+def test_host_security_scan_is_read_only_and_bounded(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    capabilities = CapabilityRegistry(root)
+    registry = ToolRegistry()
+    register_system_tools(registry, capabilities, root)
+
+    result = registry.execute(
+        "system.host-security-scan",
+        {"project_root": str(root)},
+        _context(root),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["checks"]
+    assert isinstance(result.data["findings"], list)
+    assert len(result.data["findings"]) <= 128
+    assert len(result.data["listeners"]) <= 64
+    assert result.data["processes_scanned"] >= 0

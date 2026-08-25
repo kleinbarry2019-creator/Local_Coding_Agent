@@ -97,6 +97,11 @@ def capability_matrix() -> dict[str, object]:
             ("Read-only; Fundstellen werden gemeldet, Secret-Inhalte niemals ausgegeben.",),
         ),
         CapabilityEntry(
+            "security.host-audit", "security", "available",
+            "Prüft lokale Kernel-Schutzwerte, TCP-Listener und Prozessmuster ohne Änderungen am Host.",
+            ("Read-only; Listener sind zunächst diagnostisch und Prozesse werden nicht automatisch beendet.",),
+        ),
+        CapabilityEntry(
             "security.remote-control", "connectivity", "gated",
             "Lokale Browser- und Desktop-Oberfläche; Remote-Zugriff ist vorbereitet.",
             ("Kein offener Netzwerkdienst ohne späteres explizites Pairing.",),
