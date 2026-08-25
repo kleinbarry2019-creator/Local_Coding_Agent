@@ -212,7 +212,9 @@ class RuntimeTaskController:
     def add_feedback(self, session_id: str, rating: int, comment: str = "") -> TaskFeedback:
         if not self.preferences().store_chat_history:
             raise ValueError("chat history storage is disabled")
-        return self.feedback.add(session_id, rating, comment)
+        feedback = self.feedback.add(session_id, rating, comment)
+        self.learning.record_feedback(session_id, rating, comment)
+        return feedback
 
     def feedback_items(self, limit: int = 50) -> tuple[TaskFeedback, ...]:
         if not self.preferences().store_chat_history:
@@ -372,7 +374,7 @@ class RuntimeTaskController:
                 document["protocol"] = self.export_audit_log(session_id)
             except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
                 document["protocol"] = {"error": "protocol-export-failed"}
-            if result.completion.completed:
+            if self.preferences().store_task_history:
                 self.learning.review_task(goal, document)
             self._update_task(
                 request_id,

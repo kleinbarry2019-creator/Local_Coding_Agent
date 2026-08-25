@@ -139,3 +139,33 @@ def test_completed_task_review_is_persisted_as_improvement(tmp_path: Path) -> No
     assert len(suggestions) == 1
     assert suggestions[0].kind == "task-review"
     assert suggestions[0].release_gate_required is True
+
+
+def test_failed_task_review_becomes_high_priority_learning_lead(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.review_task(
+        "Implementiere sichere Wiederaufnahme",
+        {
+            "completion": {
+                "completed": False,
+                "criteria": [
+                    {"criterion_id": "recovery", "passed": False},
+                    {"criterion_id": "tests", "passed": True},
+                ],
+            }
+        },
+    )
+    suggestion = service.store.suggestions()[0]
+    assert suggestion.priority == "high"
+    assert "recovery" in suggestion.description
+    assert suggestion.auto_apply is False
+
+
+def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.record_feedback("session-123", 3, "Die Erklärung war zu knapp.")
+    suggestion = service.store.suggestions()[0]
+    assert suggestion.kind == "user-feedback"
+    assert suggestion.priority == "high"
+    assert "zu knapp" in suggestion.description
+    assert suggestion.release_gate_required is True

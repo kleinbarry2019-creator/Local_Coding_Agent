@@ -133,9 +133,9 @@ Browser-Oberfläche verfügbar.
 ACB besitzt in der Desktop-App eigene Reiter für `Wissen & Recherche`,
 `Verbesserungen`, `Selbstentwicklung` sowie `Konto & Sync`. Ein lokaler
 Scheduler prüft in regelmäßigen Abständen allow-listete HTTPS-Feeds zu KI- und
-Sicherheitsmeldungen. Ohne Netz bleibt der Scheduler lokal verfügbar und meldet
-den Offline-Zustand; gespeichertes Wissen, Auftragsnachprüfungen und Vorschläge
-bleiben nutzbar.
+Sicherheitsmeldungen (arXiv, NIST und CISA). Ohne Netz bleibt der Scheduler
+lokal verfügbar und meldet den Offline-Zustand; gespeichertes Wissen,
+Auftragsnachprüfungen und Vorschläge bleiben nutzbar.
 
 Neue Informationen werden als lokale Wissenseinträge und nachvollziehbare
 Verbesserungsvorschläge abgelegt. Ein externer Artikel kann niemals direkt Code
@@ -147,6 +147,11 @@ Verbesserungen vorbereiten, ohne die Sicherheitsgrenzen des Systems zu
 
 Abgeschlossene Aufgaben erzeugen automatisch eine spätere Review-Notiz, zum
 Beispiel für Regressionstests, Dokumentation oder sicherere Automatisierung.
+Auch fehlgeschlagene oder unvollständige Aufträge werden mit den nicht
+erfüllten Akzeptanzkriterien als hoch priorisierte Lernvorschläge erfasst.
+Eine Nutzerbewertung erzeugt zusätzlich einen nachvollziehbaren Vorschlag zur
+Verbesserung; alle diese Vorschläge bleiben zunächst nur Kandidaten und
+benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
 Lokale Konten werden mit scrypt-Passwort-Hashes gespeichert. Die Geräte- und
 Kontostruktur für eine spätere system- und netzwerkübergreifende Synchronisation
 ist vorbereitet; Passwörter und Geheimnisse werden niemals in ein Sync-Mani-

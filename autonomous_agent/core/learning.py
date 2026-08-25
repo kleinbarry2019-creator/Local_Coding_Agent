@@ -62,6 +62,11 @@ RESEARCH_SOURCES: tuple[ResearchSource, ...] = (
     ResearchSource("arXiv KI", "https://arxiv.org/rss/cs.AI", "ai"),
     ResearchSource("arXiv ML", "https://arxiv.org/rss/cs.LG", "ai"),
     ResearchSource(
+        "NIST Cybersecurity",
+        "https://www.nist.gov/news-events/cybersecurity/rss.xml",
+        "security",
+    ),
+    ResearchSource(
         "CISA Advisories",
         "https://www.cisa.gov/cybersecurity-advisories/all.xml",
         "security",
@@ -487,24 +492,83 @@ class LearningService:
         }
 
     def review_task(self, goal: str, result: Mapping[str, object]) -> None:
-        """Record a post-completion improvement lead without changing code."""
+        """Turn verified outcomes and failures into reviewable learning leads.
+
+        Failed or incomplete work is valuable training data too: it identifies
+        which planner, tool, or acceptance criterion needs attention.  The
+        resulting proposal is still advisory and can never mutate code by
+        itself.
+        """
         completion = result.get("completion")
-        if not isinstance(completion, Mapping) or completion.get("completed") is not True:
+        if not isinstance(completion, Mapping):
             return
+        completed = completion.get("completed") is True
+        criteria = completion.get("criteria", ())
+        failed_criteria = tuple(
+            str(item.get("criterion_id", "unknown"))
+            for item in criteria
+            if isinstance(item, Mapping) and item.get("passed") is False
+        )
         now = _timestamp()
+        if completed:
+            title = f"Nachprüfung: {goal[:96]}"
+            description = (
+                "Auftrag wurde vollständig verifiziert. Prüfe regelmäßig, ob "
+                "ein Regressionstest, eine Dokumentationsverbesserung oder "
+                "eine sicherere Automatisierung daraus entstehen kann."
+            )
+            priority = "normal"
+        else:
+            failed = ", ".join(failed_criteria[:8]) or "unbekannte Kriterien"
+            title = f"Fehleranalyse: {goal[:88]}"
+            description = (
+                "Auftrag wurde nicht vollständig bestätigt. Analysiere die "
+                f"fehlenden Akzeptanzkriterien ({failed}), reproduziere den "
+                "Fehler und ergänze danach einen Regressionstest."
+            )
+            priority = "high"
         self.store.add_suggestion(
             ImprovementSuggestion(
                 suggestion_id=f"suggestion-{uuid.uuid4().hex}",
                 kind="task-review",
-                title=f"Nachprüfung: {goal[:96]}",
-                description=(
-                    "Auftrag wurde vollständig verifiziert. Prüfe regelmäßig, ob "
-                    "ein Regressionstest, eine Dokumentationsverbesserung oder "
-                    "eine sicherere Automatisierung daraus entstehen kann."
-                ),
+                title=title,
+                description=description,
                 source_ids=(),
                 status="candidate",
-                priority="normal",
+                priority=priority,
+                auto_apply=False,
+                release_gate_required=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    def record_feedback(self, session_id: str, rating: int, comment: str = "") -> None:
+        """Convert explicit user feedback into a bounded improvement proposal."""
+        if type(rating) is not int or not 1 <= rating <= 10:
+            raise ValueError("feedback rating is invalid")
+        if type(session_id) is not str or not session_id:
+            raise ValueError("feedback session is invalid")
+        if type(comment) is not str:
+            raise ValueError("feedback comment is invalid")
+        note = " ".join(comment.split())[:600]
+        description = (
+            f"Nutzerbewertung für {session_id}: {rating}/10. "
+            "Prüfe die zugehörige Antwort, Akzeptanzkriterien und Tests; "
+            "übernehme keine Änderung ohne Release-Gate."
+        )
+        if note:
+            description += f" Kommentar: {note}"
+        now = _timestamp()
+        self.store.add_suggestion(
+            ImprovementSuggestion(
+                suggestion_id=f"suggestion-{uuid.uuid4().hex}",
+                kind="user-feedback",
+                title=f"Nutzerfeedback auswerten: {session_id[-16:]}",
+                description=description,
+                source_ids=(),
+                status="candidate",
+                priority="high" if rating <= 5 else "normal",
                 auto_apply=False,
                 release_gate_required=True,
                 created_at=now,
