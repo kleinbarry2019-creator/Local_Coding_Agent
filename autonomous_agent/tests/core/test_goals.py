@@ -24,6 +24,11 @@ from autonomous_agent.core.goals import (
             GoalKind.VM_BUILD,
             "windows-vm",
         ),
+        (
+            "Implementiere eine Android-App mit Offline-Synchronisierung",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(

@@ -49,6 +49,24 @@ class VmPreflightOutput:
     warnings: list[str]
 
 
+@dataclass(frozen=True)
+class ResearchGoalInput:
+    goal: str
+    project_root: Path
+
+
+@dataclass(frozen=True)
+class ResearchGoalOutput:
+    research_completed: bool
+    goal_class: str
+    supported_workflows: list[str]
+    missing_capabilities: list[str]
+    blockers: list[str]
+    next_steps: list[str]
+    browser_opened: bool
+    network_used: bool
+
+
 def register_system_tools(
     registry: ToolRegistry,
     capabilities: CapabilityRegistry,
@@ -94,6 +112,63 @@ def register_system_tools(
             default_timeout_s=120.0,
             max_output_bytes=16_384,
             handler=ensure,
+            target_resolver=lambda request: (request.project_root,),
+        )
+    )
+
+    def research_goal(
+        request: ResearchGoalInput, context: ExecutionContext
+    ) -> ResearchGoalOutput:
+        del context
+        if request.project_root != root:
+            raise PermissionError("goal research project scope is invalid")
+        lowered = request.goal.casefold()
+        is_api = "api" in lowered or "microservice" in lowered
+        known = tuple(item.name for item in capabilities.snapshot())
+        supported_workflows = [
+            "project.read-file",
+            "project.write-file",
+            "project.run-process",
+            "project.analyze",
+        ]
+        missing = ["complex-code-generation"] if is_api else []
+        blockers = [
+            "No generic code-generation model is configured in this local runtime; execution is not claimed.",
+        ] if is_api else [
+            "The task requires a bounded implementation plan before execution can be authorized.",
+        ]
+        next_steps = [
+            "Continue trusted background research and store a reviewable proposal.",
+            "Create a concrete file/dependency plan and verify each acceptance criterion independently.",
+        ]
+        if known:
+            next_steps.append("Reuse discovered local capabilities: " + ", ".join(known[:8]))
+        return ResearchGoalOutput(
+            research_completed=True,
+            goal_class="web-api" if is_api else "complex-unknown",
+            supported_workflows=supported_workflows,
+            missing_capabilities=missing,
+            blockers=blockers,
+            next_steps=next_steps,
+            browser_opened=False,
+            network_used=False,
+        )
+
+    registry.register(
+        ToolSpec(
+            name="system.research-goal",
+            version="1.0.0",
+            description="Research an unfamiliar complex goal from local capabilities without opening a browser.",
+            input_type=ResearchGoalInput,
+            output_type=ResearchGoalOutput,
+            capabilities=frozenset({"system.goal-research"}),
+            side_effect=SideEffect.READ_ONLY,
+            network=NetworkKind.NONE,
+            requires_elevation=False,
+            requires_recovery=False,
+            default_timeout_s=5.0,
+            max_output_bytes=32_768,
+            handler=research_goal,
             target_resolver=lambda request: (request.project_root,),
         )
     )
@@ -176,6 +251,8 @@ def register_system_tools(
 __all__ = [
     "EnsureToolInput",
     "EnsureToolOutput",
+    "ResearchGoalInput",
+    "ResearchGoalOutput",
     "VmPreflightInput",
     "VmPreflightOutput",
     "register_system_tools",

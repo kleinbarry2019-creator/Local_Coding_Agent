@@ -71,6 +71,7 @@ class FailureAnalysis:
     retryable: bool
     evidence: tuple[str, ...] = ()
     missing_capability: str | None = None
+    missing_dependency: str | None = None
     candidate_actions: tuple[str, ...] = ()
 
 
@@ -267,6 +268,18 @@ class Planner:
                     purpose="verify-hypervisor-kvm-iso-and-gpu-passthrough-prerequisites",
                 ),
             )
+        if goal.kind is GoalKind.RESEARCH_TASK:
+            return (
+                PlanStep(
+                    "step-research-goal",
+                    StepKind.TOOL,
+                    "system.research-goal",
+                    {"goal": goal.original, "project_root": str(root)},
+                    root,
+                    False,
+                    purpose="research-an-unfamiliar-complex-goal-without-opening-a-browser",
+                ),
+            )
         raise ValueError("normalized goal kind is unsupported")
 
     def assess(
@@ -334,6 +347,8 @@ class FailureAnalyzer:
         category = self.classify(step, result)
         evidence = _failure_evidence(result)
         missing_capability = _missing_capability(step, result)
+        missing_dependency = _missing_python_module(result)
+        capability_blocked = _capability_install_blocked(result)
         causes = {
             FailureCategory.DEPENDENCY_MISSING: "trusted capability unavailable after provisioning",
             FailureCategory.POLICY_DENIED: "policy evidence did not authorize the requested action",
@@ -346,6 +361,10 @@ class FailureAnalyzer:
             causes[FailureCategory.DEPENDENCY_MISSING] = (
                 f"required executable is unavailable: {missing_capability}"
             )
+        elif missing_dependency is not None:
+            causes[FailureCategory.DEPENDENCY_MISSING] = (
+                f"required Python module is unavailable: {missing_dependency}"
+            )
         actions = {
             FailureCategory.DEPENDENCY_MISSING: ("verify-capability", "retry-step"),
             FailureCategory.POLICY_DENIED: ("inspect-policy-scope", "stop-safely"),
@@ -354,6 +373,11 @@ class FailureAnalyzer:
             FailureCategory.TOOL_FAILED: ("retry-once", "rollback-if-mutating"),
             FailureCategory.LOOP_DETECTED: ("stop-repeated-failure", "preserve-evidence"),
         }
+        candidate_actions = (
+            ("preserve-evidence", "stop-safely")
+            if capability_blocked
+            else actions[category]
+        )
         return FailureAnalysis(
             category=category,
             root_cause=causes[category],
@@ -362,10 +386,12 @@ class FailureAnalyzer:
                 FailureCategory.DEPENDENCY_MISSING,
                 FailureCategory.TIMEOUT,
                 FailureCategory.TOOL_FAILED,
-            },
+            }
+            and not capability_blocked,
             evidence=evidence,
             missing_capability=missing_capability,
-            candidate_actions=actions[category],
+            missing_dependency=missing_dependency,
+            candidate_actions=candidate_actions,
         )
 
     def classify(self, step: PlanStep, result: Mapping[str, object]) -> FailureCategory:
@@ -378,7 +404,13 @@ class FailureAnalyzer:
         if step.kind is StepKind.ENSURE_CAPABILITY:
             return FailureCategory.DEPENDENCY_MISSING
         data = result.get("data")
-        if isinstance(data, Mapping) and _missing_capability(step, result) is not None:
+        if (
+            isinstance(data, Mapping)
+            and (
+                _missing_capability(step, result) is not None
+                or _missing_python_module(result) is not None
+            )
+        ):
             return FailureCategory.DEPENDENCY_MISSING
         if isinstance(data, Mapping) and data.get("exit_code") not in {None, 0}:
             return FailureCategory.COMMAND_FAILED
@@ -525,6 +557,9 @@ class CompletionEvaluator:
                 if passed
                 else "vm-creation-not-performed"
             )
+        elif criterion.kind is CriterionKind.RESEARCHED:
+            passed = any(_research_completed(item) for item in outputs)
+            evidence = "bounded-research-plan-observed" if passed else "research-plan-missing"
         elif criterion.kind is CriterionKind.E2E_VERIFIED:
             passed = _direct_e2e(goal, project_root, outputs, capabilities)
             evidence = "public-boundary-reverified" if passed else "e2e-recheck-failed"
@@ -776,6 +811,21 @@ class AutonomyRuntime:
                                 ),
                             }
                         )
+                if step.tool == "system.research-goal":
+                    research = output.get("data")
+                    if isinstance(research, Mapping) and research.get(
+                        "research_completed"
+                    ) is True:
+                        problem_solving.append(
+                            {
+                                "phase": "research",
+                                "step_id": step.step_id,
+                                "goal_class": research.get("goal_class"),
+                                "browser_opened": research.get("browser_opened"),
+                                "network_used": research.get("network_used"),
+                                "outcome": "bounded-plan-created",
+                            }
+                        )
                 if output.get("success") is True:
                     succeeded = True
                     break
@@ -788,9 +838,21 @@ class AutonomyRuntime:
                         "category": analysis.category.value,
                         "root_cause": analysis.root_cause,
                         "evidence": list(analysis.evidence),
+                        "missing_dependency": analysis.missing_dependency,
                         "candidate_actions": list(analysis.candidate_actions),
                     }
                 )
+                if analysis.missing_dependency is not None:
+                    problem_solving.append(
+                        {
+                            "phase": "research",
+                            "step_id": step.step_id,
+                            "dependency": analysis.missing_dependency,
+                            "source": "local-runtime-diagnostics",
+                            "browser_opened": False,
+                            "outcome": "package-policy-required-before-install",
+                        }
+                    )
                 if (
                     step.kind is StepKind.TOOL
                     and analysis.missing_capability is not None
@@ -827,10 +889,17 @@ class AutonomyRuntime:
                             outcome="capability-provisioned-retry",
                         )
                         continue
-                repair = self.replanner.decide(
-                    analysis,
-                    repeated=loops.repeated(fingerprint),
-                    mutation_started=checkpoint is not None,
+                repair = (
+                    RepairAction.STOP
+                    if (
+                        analysis.missing_dependency is not None
+                        or _capability_install_blocked(output)
+                    )
+                    else self.replanner.decide(
+                        analysis,
+                        repeated=loops.repeated(fingerprint),
+                        mutation_started=checkpoint is not None,
+                    )
                 )
                 problem_solving.append(
                     {
@@ -1089,6 +1158,33 @@ def _missing_capability(
     return candidate
 
 
+def _missing_python_module(result: Mapping[str, object]) -> str | None:
+    data = result.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    text = "\n".join(
+        value for name in ("stderr", "stdout")
+        if isinstance(value := data.get(name), str)
+    )
+    match = re.search(
+        r"No module named ['\"]?([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return None if match is None else match.group(1)
+
+
+def _capability_install_blocked(result: Mapping[str, object]) -> bool:
+    """Return true when trusted research explicitly forbids unattended install."""
+    data = result.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    return data.get("diagnostic") == "untrusted-or-unsupported-tool" or (
+        data.get("research_source") == "host-profile"
+        and data.get("package_manager") == "rpm-ostree"
+    )
+
+
 def _goal_document(goal: NormalizedGoal) -> dict[str, object]:
     return {
         "original": goal.original,
@@ -1234,6 +1330,8 @@ def _direct_e2e(
         return capabilities.discover(_required(goal.target)).available
     if goal.kind is GoalKind.VM_BUILD:
         return any(_vm_created(item) for item in outputs)
+    if goal.kind is GoalKind.RESEARCH_TASK:
+        return False
     return False
 
 
@@ -1255,6 +1353,11 @@ def _vm_created(output: Mapping[str, object]) -> bool:
         and data.get("created") is True
         and data.get("verified") is True
     )
+
+
+def _research_completed(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return isinstance(data, Mapping) and data.get("research_completed") is True
 
 
 __all__ = [

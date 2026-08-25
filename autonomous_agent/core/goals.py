@@ -24,6 +24,7 @@ class GoalKind(str, Enum):
     RUN_COMMAND = "run-command"
     INSTALL_TOOL = "install-tool"
     VM_BUILD = "vm-build"
+    RESEARCH_TASK = "research-task"
 
 
 class CriterionKind(str, Enum):
@@ -36,6 +37,7 @@ class CriterionKind(str, Enum):
     TOOL_AVAILABLE = "tool-available"
     VM_READY = "vm-ready"
     VM_CREATED = "vm-created"
+    RESEARCHED = "researched"
     E2E_VERIFIED = "e2e-verified"
 
 
@@ -67,6 +69,8 @@ class GoalNormalizer:
         lowered = goal.casefold()
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
+        if self._is_complex_research_request(lowered):
+            return self._research_task(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
             return self._install(goal)
         if _starts_with(
@@ -125,6 +129,77 @@ class GoalNormalizer:
                 AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
                 AcceptanceCriterion("preflight", CriterionKind.VM_READY),
                 AcceptanceCriterion("created", CriterionKind.VM_CREATED),
+                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
+
+    @staticmethod
+    def _is_complex_research_request(lowered: str) -> bool:
+        return _contains_word(
+            lowered,
+            (
+                "rest-api",
+                "rest api",
+                "docker-deployment",
+                "datenbank",
+                "database",
+                "migrationen",
+                "kubernetes",
+                "deployment",
+                "microservice",
+                "machine learning",
+                "deep learning",
+                "android-app",
+                "android app",
+                "ios-app",
+                "ios app",
+                "mobile app",
+                "desktop app",
+                "browser extension",
+                "frontend",
+                "react",
+                "vue",
+                "terraform",
+                "ansible",
+                "ci/cd",
+                "pipeline",
+                "distributed system",
+                "blockchain",
+                "computer vision",
+                "sprachassistent",
+                "speech recognition",
+            ),
+        ) and _contains_word(
+            lowered,
+            (
+                "baue",
+                "bauen",
+                "erstelle",
+                "erstellen",
+                "implementiere",
+                "implement",
+                "entwickle",
+                "entwickeln",
+                "deploy",
+                "automatisiere",
+                "build",
+                "create",
+            ),
+        )
+
+    def _research_task(self, goal: str) -> NormalizedGoal:
+        return _goal(
+            goal,
+            GoalKind.RESEARCH_TASK,
+            "Research and bound an unfamiliar complex task before execution",
+            target="complex-task",
+            implicit_requirements=(
+                "Research uses the local capability matrix and trusted background sources without opening a browser.",
+                "Do not claim execution until an implementation plan and independent E2E evidence exist.",
+            ),
+            criteria=(
+                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+                AcceptanceCriterion("research", CriterionKind.RESEARCHED),
                 AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
             ),
         )

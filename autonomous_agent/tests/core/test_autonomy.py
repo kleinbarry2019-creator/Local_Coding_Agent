@@ -123,6 +123,45 @@ def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
     ]
 
 
+def test_missing_python_module_is_classified_without_unbounded_install_retry(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Run python3 -c 'import module_that_is_not_installed_for_acb_stress'"
+    )
+
+    assert result.status == "failed"
+    diagnosis = next(
+        item for item in result.problem_solving if item.get("phase") == "diagnosis"
+    )
+    assert diagnosis["category"] == "dependency-missing"
+    assert diagnosis["missing_dependency"] == "module_that_is_not_installed_for_acb_stress"
+    assert any(
+        item.get("phase") == "research"
+        and item.get("dependency") == "module_that_is_not_installed_for_acb_stress"
+        and item.get("browser_opened") is False
+        for item in result.problem_solving
+    )
+
+
+def test_unfamiliar_complex_goal_gets_browserless_bounded_research(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Implementiere eine Android-App mit Offline-Synchronisierung"
+    )
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert any(
+        item.get("phase") == "research"
+        and item.get("browser_opened") is False
+        and item.get("network_used") is False
+        for item in result.problem_solving
+    )
+    assert len(result.outputs) == 1
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)

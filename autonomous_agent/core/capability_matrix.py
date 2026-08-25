@@ -72,6 +72,11 @@ def capability_matrix() -> dict[str, object]:
             ("Immutable Hosts, fehlende Medien, Reboots und Lizenzbedingungen bleiben explizite externe Grenzen.",),
         ),
         CapabilityEntry(
+            "learning.goal-research", "learning", "available",
+            "Erforscht unbekannte komplexe Aufgaben browserlos aus dem lokalen Capability-Bestand und erzeugt einen bounded plan.",
+            ("Ohne passende Implementierungs- und E2E-Fähigkeit wird keine Fertigstellung behauptet.",),
+        ),
+        CapabilityEntry(
             "recovery.crash-resume", "recovery", "available",
             "Setzt pending-, running- und recovering-Aufträge nach Neustarts fort.",
             ("Persistenter lokaler State erforderlich.",),
