@@ -551,6 +551,12 @@ class LearningService:
             if isinstance(item, Mapping) and item.get("passed") is False
         )
         now = _timestamp()
+        context = self.knowledge_context(goal, limit=5)
+        source_ids = tuple(
+            str(item["item_id"])
+            for item in context
+            if isinstance(item.get("item_id"), str)
+        )
         if completed:
             title = f"Nachprüfung: {goal[:96]}"
             description = (
@@ -574,7 +580,7 @@ class LearningService:
                 kind="task-review",
                 title=title,
                 description=description,
-                source_ids=(),
+                source_ids=source_ids,
                 status="candidate",
                 priority=priority,
                 auto_apply=False,
@@ -582,6 +588,42 @@ class LearningService:
                 created_at=now,
                 updated_at=now,
             )
+        )
+
+    def knowledge_context(
+        self, goal: str, *, limit: int = 5
+    ) -> tuple[dict[str, object], ...]:
+        """Return bounded, relevance-ranked local knowledge for a goal.
+
+        This is deliberately lexical and explainable.  Remote content is only
+        treated as reference metadata; it is never interpreted as executable
+        instructions or injected into a shell command.
+        """
+        if type(goal) is not str or not goal.strip() or len(goal) > 4_000:
+            raise ValueError("learning goal is invalid")
+        if type(limit) is not int or limit < 0:
+            raise ValueError("learning limit is invalid")
+        wanted = _learning_tokens(goal)
+        ranked: list[tuple[float, KnowledgeItem]] = []
+        for item in self.store.knowledge(MAX_KNOWLEDGE_ITEMS):
+            haystack = _learning_tokens(
+                f"{item.title} {item.summary} {item.topic} {item.source}"
+            )
+            overlap = wanted & haystack
+            if not overlap:
+                continue
+            score = len(overlap) / max(1, len(wanted))
+            if item.trust == "allow-listed-feed":
+                score += 0.1
+            ranked.append((score, item))
+        ranked.sort(key=lambda value: (-value[0], value[1].discovered_at))
+        bounded = ranked[: min(limit, 20)]
+        return tuple(
+            {
+                **item.to_dict(),
+                "relevance": round(score, 4),
+            }
+            for score, item in bounded
         )
 
     def record_feedback(self, session_id: str, rating: int, comment: str = "") -> None:
@@ -962,6 +1004,14 @@ def _timestamp() -> str:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _learning_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]{3,}", value.casefold())
+        if token not in {"the", "and", "oder", "und", "für", "mit", "von"}
+    }
 
 
 def asdict_account(account: UserAccount) -> dict[str, object]:

@@ -152,6 +152,10 @@ erfüllten Akzeptanzkriterien als hoch priorisierte Lernvorschläge erfasst.
 Eine Nutzerbewertung erzeugt zusätzlich einen nachvollziehbaren Vorschlag zur
 Verbesserung; alle diese Vorschläge bleiben zunächst nur Kandidaten und
 benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
+Gespeichertes Wissen wird für neue Ziele lokal und erklärbar nach Relevanz
+sortiert und kann über die authentifizierte Schnittstelle
+`/api/learning/context` als Referenzkontext abgerufen werden. Die Inhalte
+werden dabei nie als Befehle interpretiert.
 Lokale Konten werden mit scrypt-Passwort-Hashes gespeichert. Die Geräte- und
 Kontostruktur für eine spätere system- und netzwerkübergreifende Synchronisation
 ist vorbereitet; Passwörter und Geheimnisse werden niemals in ein Sync-Mani-

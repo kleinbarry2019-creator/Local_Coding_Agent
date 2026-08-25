@@ -200,3 +200,21 @@ def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:
     assert verified.status == "verified"
     assert verified.gate_status == "passed"
     assert len(verified.verification_evidence) == 4
+
+
+def test_knowledge_context_is_relevance_ranked_and_explainable(tmp_path: Path) -> None:
+    payload = b"""<rss><channel>
+      <item><title>AI security evaluation</title>
+      <link>https://arxiv.org/abs/1234.1000</link>
+      <description>security testing for autonomous agents</description></item>
+      <item><title>Unrelated chemistry</title>
+      <link>https://arxiv.org/abs/1234.1001</link>
+      <description>molecular measurements</description></item>
+    </channel></rss>"""
+    service = _service(tmp_path, fetcher=lambda _source: payload)
+    service.research_now()
+    context = service.knowledge_context("Verbessere AI security testing", limit=3)
+    assert context
+    assert context[0]["title"] == "AI security evaluation"
+    assert isinstance(context[0]["relevance"], float)
+    assert service.knowledge_context("quantum networking") == ()

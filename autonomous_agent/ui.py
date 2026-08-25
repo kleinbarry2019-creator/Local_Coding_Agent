@@ -401,6 +401,9 @@ class RuntimeTaskController:
     def knowledge(self, limit: int = 50) -> tuple[KnowledgeItem, ...]:
         return self.learning.store.knowledge(limit)
 
+    def learning_context(self, goal: str, *, limit: int = 5) -> tuple[dict[str, object], ...]:
+        return self.learning.knowledge_context(goal, limit=limit)
+
     def suggestions(self, limit: int = 50) -> tuple[ImprovementSuggestion, ...]:
         return self.learning.store.suggestions(limit)
 
@@ -546,6 +549,9 @@ class AcbUiServer:
 
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
+
+    def learning_context(self, goal: str, *, limit: int = 5) -> list[dict[str, object]]:
+        return list(self._controller.learning_context(goal, limit=limit))
 
     def record_learning_gate(
         self,
@@ -836,6 +842,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/voice/wake",
             "/api/account",
             "/api/learning/gate",
+            "/api/learning/context",
             "/api/audit/export",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
@@ -922,6 +929,19 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "gate result is invalid")
                 return
             self._send_json(HTTPStatus.OK, result)
+            return
+        if path == "/api/learning/context":
+            goal = payload.get("goal")
+            limit = payload.get("limit", 5)
+            if type(goal) is not str or type(limit) is not int:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "learning context is invalid")
+                return
+            try:
+                context = self._app().learning_context(goal, limit=limit)
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "learning context is invalid")
+                return
+            self._send_json(HTTPStatus.OK, {"context": context})
             return
         if path == "/api/audit/export":
             session_id = payload.get("session_id")

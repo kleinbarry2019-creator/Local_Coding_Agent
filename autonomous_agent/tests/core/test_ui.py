@@ -561,3 +561,25 @@ def test_ui_http_account_recovery_never_returns_credentials(tmp_path: Path) -> N
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_ui_learning_context_endpoint_is_bounded(tmp_path: Path) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0)
+    thread = _start(server)
+    try:
+        status, result = _post_json(
+            f"{server.url}api/learning/context",
+            {"goal": "Verbessere die lokale Sicherheit", "limit": 3},
+            token=server.token,
+        )
+        assert status == 200
+        assert result["context"] == []
+        status, _ = _post_json(
+            f"{server.url}api/learning/context",
+            {"goal": "x", "limit": -1},
+            token=server.token,
+        )
+        assert status == 400
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
