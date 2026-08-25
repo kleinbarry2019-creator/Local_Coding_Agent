@@ -8,7 +8,7 @@ import re
 import secrets
 import threading
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from http import HTTPStatus
@@ -410,6 +410,19 @@ class RuntimeTaskController:
     def research_now(self) -> dict[str, object]:
         return self.learning.research_now()
 
+    def record_learning_gate(
+        self,
+        update_id: str,
+        *,
+        gate_status: str,
+        evidence: Sequence[str],
+    ) -> dict[str, object]:
+        return self.learning.record_gate_result(
+            update_id,
+            gate_status=gate_status,
+            evidence=evidence,
+        ).to_dict()
+
     def create_account(
         self,
         username: str,
@@ -533,6 +546,19 @@ class AcbUiServer:
 
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
+
+    def record_learning_gate(
+        self,
+        update_id: str,
+        *,
+        gate_status: str,
+        evidence: Sequence[str],
+    ) -> dict[str, object]:
+        return self._controller.record_learning_gate(
+            update_id,
+            gate_status=gate_status,
+            evidence=evidence,
+        )
 
     def authenticate(self, username: str, password: str) -> dict[str, object] | None:
         account = self._controller.authenticate(username, password)
@@ -809,6 +835,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/voice/speak",
             "/api/voice/wake",
             "/api/account",
+            "/api/learning/gate",
             "/api/audit/export",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
@@ -872,6 +899,29 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "account request is invalid")
                 return
             self._send_json(HTTPStatus.OK, result or {})
+            return
+        if path == "/api/learning/gate":
+            update_id = payload.get("update_id")
+            gate_status = payload.get("gate_status")
+            evidence = payload.get("evidence", [])
+            if (
+                not isinstance(update_id, str)
+                or not isinstance(gate_status, str)
+                or not isinstance(evidence, list)
+                or any(not isinstance(item, str) for item in evidence)
+            ):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "gate result is invalid")
+                return
+            try:
+                result = self._app().record_learning_gate(
+                    update_id,
+                    gate_status=gate_status,
+                    evidence=cast(list[str], evidence),
+                )
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "gate result is invalid")
+                return
+            self._send_json(HTTPStatus.OK, result)
             return
         if path == "/api/audit/export":
             session_id = payload.get("session_id")

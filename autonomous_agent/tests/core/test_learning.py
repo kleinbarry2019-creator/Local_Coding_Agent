@@ -169,3 +169,34 @@ def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:
     assert suggestion.priority == "high"
     assert "zu knapp" in suggestion.description
     assert suggestion.release_gate_required is True
+
+
+def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:
+    payload = b"""<rss><channel><item>
+      <title>Evidence source</title>
+      <link>https://arxiv.org/abs/1234.9999</link>
+    </item></channel></rss>"""
+    service = _service(tmp_path, fetcher=lambda _source: payload)
+    service.research_now()
+    update = service.store.self_updates()[0]
+
+    with pytest.raises(ValueError, match="evidence"):
+        service.record_gate_result(
+            update.update_id,
+            gate_status="passed",
+            evidence=["tests:passed"],
+        )
+
+    verified = service.record_gate_result(
+        update.update_id,
+        gate_status="passed",
+        evidence=[
+            "tests:passed",
+            "security:passed",
+            "release:passed",
+            "rollback:passed",
+        ],
+    )
+    assert verified.status == "verified"
+    assert verified.gate_status == "passed"
+    assert len(verified.verification_evidence) == 4

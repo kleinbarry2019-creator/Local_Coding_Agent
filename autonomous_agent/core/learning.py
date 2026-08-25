@@ -37,6 +37,8 @@ MAX_ITEMS_PER_FEED = 20
 MAX_KNOWLEDGE_ITEMS = 300
 MAX_SUGGESTIONS = 200
 MAX_SELF_UPDATES = 100
+MAX_GATE_EVIDENCE = 12
+MAX_GATE_EVIDENCE_TEXT = 240
 RESEARCH_INTERVAL_S = 6 * 60 * 60
 _USERNAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{2,31}$")
 _ALLOWED_HOSTS = frozenset(
@@ -140,6 +142,7 @@ class SelfUpdateProposal:
     gate_status: str
     created_at: str
     updated_at: str
+    verification_evidence: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -149,6 +152,7 @@ class SelfUpdateProposal:
             "source_ids": list(self.source_ids),
             "status": self.status,
             "gate_status": self.gate_status,
+            "verification_evidence": list(self.verification_evidence),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -271,6 +275,43 @@ class LearningStore:
                 "self_updates.json", [update.to_dict(), *raw][:MAX_SELF_UPDATES]
             )
             return True
+
+    def record_self_update_gate(
+        self,
+        update_id: str,
+        *,
+        gate_status: str,
+        evidence: Sequence[str],
+    ) -> SelfUpdateProposal:
+        """Persist bounded verification evidence for a self-update proposal."""
+        if gate_status not in {"passed", "failed"}:
+            raise ValueError("gate status is invalid")
+        if type(update_id) is not str or not update_id:
+            raise ValueError("update id is invalid")
+        normalized = tuple(
+            item.strip()[:MAX_GATE_EVIDENCE_TEXT]
+            for item in evidence
+            if isinstance(item, str) and item.strip()
+        )[:MAX_GATE_EVIDENCE]
+        if gate_status == "passed" and not _gate_evidence_complete(normalized):
+            raise ValueError("successful gate evidence is incomplete")
+        with self._lock:
+            raw = self._read_list("self_updates.json")
+            for index, value in enumerate(raw):
+                if not isinstance(value, dict) or value.get("update_id") != update_id:
+                    continue
+                current = _update_from_dict(value)
+                updated = replace(
+                    current,
+                    status="verified" if gate_status == "passed" else "candidate",
+                    gate_status=gate_status,
+                    verification_evidence=normalized,
+                    updated_at=_timestamp(),
+                )
+                raw[index] = updated.to_dict()
+                self._write_list("self_updates.json", raw)
+                return updated
+        raise ValueError("self-update does not exist")
 
     def add_account(self, account: UserAccount) -> None:
         with self._lock:
@@ -574,6 +615,20 @@ class LearningService:
                 created_at=now,
                 updated_at=now,
             )
+        )
+
+    def record_gate_result(
+        self,
+        update_id: str,
+        *,
+        gate_status: str,
+        evidence: Sequence[str],
+    ) -> SelfUpdateProposal:
+        """Record release evidence before a self-update can be verified."""
+        return self.store.record_self_update_gate(
+            update_id,
+            gate_status=gate_status,
+            evidence=evidence,
         )
 
     def _create_proposals(self, item: KnowledgeItem) -> None:
@@ -949,10 +1004,29 @@ def _suggestion_from_dict(value: dict[str, object]) -> ImprovementSuggestion:
 def _update_from_dict(value: dict[str, object]) -> SelfUpdateProposal:
     raw_sources = value.get("source_ids", [])
     sources = raw_sources if isinstance(raw_sources, (list, tuple)) else []
+    raw_evidence = value.get("verification_evidence", [])
+    evidence = raw_evidence if isinstance(raw_evidence, (list, tuple)) else []
     return SelfUpdateProposal(
         update_id=str(value["update_id"]), title=str(value["title"]), reason=str(value["reason"]),
         source_ids=tuple(str(item) for item in sources if isinstance(item, str)), status=str(value["status"]),
         gate_status=str(value["gate_status"]), created_at=str(value["created_at"]), updated_at=str(value["updated_at"]),
+        verification_evidence=tuple(
+            str(item)[:MAX_GATE_EVIDENCE_TEXT]
+            for item in evidence
+            if isinstance(item, str) and item.strip()
+        )[:MAX_GATE_EVIDENCE],
+    )
+
+
+def _gate_evidence_complete(evidence: Sequence[str]) -> bool:
+    required = ("tests", "security", "release", "rollback")
+    return all(
+        any(
+            item.casefold().startswith(f"{name}:")
+            and item.casefold().endswith(":passed")
+            for item in evidence
+        )
+        for name in required
     )
 
 
