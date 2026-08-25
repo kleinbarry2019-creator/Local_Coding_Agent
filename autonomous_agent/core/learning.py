@@ -649,7 +649,6 @@ class LearningService:
                 updated_at=now,
             )
         )
-
     def _detect_recurring_failure(self, failed_criteria: Sequence[str]) -> None:
         """Create one bounded root-cause lead for repeated failed criteria."""
         experiences = self.store.experiences(MAX_EXPERIENCES)
@@ -780,6 +779,39 @@ class LearningService:
                 updated_at=now,
             )
         )
+        metadata = self.store.metadata()
+        low_feedback_count = metadata.get("low_feedback_count", 0)
+        if type(low_feedback_count) is not int or low_feedback_count < 0:
+            low_feedback_count = 0
+        if rating <= 5:
+            low_feedback_count += 1
+        self.store.update_metadata(
+            {
+                "low_feedback_count": low_feedback_count,
+                "last_feedback_rating": rating,
+            }
+        )
+        if low_feedback_count >= 2:
+            self.store.add_suggestion(
+                ImprovementSuggestion(
+                    suggestion_id=f"suggestion-{uuid.uuid4().hex}",
+                    kind="recurring-feedback",
+                    title="Wiederkehrendes negatives Nutzerfeedback",
+                    description=(
+                        f"Mindestens {low_feedback_count} niedrige Bewertungen "
+                        "wurden erfasst. Vergleiche die betroffenen Aufgaben, "
+                        "identifiziere ein gemeinsames Verständlichkeits- oder "
+                        "Qualitätsproblem und ergänze einen Regressionstest."
+                    ),
+                    source_ids=(),
+                    status="candidate",
+                    priority="high",
+                    auto_apply=False,
+                    release_gate_required=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
     def record_gate_result(
         self,

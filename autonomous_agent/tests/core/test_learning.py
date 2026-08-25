@@ -196,6 +196,20 @@ def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:
     assert suggestion.release_gate_required is True
 
 
+def test_repeated_low_feedback_creates_anonymized_pattern_signal(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.record_feedback("session-one", 3, "erste Kritik")
+    service.record_feedback("session-two", 4, "zweite Kritik")
+    recurring = [
+        item
+        for item in service.store.suggestions()
+        if item.kind == "recurring-feedback"
+    ]
+    assert len(recurring) == 1
+    assert recurring[0].priority == "high"
+    assert service.store.metadata()["low_feedback_count"] == 2
+
+
 def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:
     payload = b"""<rss><channel><item>
       <title>Evidence source</title>

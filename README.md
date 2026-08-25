@@ -154,6 +154,8 @@ Root-Cause-/Regressionstest-Vorschlag verdichtet.
 Eine Nutzerbewertung erzeugt zusätzlich einen nachvollziehbaren Vorschlag zur
 Verbesserung; alle diese Vorschläge bleiben zunächst nur Kandidaten und
 benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
+Wiederholte niedrige Bewertungen werden nur als anonyme Zählung erkannt und in
+einen eigenen Qualitäts-/Regressionstest-Vorschlag überführt.
 Gespeichertes Wissen wird für neue Ziele lokal und erklärbar nach Relevanz
 sortiert und kann über die authentifizierte Schnittstelle
 `/api/learning/context` als Referenzkontext abgerufen werden. Die Inhalte
