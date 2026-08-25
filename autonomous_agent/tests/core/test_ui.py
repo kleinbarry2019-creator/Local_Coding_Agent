@@ -265,6 +265,27 @@ def test_controller_honors_network_research_preference(tmp_path: Path) -> None:
         controller.close()
 
 
+def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(_config(tmp_path))
+    try:
+        controller.update_preferences(
+            {
+                "nickname": "Privat",
+                "interests": "intern",
+                "store_personalization": False,
+                "store_task_history": False,
+            }
+        )
+        context = controller.response_context()
+        assert context.nickname == ""
+        assert context.audience_age is None
+        assert controller.persisted_sessions() == []
+        assert controller.persisted_session("session-0123456789abcdef0123456789abcdef") is None
+        assert controller.recover_pending() == ()
+    finally:
+        controller.close()
+
+
 def test_ui_http_boundary_requires_token_and_serves_security_headers(
     tmp_path: Path,
 ) -> None:

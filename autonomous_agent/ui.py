@@ -10,7 +10,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Protocol, cast
@@ -175,7 +175,18 @@ class RuntimeTaskController:
         return self.onboarding.complete()
 
     def response_context(self) -> ResponseContext:
-        return build_response_context(self.preferences())
+        preferences = self.preferences()
+        if not preferences.store_personalization:
+            preferences = replace(
+                preferences,
+                nickname="",
+                pronouns="",
+                interests="",
+                age=None,
+                occupation="",
+                gender_identity="",
+            )
+        return build_response_context(preferences)
 
     def assistive_hints(self) -> AssistiveHints:
         return detect_assistive_hints()
@@ -234,6 +245,8 @@ class RuntimeTaskController:
 
     def recover_pending(self) -> tuple[UiTask, ...]:
         """Resume tasks interrupted while pending, running, or recovering."""
+        if not self.preferences().store_task_history:
+            return ()
         records = self.runtime.tasks.list_tasks(
             statuses=frozenset({"pending", "running", "recovering"}),
             limit=MAX_TASK_RECORDS,
@@ -293,12 +306,16 @@ class RuntimeTaskController:
         task.estimated_remaining_seconds = min(task.remaining_steps * 5, 300)
 
     def persisted_session(self, session_id: str) -> dict[str, object] | None:
+        if not self.preferences().store_task_history:
+            return None
         record = self.runtime.tasks.load_task(session_id)
         if record is None:
             return None
         return _session_document(record)
 
     def persisted_sessions(self, limit: int = 50) -> list[dict[str, object]]:
+        if not self.preferences().store_task_history:
+            return []
         records = self.runtime.tasks.list_tasks(
             limit=max(1, min(limit, MAX_TASK_RECORDS))
         )
