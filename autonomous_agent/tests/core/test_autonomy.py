@@ -11,6 +11,7 @@ from autonomous_agent.core.autonomy import (
     FailureAnalysis,
     FailureAnalyzer,
     FailureCategory,
+    Planner,
     PlanStep,
     RepairAction,
     Replanner,
@@ -63,6 +64,9 @@ def test_runtime_completes_only_after_independent_file_readback(tmp_path: Path) 
     assert persisted.status == "completed"
     assert persisted.completion is not None
     assert persisted.completion["completed"] is True
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["valid"] is True
+    assert result.plan_assessment["ordered_step_ids"] == ["step-write"]
     assert runtime.audit.verify().ok
 
 
@@ -128,7 +132,10 @@ def test_exit_zero_is_required_but_not_sufficient_without_e2e(tmp_path: Path) ->
     assert not result.completion.e2e_verified
     assert any(output.get("success") is False for output in result.outputs)
     assert result.problem_solving
-    assert result.problem_solving[0]["category"] == "command-failed"
+    assert any(
+        event.get("category") == "command-failed"
+        for event in result.problem_solving
+    )
 
 
 def test_completion_uses_latest_verified_observation_after_a_replan(tmp_path: Path) -> None:
@@ -178,6 +185,22 @@ def test_failure_analyzer_extracts_missing_command_and_recovery_options() -> Non
     assert analysis.category is FailureCategory.DEPENDENCY_MISSING
     assert analysis.missing_capability == "missing-tool"
     assert "verify-capability" in analysis.candidate_actions
+
+
+def test_planner_rejects_dependency_cycles_before_execution(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    plan = (
+        PlanStep(
+            "a", StepKind.TOOL, "project.list-files", {}, project, False, ("b",)
+        ),
+        PlanStep(
+            "b", StepKind.TOOL, "project.list-files", {}, project, False, ("a",)
+        ),
+    )
+    assessment = Planner().assess(plan, project)
+    assert assessment.valid is False
+    assert any(item.startswith("dependency-cycle:") for item in assessment.issues)
 
 
 def test_real_sandbox_command_is_e2e_verified(tmp_path: Path) -> None:

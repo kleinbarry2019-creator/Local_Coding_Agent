@@ -90,6 +90,12 @@ Mutating steps are rolled back through checkpoints before retries. The final
 evaluator uses the last verified observation of a repaired step, while failed
 intermediate attempts remain available for diagnosis.
 
+Vor jedem Auftrag prüft ein Plan-Preflight außerdem die Abhängigkeiten als
+Graph, erkennt doppelte Schritte, unbekannte Abhängigkeiten, Zyklen,
+Symlink-Ziele und Ziele außerhalb des Projektbereichs. Risiko, Reihenfolge und
+eventuelle Blocker werden im Feld `plan_assessment` mit dem Auftrag gespeichert;
+ein ungültiger Plan wird vor dem ersten Tool-Aufruf sicher beendet.
+
 ## Grafische Oberfläche
 
 ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und

@@ -82,6 +82,8 @@ class PlanStep:
     arguments: Mapping[str, object]
     target: Path
     mutates: bool
+    depends_on: tuple[str, ...] = ()
+    purpose: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,7 @@ class RuntimeResult:
     completion: CompletionReport
     outputs: tuple[Mapping[str, object], ...]
     problem_solving: tuple[Mapping[str, object], ...] = ()
+    plan_assessment: Mapping[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -126,6 +129,27 @@ class RuntimeResult:
             "completion": self.completion.to_dict(),
             "outputs": [dict(item) for item in self.outputs],
             "problem_solving": [dict(item) for item in self.problem_solving],
+            "plan_assessment": (
+                None if self.plan_assessment is None else dict(self.plan_assessment)
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class PlanAssessment:
+    """Bounded preflight result for a plan dependency graph."""
+
+    valid: bool
+    issues: tuple[str, ...]
+    ordered_step_ids: tuple[str, ...]
+    risk: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "valid": self.valid,
+            "issues": list(self.issues),
+            "ordered_step_ids": list(self.ordered_step_ids),
+            "risk": self.risk,
         }
 
 
@@ -144,6 +168,7 @@ class Planner:
                     {"path": str(target), "content": goal.content or ""},
                     target,
                     True,
+                    purpose="create-or-replace-the-requested-file",
                 ),
             )
         if goal.kind is GoalKind.READ_FILE:
@@ -156,6 +181,7 @@ class Planner:
                     {"path": str(target)},
                     target,
                     False,
+                    purpose="read-the-requested-file",
                 ),
             )
         if goal.kind is GoalKind.LIST_FILES:
@@ -168,6 +194,7 @@ class Planner:
                     {"path": str(target)},
                     target,
                     False,
+                    purpose="enumerate-the-requested-directory",
                 ),
             )
         if goal.kind is GoalKind.RUN_COMMAND:
@@ -180,6 +207,7 @@ class Planner:
                     {"name": executable},
                     root,
                     False,
+                    purpose="verify-the-command-capability",
                 ),
                 PlanStep(
                     "step-process",
@@ -188,6 +216,8 @@ class Planner:
                     {"argv": list(goal.argv), "cwd": str(root)},
                     root,
                     True,
+                    depends_on=("step-capability",),
+                    purpose="execute-the-requested-command",
                 ),
             )
         if goal.kind is GoalKind.INSTALL_TOOL:
@@ -200,9 +230,69 @@ class Planner:
                     {"name": tool},
                     root,
                     True,
+                    purpose="provision-and-verify-the-requested-tool",
                 ),
             )
         raise ValueError("normalized goal kind is unsupported")
+
+    def assess(
+        self, plan: tuple[PlanStep, ...], project_root: Path
+    ) -> PlanAssessment:
+        """Validate dependencies, targets, and ordering before execution."""
+        root = project_root.resolve(strict=True)
+        issues: list[str] = []
+        by_id: dict[str, PlanStep] = {}
+        for step in plan:
+            if not step.step_id or step.step_id in by_id:
+                issues.append(f"duplicate-step-id:{step.step_id[:80]}")
+                continue
+            by_id[step.step_id] = step
+            target = step.target.resolve(strict=False)
+            if not target.is_relative_to(root):
+                issues.append(f"target-outside-project:{step.step_id[:80]}")
+            if step.target.exists() and step.target.is_symlink():
+                issues.append(f"symlink-target:{step.step_id[:80]}")
+            if step.kind is StepKind.ENSURE_CAPABILITY and not step.tool:
+                issues.append(f"missing-capability-name:{step.step_id[:80]}")
+            for dependency in step.depends_on:
+                if dependency not in by_id and dependency not in {
+                    prior.step_id for prior in plan
+                }:
+                    issues.append(
+                        f"unknown-dependency:{step.step_id[:48]}->{dependency[:48]}"
+                    )
+
+        order: list[str] = []
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(step_id: str) -> None:
+            if step_id in visited:
+                return
+            if step_id in visiting:
+                issues.append(f"dependency-cycle:{step_id[:80]}")
+                return
+            visiting.add(step_id)
+            step = by_id.get(step_id)
+            if step is not None:
+                for dependency in step.depends_on:
+                    if dependency in by_id:
+                        visit(dependency)
+                order.append(step_id)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step in plan:
+            visit(step.step_id)
+        risk = "high" if any(step.mutates for step in plan) else "low"
+        if any(step.kind is StepKind.ENSURE_CAPABILITY for step in plan):
+            risk = "high" if risk == "high" else "medium"
+        return PlanAssessment(
+            valid=not issues,
+            issues=tuple(dict.fromkeys(issues))[:20],
+            ordered_step_ids=tuple(order),
+            risk=risk,
+        )
 
 
 class FailureAnalyzer:
@@ -541,7 +631,40 @@ class AutonomyRuntime:
         outputs: list[Mapping[str, object]] = list(initial_outputs)
         loops = LoopDetector()
         attempts = initial_attempts
-        problem_solving: list[Mapping[str, object]] = []
+        assessment = self.planner.assess(plan, self.config.paths.project_root)
+        problem_solving: list[Mapping[str, object]] = [
+            {
+                "phase": "planning",
+                "strategy": "preflight-dependency-graph",
+                "valid": assessment.valid,
+                "risk": assessment.risk,
+                "ordered_step_ids": list(assessment.ordered_step_ids),
+                "issues": list(assessment.issues),
+            }
+        ]
+        if not assessment.valid:
+            report = self.completion.evaluate(
+                goal,
+                self.config.paths.project_root,
+                tuple(outputs),
+                self.capabilities,
+            )
+            self.tasks.transition(
+                session_id,
+                status="failed",
+                current_step=start_step,
+                attempts=attempts,
+                completion=report.to_dict(),
+                outcome="plan-preflight-failed",
+            )
+            return RuntimeResult(
+                session_id,
+                "failed",
+                report,
+                tuple(outputs),
+                tuple(problem_solving),
+                assessment.to_dict(),
+            )
         for index in range(start_step, len(plan)):
             step = plan[index]
             checkpoint = (
@@ -669,6 +792,7 @@ class AutonomyRuntime:
                     report,
                     tuple(outputs),
                     tuple(problem_solving),
+                    assessment.to_dict(),
                 )
             self.tasks.transition(
                 session_id,
@@ -698,6 +822,7 @@ class AutonomyRuntime:
             report,
             tuple(outputs),
             tuple(problem_solving),
+            assessment.to_dict(),
         )
 
     def _execute_step(self, session_id: str, step: PlanStep) -> Mapping[str, object]:
@@ -903,6 +1028,8 @@ def _step_document(step: PlanStep) -> dict[str, object]:
         "arguments": dict(step.arguments),
         "target": str(step.target),
         "mutates": step.mutates,
+        "depends_on": list(step.depends_on),
+        "purpose": step.purpose,
     }
 
 
@@ -946,6 +1073,9 @@ def _plan_from_documents(
         arguments = document.get("arguments")
         if not isinstance(arguments, Mapping):
             raise TypeError("persisted plan arguments are invalid")
+        raw_dependencies = document.get("depends_on", [])
+        if not isinstance(raw_dependencies, list):
+            raise TypeError("persisted plan dependencies are invalid")
         steps.append(
             PlanStep(
                 step_id=str(document["step_id"]),
@@ -954,6 +1084,8 @@ def _plan_from_documents(
                 arguments=dict(arguments),
                 target=Path(str(document["target"])),
                 mutates=bool(document["mutates"]),
+                depends_on=tuple(str(item) for item in raw_dependencies),
+                purpose=str(document.get("purpose", "")),
             )
         )
     return tuple(steps)
@@ -1024,6 +1156,7 @@ __all__ = [
     "FailureAnalyzer",
     "FailureCategory",
     "LoopDetector",
+    "PlanAssessment",
     "PlanStep",
     "Planner",
     "RepairAction",
