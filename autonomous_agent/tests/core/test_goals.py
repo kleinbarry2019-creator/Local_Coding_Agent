@@ -300,6 +300,47 @@ def test_vm_setup_with_hypervisor_install_request_is_vm_goal() -> None:
     assert goal.target == "windows-vm"
 
 
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Research zero-trust network hardening and autonomously apply all verified changes",
+        "Research zero-trust network hardening and autonomously implement all verified changes",
+    ],
+)
+def test_research_plus_apply_is_not_research_only(goal_text: str) -> None:
+    goal = GoalNormalizer().normalize(goal_text)
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_install_and_deploy_is_not_parsed_as_one_tool_name() -> None:
+    goal = GoalNormalizer().normalize(
+        "Installiere Docker und deploye anschließend einen sicheren Kubernetes-Cluster"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_placeholder_shell_script_is_not_executed_as_a_command() -> None:
+    goal = GoalNormalizer().normalize(
+        "Could you execute a shell script and verify its output"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_qemu_passthrough_request_is_not_parsed_as_prose_arguments() -> None:
+    goal = GoalNormalizer().normalize(
+        "Run qemu-system-x86_64 with hardware passthrough and verify the VM boots"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
 def test_mixed_repository_analysis_and_report_is_not_silently_only_a_write() -> None:
     goal = GoalNormalizer().normalize(
         "Analyze the repository and write a language report to languages.md"

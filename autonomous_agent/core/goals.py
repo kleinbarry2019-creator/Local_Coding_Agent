@@ -84,6 +84,8 @@ class GoalNormalizer:
         if self._is_mixed_read_write_request(lowered):
             return self._research_task(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
+            if self._is_install_compound_request(lowered):
+                return self._research_task(goal)
             return self._install(goal)
         if _starts_with(
             lowered,
@@ -146,7 +148,12 @@ class GoalNormalizer:
         ):
             return self._analyze(goal)
         if self._is_natural_run_request(lowered):
-            return self._run_natural(goal)
+            try:
+                return self._run_natural(goal)
+            except GoalError:
+                if self._is_ambitious_unknown_request(lowered):
+                    return self._research_task(goal)
+                raise
         if self._is_ambitious_unknown_request(lowered):
             return self._research_task(goal)
         raise GoalError("goal is not a supported simple coding or system task")
@@ -272,9 +279,34 @@ class GoalNormalizer:
                 "ausfuehren",
                 "execute",
                 "umsetzen",
+                "apply",
+                "anwenden",
+                "changes",
+                "änderungen",
             ),
         )
         return research_intent and execution_intent
+
+    @staticmethod
+    def _is_install_compound_request(lowered: str) -> bool:
+        """Route install-plus-deploy requests through bounded planning."""
+        if not _starts_with(lowered, ("install ", "installiere ")):
+            return False
+        word_count = len(re.findall(r"(?<!\w)[\w]+(?!\w)", lowered))
+        return word_count >= 6 and _contains_word(
+            lowered,
+            (
+                "deploy",
+                "deploye",
+                "konfiguriere",
+                "richte",
+                "setup",
+                "cluster",
+                "vm",
+                "sicheren",
+                "secure",
+            ),
+        )
 
     @staticmethod
     def _is_mixed_read_write_request(lowered: str) -> bool:
@@ -346,6 +378,7 @@ class GoalNormalizer:
                 "echtzeit-rendering",
                 "audioverarbeitung",
                 "gpu-beschleunigung",
+                "hardware passthrough",
                 "blockchain",
                 "computer vision",
                 "sprachassistent",
@@ -415,6 +448,7 @@ class GoalNormalizer:
                 "perform",
                 "architect",
                 "execute",
+                "run",
                 "automate",
                 "build",
                 "create",
@@ -570,6 +604,17 @@ class GoalNormalizer:
         )
 
     @staticmethod
+    def _is_placeholder_command(command: str) -> bool:
+        return bool(
+            re.fullmatch(
+                r"(?:a|an|the|ein|eine|der|die|das)\s+"
+                r"(?:(?:shell|bash)\s+)?(?:script|skript|command|kommando)",
+                command.strip(),
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
     def _looks_like_explicit_command(goal: str) -> bool:
         """Keep verification wording from reclassifying a real CLI command."""
         command = _after_command_verb(goal)
@@ -714,6 +759,8 @@ class GoalNormalizer:
             maxsplit=1,
             flags=re.IGNORECASE,
         )[0].strip()
+        if self._is_placeholder_command(command):
+            raise GoalError("natural run goal requires a concrete executable")
         return self._run_command(goal, command)
 
     def _run_command(self, goal: str, command: str) -> NormalizedGoal:
