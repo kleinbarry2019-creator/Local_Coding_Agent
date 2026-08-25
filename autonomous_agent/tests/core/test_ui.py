@@ -280,6 +280,9 @@ def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -
         context = controller.response_context()
         assert context.nickname == ""
         assert context.audience_age is None
+        stored = controller.preferences()
+        assert stored.nickname == ""
+        assert stored.interests == ""
         assert controller.persisted_sessions() == []
         assert controller.persisted_session("session-0123456789abcdef0123456789abcdef") is None
         assert controller.recover_pending() == ()
@@ -288,6 +291,8 @@ def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -
             controller.add_feedback(
                 "session-0123456789abcdef0123456789abcdef", 10, "privat"
             )
+        controller.update_preferences({"nickname": "erneut privat"})
+        assert controller.preferences().nickname == ""
     finally:
         controller.close()
 

@@ -159,7 +159,22 @@ class RuntimeTaskController:
         return self.profile_store.load()
 
     def update_preferences(self, changes: Mapping[str, object]) -> UserPreferences:
-        preferences = self.profile_store.update(changes)
+        normalized = dict(changes)
+        current = self.profile_store.load()
+        personalization_enabled = normalized.get(
+            "store_personalization", current.store_personalization
+        )
+        if personalization_enabled is False:
+            for key in (
+                "nickname",
+                "pronouns",
+                "interests",
+                "age",
+                "occupation",
+                "gender_identity",
+            ):
+                normalized[key] = None if key == "age" else ""
+        preferences = self.profile_store.update(normalized)
         self.learning.network_enabled = (
             self._research_network_requested and preferences.allow_network_research
         )
