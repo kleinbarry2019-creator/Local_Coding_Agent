@@ -33,7 +33,7 @@ def _render_desktop_entry(executable: Path) -> str:
 Type=Application
 Name=ACB – Autonome Computing Butler
 Comment=Lokaler Offline-Agent für Coding- und Systemaufgaben
-TryExec={_desktop_quote(executable)}
+TryExec={executable}
 Exec={_desktop_quote(executable)} app --project {_desktop_quote(project)} --state-dir {_desktop_quote(state)}
 Terminal=false
 Categories=Development;Utility;

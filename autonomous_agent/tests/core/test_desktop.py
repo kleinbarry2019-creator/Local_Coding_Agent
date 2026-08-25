@@ -14,7 +14,7 @@ def test_desktop_entry_is_installed_atomically(tmp_path: Path) -> None:
 
     assert installed == target
     content = target.read_text(encoding="utf-8")
-    assert "TryExec=\"" in content
+    assert "TryExec=" in content
     assert "Exec=\"" in content
     assert " app --project \"" in content
     assert " --state-dir \"" in content
