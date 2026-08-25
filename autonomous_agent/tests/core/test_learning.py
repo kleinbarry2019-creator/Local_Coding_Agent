@@ -196,7 +196,7 @@ def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:
     assert suggestion.release_gate_required is True
 
 
-def test_repeated_low_feedback_creates_anonymized_pattern_signal(tmp_path: Path) -> None:
+def test_repeated_low_feedback_creates_per_user_pattern_signal(tmp_path: Path) -> None:
     service = _service(tmp_path, network_enabled=False)
     service.record_feedback("session-one", 3, "erste Kritik")
     service.record_feedback("session-two", 4, "zweite Kritik")
@@ -207,7 +207,18 @@ def test_repeated_low_feedback_creates_anonymized_pattern_signal(tmp_path: Path)
     ]
     assert len(recurring) == 1
     assert recurring[0].priority == "high"
-    assert service.store.metadata()["low_feedback_count"] == 2
+    assert service.store.metadata()["low_feedback_by_user"]["local-profile"] == 2
+
+
+def test_feedback_pattern_counts_are_isolated_per_user(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.record_feedback("session-one", 3, user_id="account-a")
+    service.record_feedback("session-two", 4, user_id="account-b")
+    metadata = service.store.metadata()
+    assert metadata["low_feedback_by_user"] == {"account-a": 1, "account-b": 1}
+    assert not any(
+        item.kind == "recurring-feedback" for item in service.store.suggestions()
+    )
 
 
 def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:

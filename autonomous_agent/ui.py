@@ -130,6 +130,7 @@ class RuntimeTaskController:
         )
         self._tasks: dict[str, UiTask] = {}
         self._lock = threading.RLock()
+        self._active_account_id: str | None = None
         self._executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="acb-ui-runtime",
@@ -216,7 +217,12 @@ class RuntimeTaskController:
         if not self.preferences().store_chat_history:
             raise ValueError("chat history storage is disabled")
         feedback = self.feedback.add(session_id, rating, comment)
-        self.learning.record_feedback(session_id, rating, comment)
+        self.learning.record_feedback(
+            session_id,
+            rating,
+            comment,
+            user_id=self._active_account_id or "local-profile",
+        )
         return feedback
 
     def feedback_items(self, limit: int = 50) -> tuple[TaskFeedback, ...]:
@@ -441,15 +447,19 @@ class RuntimeTaskController:
         security_question: str = "",
         security_answer: str = "",
     ) -> UserAccount:
-        return self.learning.create_account(
+        account = self.learning.create_account(
             username,
             password,
             security_question=security_question,
             security_answer=security_answer,
         )
+        self._active_account_id = account.account_id
+        return account
 
     def authenticate(self, username: str, password: str) -> UserAccount | None:
-        return self.learning.authenticate(username, password)
+        account = self.learning.authenticate(username, password)
+        self._active_account_id = None if account is None else account.account_id
+        return account
 
     def reset_password(
         self, username: str, security_answer: str, new_password: str

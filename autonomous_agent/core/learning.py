@@ -747,7 +747,14 @@ class LearningService:
         ]
         return tuple((experience_context + knowledge_context)[: min(limit, 20)])
 
-    def record_feedback(self, session_id: str, rating: int, comment: str = "") -> None:
+    def record_feedback(
+        self,
+        session_id: str,
+        rating: int,
+        comment: str = "",
+        *,
+        user_id: str = "local-profile",
+    ) -> None:
         """Convert explicit user feedback into a bounded improvement proposal."""
         if type(rating) is not int or not 1 <= rating <= 10:
             raise ValueError("feedback rating is invalid")
@@ -755,6 +762,8 @@ class LearningService:
             raise ValueError("feedback session is invalid")
         if type(comment) is not str:
             raise ValueError("feedback comment is invalid")
+        if type(user_id) is not str or not user_id or len(user_id) > 160:
+            raise ValueError("feedback user is invalid")
         note = " ".join(comment.split())[:600]
         description = (
             f"Nutzerbewertung für {session_id}: {rating}/10. "
@@ -780,15 +789,29 @@ class LearningService:
             )
         )
         metadata = self.store.metadata()
-        low_feedback_count = metadata.get("low_feedback_count", 0)
+        raw_by_user = metadata.get("low_feedback_by_user", {})
+        by_user = dict(raw_by_user) if isinstance(raw_by_user, dict) else {}
+        low_feedback_count = by_user.get(user_id, 0)
         if type(low_feedback_count) is not int or low_feedback_count < 0:
             low_feedback_count = 0
         if rating <= 5:
             low_feedback_count += 1
+        by_user[user_id] = low_feedback_count
+        by_user = dict(list(by_user.items())[-100:])
+        raw_ratings = metadata.get("last_feedback_rating_by_user", {})
+        ratings_by_user: dict[str, int] = {}
+        if isinstance(raw_ratings, dict):
+            ratings_by_user = {
+                key: value
+                for key, value in raw_ratings.items()
+                if isinstance(key, str) and type(value) is int
+            }
+        ratings_by_user[user_id] = rating
+        ratings_by_user = dict(list(ratings_by_user.items())[-100:])
         self.store.update_metadata(
             {
-                "low_feedback_count": low_feedback_count,
-                "last_feedback_rating": rating,
+                "low_feedback_by_user": by_user,
+                "last_feedback_rating_by_user": ratings_by_user,
             }
         )
         if low_feedback_count >= 2:
@@ -796,7 +819,7 @@ class LearningService:
                 ImprovementSuggestion(
                     suggestion_id=f"suggestion-{uuid.uuid4().hex}",
                     kind="recurring-feedback",
-                    title="Wiederkehrendes negatives Nutzerfeedback",
+                    title=f"Wiederkehrendes negatives Nutzerfeedback: {user_id}",
                     description=(
                         f"Mindestens {low_feedback_count} niedrige Bewertungen "
                         "wurden erfasst. Vergleiche die betroffenen Aufgaben, "
