@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess  # nosec B404
 from collections.abc import Mapping
@@ -23,6 +24,15 @@ _TRUSTED_CATALOG: Mapping[str, Mapping[str, str]] = MappingProxyType(
         "node": MappingProxyType({"apt": "nodejs", "dnf": "nodejs", "brew": "node"}),
         "npm": MappingProxyType({"apt": "npm", "dnf": "npm", "brew": "node"}),
         "ollama": MappingProxyType({"brew": "ollama"}),
+        # Fedora's qemu-system-x86-core and Debian's qemu-system-x86 packages
+        # provide the trusted x86_64 QEMU executable used by the VM preflight.
+        "qemu-system-x86_64": MappingProxyType(
+            {
+                "apt": "qemu-system-x86",
+                "dnf": "qemu-system-x86-core",
+                "rpm-ostree": "qemu-system-x86-core",
+            }
+        ),
     }
 )
 
@@ -41,6 +51,17 @@ class InstallResult:
     installed: bool
     capability: Capability
     diagnostic: str
+    reboot_required: bool = False
+
+
+@dataclass(frozen=True)
+class CapabilityResearch:
+    name: str
+    supported: bool
+    source: str
+    manager: str | None
+    package: str | None
+    rationale: str
 
 
 class CapabilityRegistry:
@@ -86,12 +107,55 @@ class CapabilityRegistry:
             return InstallResult(False, current, "untrusted-or-unsupported-tool")
         result = PrivilegedSystemExecutor().install(recipe)
         verified = self.discover(name)
+        reboot_required = (
+            result == 0
+            and recipe.manager == "rpm-ostree"
+            and not verified.available
+        )
         return InstallResult(
             result == 0 and verified.available,
             verified,
             "installed-and-verified"
             if result == 0 and verified.available
+            else "installed-reboot-required"
+            if reboot_required
             else "installation-or-verification-failed",
+            reboot_required=reboot_required,
+        )
+
+    def research(self, name: str) -> CapabilityResearch:
+        """Resolve a missing capability against the bounded trusted catalog."""
+        if not _valid_name(name):
+            raise ValueError("capability name is invalid")
+        recipe = _installation_recipe(name)
+        if recipe is None:
+            immutable = _is_immutable_host()
+            rationale = (
+                "No trusted package manager is available for this host profile; autonomous installation is refused."
+                if immutable
+                else "No verified package recipe is available; autonomous installation is refused."
+            )
+            return CapabilityResearch(
+                name=name,
+                supported=False,
+                source="host-profile" if immutable else "trusted-catalog",
+                manager=None,
+                package=None,
+                rationale=rationale,
+            )
+        if recipe.manager == "rpm-ostree":
+            rationale = (
+                "The trusted rpm-ostree layer will be installed action-scoped; a reboot is required before the executable can be version-verified."
+            )
+        return CapabilityResearch(
+            name=name,
+            supported=True,
+            source="trusted-catalog",
+            manager=recipe.manager,
+            package=recipe.package,
+            rationale=rationale
+            if recipe.manager == "rpm-ostree"
+            else "A verified package recipe is available and will be version-probed after installation.",
         )
 
     def snapshot(self) -> tuple[Capability, ...]:
@@ -125,19 +189,52 @@ class PrivilegedSystemExecutor:
             if not sudo.is_file():
                 raise RuntimeError("non-interactive privilege broker is unavailable")
             command = [str(sudo), "-n", *command]
+        process = subprocess.Popen(  # nosec B603
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+            shell=False,
+            start_new_session=True,
+        )
         try:
-            completed = subprocess.run(  # nosec B603
-                command,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=False,
-                shell=False,
-                check=False,
-                timeout=300.0,
-            )
+            _stdout, _stderr = process.communicate(timeout=60.0)
         except subprocess.TimeoutExpired:
+            _terminate_process_group(process)
             return 124
-        return completed.returncode
+        return process.returncode
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop an installer and descendants when a package manager hangs."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except OSError:
+        process.terminate()
+    # Package managers may delegate work to a daemon which inherits the
+    # installer pipes.  Closing our descriptors before waiting is important:
+    # otherwise a descendant can keep communicate() blocked indefinitely even
+    # after the installer itself has been terminated.
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            process.kill()
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            # Reaping is best-effort here.  Never let a stuck package-manager
+            # daemon hold the autonomous runtime hostage forever.
+            pass
 
 
 def _installation_recipe(name: str) -> InstallationRecipe | None:
@@ -148,6 +245,12 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
         ("apt", Path("/usr/bin/apt-get"), ("install", "-y"), True),
         ("dnf", Path("/usr/bin/dnf"), ("install", "-y"), True),
         (
+            "rpm-ostree",
+            Path("/usr/bin/rpm-ostree"),
+            ("install", "--idempotent"),
+            True,
+        ),
+        (
             "brew",
             Path("/home/linuxbrew/.linuxbrew/bin/brew"),
             ("install",),
@@ -155,6 +258,10 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
         ),
     )
     for manager, executable, arguments, elevation in managers:
+        if manager == "dnf" and _is_immutable_host():
+            continue
+        if manager == "rpm-ostree" and not _is_immutable_host():
+            continue
         package = packages.get(manager)
         if package is not None and executable.is_file():
             return InstallationRecipe(
@@ -165,6 +272,11 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
                 requires_elevation=elevation,
             )
     return None
+
+
+def _is_immutable_host() -> bool:
+    """Detect ostree-based hosts where dnf install is intentionally blocked."""
+    return Path("/run/ostree-booted").is_file()
 
 
 def _find_executable(name: str, project_root: Path) -> Path | None:
@@ -249,6 +361,7 @@ def _valid_name(name: object) -> bool:
 __all__ = [
     "Capability",
     "CapabilityRegistry",
+    "CapabilityResearch",
     "InstallResult",
     "InstallationRecipe",
     "PrivilegedSystemExecutor",

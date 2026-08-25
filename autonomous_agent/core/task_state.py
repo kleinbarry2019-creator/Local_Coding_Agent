@@ -320,6 +320,57 @@ class TaskStateStore:
             mutation,
         )
 
+    def list_checkpoints(
+        self,
+        session_id: str,
+        *,
+        statuses: frozenset[str] = frozenset({"created", "discarded"}),
+        limit: int = 5,
+    ) -> tuple[CheckpointRecord, ...]:
+        if type(session_id) is not str or not session_id.startswith("session-"):
+            raise ValueError("session id is invalid")
+        if type(limit) is not int or not 1 <= limit <= 5:
+            raise ValueError("checkpoint list limit is invalid")
+        if not statuses or not statuses.issubset({"created", "discarded", "restored"}):
+            raise ValueError("checkpoint status filter is invalid")
+        query = (
+            "SELECT checkpoint_id, step_id, manifest_json, status, created_at "
+            "FROM checkpoints WHERE session_id = ? AND "
+            "(status = ? OR status = ? OR status = ?) "
+            "ORDER BY created_at DESC"
+        )
+        parameters: tuple[object, ...] = (
+            session_id,
+            "created",
+            "discarded",
+            "restored",
+        )
+        with self.store.connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        records: list[CheckpointRecord] = []
+        for row in rows:
+            if str(row[3]) not in statuses:
+                continue
+            try:
+                manifest = json.loads(str(row[2]))
+            except (TypeError, json.JSONDecodeError) as error:
+                raise RuntimeError("checkpoint manifest is invalid") from error
+            if not isinstance(manifest, dict):
+                raise RuntimeError("checkpoint manifest is invalid")  # noqa: TRY004
+            records.append(
+                CheckpointRecord(
+                    checkpoint_id=str(row[0]),
+                    session_id=session_id,
+                    step_id=str(row[1]),
+                    manifest=manifest,
+                    status=str(row[3]),
+                    created_at=str(row[4]),
+                )
+            )
+            if len(records) >= limit:
+                break
+        return tuple(records)
+
 
 def _canonical_json(value: object) -> str:
     return json.dumps(

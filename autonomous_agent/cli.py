@@ -15,6 +15,7 @@ from autonomous_agent.core.config import (
     CliOverrides,
     ConfigError,
     ExecutionMode,
+    ensure_state_root,
     load_config,
 )
 from autonomous_agent.core.doctor import (
@@ -196,6 +197,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     app.add_argument("--project", type=_project_path, metavar="PATH")
     app.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    desktop = commands.add_parser(
+        "install-desktop",
+        help="install the user-local ACB application launcher",
+        description="Install an offline ACB launcher in the current user's application menu.",
+    )
+    desktop.add_argument("--project", type=_project_path, metavar="PATH")
+    desktop.add_argument("--state-dir", type=_state_path, metavar="PATH")
+    learn = commands.add_parser(
+        "learn",
+        help="research trusted AI and security feeds",
+        description="Research allow-listed feeds and store gated local proposals.",
+    )
+    learn.add_argument("--network", action="store_true", help="allow bounded HTTPS feed access")
+    learn.add_argument("--json", action="store_true", help="emit compact JSON")
+    learn.add_argument("--project", type=_project_path, metavar="PATH")
+    learn.add_argument("--state-dir", type=_state_path, metavar="PATH")
     return parser
 
 
@@ -229,7 +246,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         is_doctor = namespace.command == "doctor"
-        is_runtime = namespace.command in {"run", "resume", "ui", "app"}
+        is_runtime = namespace.command in {
+            "run", "resume", "ui", "app", "install-desktop", "learn"
+        }
         runtime_command = is_runtime
         if not is_doctor and not is_runtime:
             raise _CliArgumentError
@@ -255,15 +274,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             from autonomous_agent.app import launch
 
             return launch(config)
+        if namespace.command == "install-desktop":
+            from autonomous_agent.desktop import install_desktop_entry
+
+            sys.stdout.write(f"{install_desktop_entry()}\n")
+            return 0
+        if namespace.command == "learn":
+            from autonomous_agent.core.learning import LearningService
+
+            ensure_state_root(config)
+            service = LearningService(
+                config.paths.state_root,
+                config.paths.project_root,
+                network_enabled=namespace.network,
+            )
+            research = service.research_now()
+            if namespace.json:
+                rendered = json.dumps(research, ensure_ascii=False, separators=(",", ":")) + "\n"
+            else:
+                rendered = _render_learning_human(research)
+            return_code = 0 if research.get("status") in {"ok", "offline", "partial"} else 1
+            sys.stdout.write(rendered)
+            return return_code
         if namespace.command == "ui":
             import webbrowser
 
             from autonomous_agent.ui import AcbUiServer
 
+            research_enabled = os.environ.get("ACB_RESEARCH_NETWORK", "1").lower() not in {
+                "0",
+                "false",
+                "off",
+                "no",
+            }
             server = AcbUiServer(
                 config,
                 host=namespace.host,
                 port=namespace.port,
+                start_learning=True,
+                research_network=research_enabled,
             )
             if namespace.open:
                 webbrowser.open(server.url)
@@ -477,6 +526,19 @@ def _render_runtime_human(result: object) -> str:
         for item in result.completion.criteria
     )
     return "\n".join(lines) + "\n"
+
+
+def _render_learning_human(result: object) -> str:
+    document = result if isinstance(result, dict) else {}
+    status = document.get("status", "unknown")
+    items = document.get("items", 0)
+    errors = document.get("errors", [])
+    suffix = (
+        f"; nicht verfügbar: {', '.join(str(item) for item in errors)}"
+        if isinstance(errors, list) and errors
+        else ""
+    )
+    return f"{_DISPLAY_NAME} Lernen: {status}\nNeue Wissenseinträge: {items}{suffix}\n"
 
 
 def _probe_line(probe: ProbeResult) -> str:

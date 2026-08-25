@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import subprocess
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from autonomous_agent.core.capabilities import CapabilityRegistry
+import pytest
+
+from autonomous_agent.core.capabilities import (
+    CapabilityRegistry,
+    _terminate_process_group,
+)
 from autonomous_agent.core.config import ExecutionMode, ResourceLimits
 from autonomous_agent.core.policy import (
     AuthorityGrant,
@@ -107,6 +113,57 @@ def test_unknown_missing_tool_is_not_installable(tmp_path: Path) -> None:
     assert result.diagnostic == "untrusted-or-unsupported-tool"
 
 
+def test_hung_installer_is_terminated_without_waiting_on_inherited_pipes() -> None:
+    process = subprocess.Popen(
+        ["/bin/sh", "-c", "sleep 30"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    started = time.monotonic()
+    _terminate_process_group(process)
+
+    assert process.poll() is not None
+    assert time.monotonic() - started < 6.0
+
+
+def test_missing_qemu_is_researched_against_trusted_catalog(tmp_path: Path) -> None:
+    research = CapabilityRegistry(tmp_path).research("qemu-system-x86_64")
+
+    if Path("/run/ostree-booted").is_file():
+        assert research.supported
+        assert research.source == "trusted-catalog"
+        assert research.manager == "rpm-ostree"
+        assert research.package == "qemu-system-x86-core"
+        assert "reboot" in research.rationale
+    else:
+        assert research.supported
+        assert research.source == "trusted-catalog"
+        assert research.manager in {"apt", "dnf", "brew"}
+        assert research.package
+
+
+def test_immutable_qemu_install_reports_reboot_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not Path("/run/ostree-booted").is_file():
+        pytest.skip("immutable-host behavior is not applicable")
+    registry = CapabilityRegistry(tmp_path)
+    if registry.discover("qemu-system-x86_64").available:
+        pytest.skip("qemu is already available")
+    monkeypatch.setattr(
+        "autonomous_agent.core.capabilities.PrivilegedSystemExecutor.install",
+        lambda _self, _recipe: 0,
+    )
+
+    result = registry.ensure("qemu-system-x86_64")
+
+    assert not result.installed
+    assert result.reboot_required
+    assert result.diagnostic == "installed-reboot-required"
+
+
 def test_system_tool_requires_exact_action_scoped_authority(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     capabilities = CapabilityRegistry(root)
@@ -137,3 +194,24 @@ def test_system_tool_requires_exact_action_scoped_authority(tmp_path: Path) -> N
     assert allowed.data is not None
     assert allowed.data["installed"] is True
     assert allowed.data["version"] is not None
+
+
+def test_host_security_scan_is_read_only_and_bounded(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    capabilities = CapabilityRegistry(root)
+    registry = ToolRegistry()
+    register_system_tools(registry, capabilities, root)
+
+    result = registry.execute(
+        "system.host-security-scan",
+        {"project_root": str(root)},
+        _context(root),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["checks"]
+    assert isinstance(result.data["findings"], list)
+    assert len(result.data["findings"]) <= 128
+    assert len(result.data["listeners"]) <= 64
+    assert result.data["processes_scanned"] >= 0

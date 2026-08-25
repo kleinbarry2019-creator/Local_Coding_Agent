@@ -82,6 +82,50 @@ The agent process itself refuses to act as a permanent root process.
 the action was really executed, and a public-boundary E2E recheck matches the
 original request. A successful process exit by itself is only one criterion.
 
+The problem-solving trace classifies failures by cause, records bounded
+evidence, and lists safe recovery strategies in the result field
+`problem_solving`. When a `command not found` error is detected, ACB first
+verifies or provisions the trusted capability and retries the affected step.
+Mutating steps are rolled back through checkpoints before retries. The final
+evaluator uses the last verified observation of a repaired step, while failed
+intermediate attempts remain available for diagnosis.
+
+Vor jedem Auftrag prüft ein Plan-Preflight außerdem die Abhängigkeiten als
+Graph, erkennt doppelte Schritte, unbekannte Abhängigkeiten, Zyklen,
+Symlink-Ziele und Ziele außerhalb des Projektbereichs. Risiko, Reihenfolge und
+eventuelle Blocker werden im Feld `plan_assessment` mit dem Auftrag gespeichert;
+ein ungültiger Plan wird vor dem ersten Tool-Aufruf sicher beendet.
+
+Für Coding-Aufträge kann ACB ein Projekt lokal und offline vermessen. Der
+gemeinsame Read-only-Tool `project.analyze` erkennt bounded die vorhandenen
+Programmiersprachen, Projekt-/Build-Manifeste, Testkonfigurationen, Datei- und
+Verzeichnisstruktur, eine begrenzte Import-/Abhängigkeitskarte sowie konkrete
+Testdateien und Testbefehle. Die Analyse liest keine externen Quellen und führt
+keinen gefundenen Code aus; sie liefert nur verifizierbare Grundlage für die
+anschließende Planung und automatische Testauswahl.
+
+Für Sicherheitsaufträge stehen zwei getrennte, read-only Prüfungen bereit:
+`Prüfe die Projektsicherheit` untersucht bounded Projektdateien auf typische
+Secrets, private Schlüssel und gefährliche Ausführungsmuster; `Prüfe die
+Systemsicherheit und offene Ports` liest zusätzlich ausgewählte Kernel-
+Schutzwerte, TCP-Listener und Prozessmuster des lokalen Hosts. Beide Aufträge
+geben nur redigierte Befunde aus, verändern nichts am System und werden erst
+nach erfolgreicher E2E-Nachprüfung als abgeschlossen markiert.
+
+Erweiterungen werden nicht blind aus Python-Dateien geladen. Unter
+`.acb/plugins/*.json` kann ein Projekt ein Plugin-Manifest mit Entry-Point,
+Berechtigungen und SHA-256-Digest hinterlegen. `/api/plugins` zeigt nur
+Manifeste, deren Pfad, Schema, Berechtigungen und Entry-Point-Digest lokal
+verifiziert wurden; die Ausführung bleibt an die gemeinsame Policy-/Tool-
+Registry gebunden. Ungültige, veraltete oder manipulierte Manifeste werden
+abgewiesen und niemals importiert.
+
+Die authentifizierte lokale Schnittstelle `/api/capabilities` liefert außerdem
+die zentrale Capability-Matrix mit Status (`available`, `conditional` oder
+`gated`), Voraussetzungen und Grenzen. Damit kann die GUI einem Benutzer
+verständlich anzeigen, welche Coding-, Lern-, Recovery-, Security-, Sprach- und
+Kompatibilitätsfunktionen auf dem aktuellen System tatsächlich nutzbar sind.
+
 ## Grafische Oberfläche
 
 ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und
@@ -97,6 +141,13 @@ werden. Der Standard ist `http://127.0.0.1:8765/`. Jeder Schreibauftrag benötig
 ein zufälliges Sitzungstoken, das nur der lokal ausgelieferten Oberfläche bekannt
 ist. Netzwerkzugriff auf die UI wird nicht akzeptiert.
 
+Die Browser-Oberfläche startet den lokalen Lern-Scheduler und bietet im Bereich
+„Wissen & Verbesserungen“ eine Schaltfläche für eine manuelle Recherche. Dabei
+werden ausschließlich die konfigurierte Quellen-Allowlist und die
+Datenschutzpräferenz verwendet; es öffnet sich kein externes Browserfenster.
+Mit `ACB_RESEARCH_NETWORK=0 acb ui` kann der Netzwerkzugriff für diese UI
+vollständig deaktiviert werden.
+
 ## Lokale Desktop-App und Offline-Fortsetzung
 
 Für die installierte Anwendung gibt es zusätzlich eine native GTK-Desktop-App:
@@ -107,11 +158,15 @@ acb app
 ```
 
 Für einen Eintrag im lokalen Anwendungsmenü kann die mitgelieferte Desktop-
-Definition installiert werden:
+Definition auch direkt über ACB installiert werden:
 
 ```bash
-install -D packaging/acb.desktop ~/.local/share/applications/acb.desktop
+acb install-desktop
 ```
+
+Der Eintrag wird ausschließlich im Benutzerkonto unter
+`~/.local/share/applications/acb.desktop` angelegt; Root-Rechte und Netzwerk sind
+nicht erforderlich.
 
 Die Desktop-App öffnet keinen Netzwerkdienst. Auf Linux wird sie mit dem lokalen
 GTK-System gestartet, zeigt den Arbeitsbereich und den Aufgabenverlauf an und
@@ -123,6 +178,88 @@ nicht erforderlich.
 Die App benötigt GTK 4 und PyGObject auf dem lokalen System. Falls diese
 Desktop-Integration nicht vorhanden ist, bleibt `acb ui` als sichere lokale
 Browser-Oberfläche verfügbar.
+
+### Lernen, Recherche und kontrollierte Selbstentwicklung
+
+ACB besitzt in der Desktop-App eigene Reiter für `Wissen & Recherche`,
+`Verbesserungen`, `Selbstentwicklung` sowie `Konto & Sync`. Ein lokaler
+Scheduler prüft in regelmäßigen Abständen allow-listete HTTPS-Feeds zu KI- und
+Sicherheitsmeldungen (arXiv, NIST und CISA). Ohne Netz bleibt der Scheduler
+lokal verfügbar und meldet den Offline-Zustand; gespeichertes Wissen,
+Auftragsnachprüfungen und Vorschläge bleiben nutzbar.
+
+Neue Informationen werden als lokale Wissenseinträge und nachvollziehbare
+Verbesserungsvorschläge abgelegt. Ein externer Artikel kann niemals direkt Code
+ausführen. Eine mögliche Änderung wird erst nach Ressourcenprüfung,
+Acceptance-Tests, Security-Scan, Release-Gate und Checkpoint/Rollback zur
+Übernahme zugelassen. Damit kann ACB kontinuierlich lernen und konkrete
+Verbesserungen vorbereiten, ohne die Sicherheitsgrenzen des Systems zu
+überspringen.
+
+Abgeschlossene Aufgaben erzeugen automatisch eine spätere Review-Notiz, zum
+Beispiel für Regressionstests, Dokumentation oder sicherere Automatisierung.
+Auch fehlgeschlagene oder unvollständige Aufträge werden mit den nicht
+erfüllten Akzeptanzkriterien als hoch priorisierte Lernvorschläge erfasst.
+Wiederholt fehlgeschlagene Kriterien werden zu einem gemeinsamen
+Root-Cause-/Regressionstest-Vorschlag verdichtet.
+Eine Nutzerbewertung erzeugt zusätzlich einen nachvollziehbaren Vorschlag zur
+Verbesserung; alle diese Vorschläge bleiben zunächst nur Kandidaten und
+benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
+Wiederholte niedrige Bewertungen werden dem aktiven lokalen Benutzerkonto bzw.
+dem lokalen Profil zugeordnet und in einen eigenen Qualitäts-/Regressionstest-
+Vorschlag überführt. So kann ACB Antwortstil und Hilfestellung individuell
+weiterentwickeln. In `Einstellungen > Datenschutz & Recherche` lässt sich die
+automatische Anpassung des Antwortstils aus diesem Feedback unabhängig von der
+lokalen Feedback-/Chatablage deaktivieren. Im Reiter `Selbstentwicklung` kann
+das aktive persönliche Antwort-Lernprofil jederzeit zurückgesetzt werden; die
+ursprünglichen Aufgaben- und Chat-Audits bleiben dabei erhalten.
+Gespeichertes Wissen wird für neue Ziele lokal und erklärbar nach Relevanz
+sortiert und kann über die authentifizierte Schnittstelle
+`/api/learning/context` als Referenzkontext abgerufen werden. Die Inhalte
+werden dabei nie als Befehle interpretiert.
+Lokale Konten werden mit scrypt-Passwort-Hashes gespeichert. Die Geräte- und
+Kontostruktur für eine spätere system- und netzwerkübergreifende Synchronisation
+ist vorbereitet; Passwörter und Geheimnisse werden niemals in ein Sync-Mani-
+fest exportiert und es wird keine Cloud-Verbindung ohne ausdrückliches Pairing
+angelegt. Die Recherche kann für eine Sitzung über `ACB_RESEARCH_NETWORK=0`
+abgeschaltet werden.
+
+### Profil, Darstellung und Bedienung
+
+Der Reiter `Einstellungen` speichert ein lokales Profil unter dem geschützten
+State-Verzeichnis. Dort können Darstellung (`System`, `Hell`, `Dunkel`),
+Antwortumfang, einfache Sprache, Gendern, Nickname/Pronomen, optionale
+Interessen und Beruf sowie das eigene Wissensniveau eingestellt werden.
+Zusätzlich gibt es Schalter für Sprach-Ein-/Ausgabe, einen eigenen Wake-Satz,
+große Schrift, hohen Kontrast, Screenreader-/Braille-Unterstützung,
+motorische/kognitive Unterstützung und Farbsehmodi. Datenschutz- und
+Recherchefreigaben sind getrennt steuerbar; standardmäßig bleibt die Freigabe
+für sensible Daten bestätigungspflichtig.
+
+Die gleichen Präferenzen können über die authentifizierte lokale UI-Schnittstelle
+`/api/preferences` gelesen und als JSON geändert werden. Dadurch können spätere
+Chat-, Sprach- und mobile Adapter dieselbe geprüfte Profilstruktur verwenden,
+ohne eine zweite Einstellungslogik einzuführen.
+
+Sprachmodelle, gerätespezifische Mikrofon-/Lautsprecheradapter und eine
+geräteübergreifende Synchronisierung bleiben bewusst optionale Adapter. Ohne
+vorhandene lokale Sprach- oder Assistenzhardware fällt ACB sicher auf Tastatur,
+Standardaudio und die gewählte Darstellung zurück; es werden keine fremden
+Treiber oder externen Konten automatisch installiert.
+
+Der Erststart bietet jetzt eine lokale dreitägige Testphase oder die direkte
+Profileinrichtung. Testaufträge bleiben in dieser Phase eingeschränkt. Die
+Runtime kann außerdem den Antwortkontext (Wissensniveau, einfache Sprache,
+Ansprache und nächste Schritte), lokale Assistenzhinweise und verfügbare
+Offline-Sprachadapter melden. Nach einem abgeschlossenen Auftrag kann eine
+Bewertung von 1 bis 10 mit Kommentar lokal gespeichert werden; sie verändert
+keinen Audit- oder Task-State.
+
+Die Desktop-Kopfzeile bietet zusätzlich `Audit prüfen` und `Rückgängig`. Die
+Rückgängig-Funktion verwendet die vorhandenen, verifizierten Checkpoints der
+Runtime und kann bis zu fünf noch verfügbare Mutationsschritte eines Auftrags
+einzeln zurückrollen. Jeder Rückrollvorgang wird erneut gegen die Audit-Kette
+geprüft; ein unklarer oder beschädigter Checkpoint wird nicht angewendet.
 
 Example (shown on multiple lines here only for readability):
 

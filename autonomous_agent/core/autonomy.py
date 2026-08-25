@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import tempfile
 import time
 import uuid
 from collections.abc import Mapping
@@ -28,11 +31,12 @@ from autonomous_agent.core.goals import (
     GoalNormalizer,
     NormalizedGoal,
 )
+from autonomous_agent.core.local_model import LocalModelError, LocalModelRunner
 from autonomous_agent.core.policy import AuthorityGrant, PolicyContext, ScopeEvidence
 from autonomous_agent.core.runtime_tools import ProjectToolRuntime
 from autonomous_agent.core.state import CoreStateStore
 from autonomous_agent.core.system_tools import register_system_tools
-from autonomous_agent.core.task_state import TaskStateStore
+from autonomous_agent.core.task_state import CheckpointRecord, TaskStateStore
 from autonomous_agent.core.tools import (
     ExecutionContext,
     SchemaLimits,
@@ -66,6 +70,10 @@ class FailureAnalysis:
     category: FailureCategory
     root_cause: str
     retryable: bool
+    evidence: tuple[str, ...] = ()
+    missing_capability: str | None = None
+    missing_dependency: str | None = None
+    candidate_actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -76,6 +84,8 @@ class PlanStep:
     arguments: Mapping[str, object]
     target: Path
     mutates: bool
+    depends_on: tuple[str, ...] = ()
+    purpose: str = ""
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,8 @@ class RuntimeResult:
     status: str
     completion: CompletionReport
     outputs: tuple[Mapping[str, object], ...]
+    problem_solving: tuple[Mapping[str, object], ...] = ()
+    plan_assessment: Mapping[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -118,6 +130,28 @@ class RuntimeResult:
             "status": self.status,
             "completion": self.completion.to_dict(),
             "outputs": [dict(item) for item in self.outputs],
+            "problem_solving": [dict(item) for item in self.problem_solving],
+            "plan_assessment": (
+                None if self.plan_assessment is None else dict(self.plan_assessment)
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class PlanAssessment:
+    """Bounded preflight result for a plan dependency graph."""
+
+    valid: bool
+    issues: tuple[str, ...]
+    ordered_step_ids: tuple[str, ...]
+    risk: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "valid": self.valid,
+            "issues": list(self.issues),
+            "ordered_step_ids": list(self.ordered_step_ids),
+            "risk": self.risk,
         }
 
 
@@ -136,6 +170,7 @@ class Planner:
                     {"path": str(target), "content": goal.content or ""},
                     target,
                     True,
+                    purpose="create-or-replace-the-requested-file",
                 ),
             )
         if goal.kind is GoalKind.READ_FILE:
@@ -148,6 +183,7 @@ class Planner:
                     {"path": str(target)},
                     target,
                     False,
+                    purpose="read-the-requested-file",
                 ),
             )
         if goal.kind is GoalKind.LIST_FILES:
@@ -160,6 +196,43 @@ class Planner:
                     {"path": str(target)},
                     target,
                     False,
+                    purpose="enumerate-the-requested-directory",
+                ),
+            )
+        if goal.kind is GoalKind.ANALYZE_PROJECT:
+            return (
+                PlanStep(
+                    "step-analyze",
+                    StepKind.TOOL,
+                    "project.analyze",
+                    {"path": str(root)},
+                    root,
+                    False,
+                    purpose="map-project-languages-manifests-and-test-hints",
+                ),
+            )
+        if goal.kind is GoalKind.SECURITY_SCAN:
+            return (
+                PlanStep(
+                    "step-security-scan",
+                    StepKind.TOOL,
+                    "project.security-scan",
+                    {"path": str(root)},
+                    root,
+                    False,
+                    purpose="scan-project-text-for-bounded-security-findings",
+                ),
+            )
+        if goal.kind is GoalKind.HOST_SECURITY_SCAN:
+            return (
+                PlanStep(
+                    "step-host-security-scan",
+                    StepKind.TOOL,
+                    "system.host-security-scan",
+                    {"project_root": str(root)},
+                    root,
+                    False,
+                    purpose="inspect-local-host-security-without-mutating-the-system",
                 ),
             )
         if goal.kind is GoalKind.RUN_COMMAND:
@@ -172,6 +245,7 @@ class Planner:
                     {"name": executable},
                     root,
                     False,
+                    purpose="verify-the-command-capability",
                 ),
                 PlanStep(
                     "step-process",
@@ -179,7 +253,9 @@ class Planner:
                     "project.run-process",
                     {"argv": list(goal.argv), "cwd": str(root)},
                     root,
-                    True,
+                    not _command_is_read_only(goal.argv),
+                    depends_on=("step-capability",),
+                    purpose="execute-the-requested-command",
                 ),
             )
         if goal.kind is GoalKind.INSTALL_TOOL:
@@ -192,14 +268,125 @@ class Planner:
                     {"name": tool},
                     root,
                     True,
+                    purpose="provision-and-verify-the-requested-tool",
+                ),
+            )
+        if goal.kind is GoalKind.VM_BUILD:
+            return (
+                PlanStep(
+                    "step-vm-hypervisor",
+                    StepKind.ENSURE_CAPABILITY,
+                    "qemu-system-x86_64",
+                    {"name": "qemu-system-x86_64"},
+                    root,
+                    True,
+                    purpose="research-provision-and-version-verify-the-trusted-hypervisor",
+                ),
+                PlanStep(
+                    "step-vm-preflight",
+                    StepKind.TOOL,
+                    "system.vm-preflight",
+                    {"project_root": str(root)},
+                    root,
+                    False,
+                    depends_on=("step-vm-hypervisor",),
+                    purpose="verify-hypervisor-kvm-iso-and-gpu-passthrough-prerequisites",
+                ),
+            )
+        if goal.kind is GoalKind.RESEARCH_TASK:
+            research_step = PlanStep(
+                "step-research-goal",
+                StepKind.TOOL,
+                "system.research-goal",
+                {"goal": goal.original, "project_root": str(root)},
+                root,
+                False,
+                purpose="research-an-unfamiliar-complex-goal-without-opening-a-browser",
+            )
+            if goal.target == "research-only":
+                return (research_step,)
+            return (
+                research_step,
+                PlanStep(
+                    "step-model-execution",
+                    StepKind.TOOL,
+                    "system.local-model-goal",
+                    {"goal": goal.original, "project_root": str(root)},
+                    root,
+                    False,
+                    depends_on=("step-research-goal",),
+                    purpose="execute-the-researched-goal-through-bounded-local-model-tools",
                 ),
             )
         raise ValueError("normalized goal kind is unsupported")
+
+    def assess(
+        self, plan: tuple[PlanStep, ...], project_root: Path
+    ) -> PlanAssessment:
+        """Validate dependencies, targets, and ordering before execution."""
+        root = project_root.resolve(strict=True)
+        issues: list[str] = []
+        by_id: dict[str, PlanStep] = {}
+        for step in plan:
+            if not step.step_id or step.step_id in by_id:
+                issues.append(f"duplicate-step-id:{step.step_id[:80]}")
+                continue
+            by_id[step.step_id] = step
+            target = step.target.resolve(strict=False)
+            if not target.is_relative_to(root):
+                issues.append(f"target-outside-project:{step.step_id[:80]}")
+            if step.target.exists() and step.target.is_symlink():
+                issues.append(f"symlink-target:{step.step_id[:80]}")
+            if step.kind is StepKind.ENSURE_CAPABILITY and not step.tool:
+                issues.append(f"missing-capability-name:{step.step_id[:80]}")
+            for dependency in step.depends_on:
+                if dependency not in by_id and dependency not in {
+                    prior.step_id for prior in plan
+                }:
+                    issues.append(
+                        f"unknown-dependency:{step.step_id[:48]}->{dependency[:48]}"
+                    )
+
+        order: list[str] = []
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(step_id: str) -> None:
+            if step_id in visited:
+                return
+            if step_id in visiting:
+                issues.append(f"dependency-cycle:{step_id[:80]}")
+                return
+            visiting.add(step_id)
+            step = by_id.get(step_id)
+            if step is not None:
+                for dependency in step.depends_on:
+                    if dependency in by_id:
+                        visit(dependency)
+                order.append(step_id)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step in plan:
+            visit(step.step_id)
+        risk = "high" if any(step.mutates for step in plan) else "low"
+        if any(step.kind is StepKind.ENSURE_CAPABILITY for step in plan):
+            risk = "high" if risk == "high" else "medium"
+        return PlanAssessment(
+            valid=not issues,
+            issues=tuple(dict.fromkeys(issues))[:20],
+            ordered_step_ids=tuple(order),
+            risk=risk,
+        )
 
 
 class FailureAnalyzer:
     def analyze(self, step: PlanStep, result: Mapping[str, object]) -> FailureAnalysis:
         category = self.classify(step, result)
+        evidence = _failure_evidence(result)
+        missing_capability = _missing_capability(step, result)
+        missing_dependency = _missing_python_module(result)
+        capability_blocked = _capability_install_blocked(result)
         causes = {
             FailureCategory.DEPENDENCY_MISSING: "trusted capability unavailable after provisioning",
             FailureCategory.POLICY_DENIED: "policy evidence did not authorize the requested action",
@@ -208,10 +395,45 @@ class FailureAnalyzer:
             FailureCategory.TOOL_FAILED: "tool handler failed at its trusted boundary",
             FailureCategory.LOOP_DETECTED: "the same failure fingerprint repeated",
         }
+        if missing_capability is not None:
+            causes[FailureCategory.DEPENDENCY_MISSING] = (
+                f"required executable is unavailable: {missing_capability}"
+            )
+        elif missing_dependency is not None:
+            causes[FailureCategory.DEPENDENCY_MISSING] = (
+                f"required Python module is unavailable: {missing_dependency}"
+            )
+        actions = {
+            FailureCategory.DEPENDENCY_MISSING: ("verify-capability", "retry-step"),
+            FailureCategory.POLICY_DENIED: ("inspect-policy-scope", "stop-safely"),
+            FailureCategory.TIMEOUT: ("retry-with-bounded-deadline", "rollback-if-mutating"),
+            FailureCategory.COMMAND_FAILED: ("inspect-command-evidence", "stop-safely"),
+            FailureCategory.TOOL_FAILED: ("retry-once", "rollback-if-mutating"),
+            FailureCategory.LOOP_DETECTED: ("stop-repeated-failure", "preserve-evidence"),
+        }
+        candidate_actions = (
+            ("preserve-evidence", "stop-safely")
+            if capability_blocked
+            else actions[category]
+        )
+        retryable = category in {
+            FailureCategory.DEPENDENCY_MISSING,
+            FailureCategory.TIMEOUT,
+            FailureCategory.TOOL_FAILED,
+        } and not capability_blocked
+        if result.get("diagnostic_code") in {
+            "local-model-unavailable",
+            "model-loop-detected",
+        }:
+            retryable = False
         return FailureAnalysis(
             category=category,
             root_cause=causes[category],
-            retryable=category in {FailureCategory.TIMEOUT, FailureCategory.TOOL_FAILED},
+            retryable=retryable,
+            evidence=evidence,
+            missing_capability=missing_capability,
+            missing_dependency=missing_dependency,
+            candidate_actions=candidate_actions,
         )
 
     def classify(self, step: PlanStep, result: Mapping[str, object]) -> FailureCategory:
@@ -224,6 +446,14 @@ class FailureAnalyzer:
         if step.kind is StepKind.ENSURE_CAPABILITY:
             return FailureCategory.DEPENDENCY_MISSING
         data = result.get("data")
+        if (
+            isinstance(data, Mapping)
+            and (
+                _missing_capability(step, result) is not None
+                or _missing_python_module(result) is not None
+            )
+        ):
+            return FailureCategory.DEPENDENCY_MISSING
         if isinstance(data, Mapping) and data.get("exit_code") not in {None, 0}:
             return FailureCategory.COMMAND_FAILED
         if diagnostic == "internal_error":
@@ -275,11 +505,16 @@ class CompletionEvaluator:
         outputs: tuple[Mapping[str, object], ...],
         capabilities: CapabilityRegistry,
     ) -> CompletionReport:
+        effective_outputs = _effective_outputs(outputs)
         results = tuple(
-            self._evaluate_criterion(item, goal, project_root, outputs, capabilities)
+            self._evaluate_criterion(
+                item, goal, project_root, effective_outputs, capabilities
+            )
             for item in goal.acceptance_criteria
         )
-        executed = bool(outputs) and all(item.get("success") is True for item in outputs)
+        executed = bool(effective_outputs) and all(
+            item.get("success") is True for item in effective_outputs
+        )
         e2e = any(
             item.criterion_id == "e2e" and item.passed for item in results
         )
@@ -321,6 +556,23 @@ class CompletionEvaluator:
         elif criterion.kind is CriterionKind.OUTPUT_PRODUCED:
             passed = any(item.get("data") is not None for item in outputs)
             evidence = "typed-output-observed" if passed else "output-missing"
+        elif criterion.kind is CriterionKind.PROJECT_ANALYZED:
+            analysis: Mapping[str, object] | None = None
+            for item in outputs:
+                data = item.get("data")
+                if isinstance(data, Mapping) and isinstance(
+                    data.get("languages"), Mapping
+                ):
+                    analysis = data
+                    break
+            passed = isinstance(analysis, Mapping) and isinstance(
+                analysis.get("files"), int
+            )
+            evidence = (
+                "project-language-map-and-structure-observed"
+                if passed
+                else "project-analysis-missing"
+            )
         elif criterion.kind is CriterionKind.COMMAND_EXITED_ZERO:
             passed = any(_exit_code_zero(item) for item in outputs)
             evidence = "sandbox-exit-zero" if passed else "sandbox-command-failed"
@@ -328,6 +580,28 @@ class CompletionEvaluator:
             capability = capabilities.discover(_required(criterion.target))
             passed = capability.available and capability.version is not None
             evidence = "version-probe-passed" if passed else "tool-unavailable"
+        elif criterion.kind is CriterionKind.VM_READY:
+            preflight = next(
+                (
+                    item.get("data")
+                    for item in outputs
+                    if isinstance(item.get("data"), Mapping)
+                    and item.get("step_id") == "step-vm-preflight"
+                ),
+                None,
+            )
+            passed = isinstance(preflight, Mapping) and preflight.get("ready") is True
+            evidence = "vm-prerequisites-verified" if passed else "vm-prerequisites-missing"
+        elif criterion.kind is CriterionKind.VM_CREATED:
+            passed = any(_vm_created(item) for item in outputs)
+            evidence = (
+                "vm-artifact-and-guest-checks-observed"
+                if passed
+                else "vm-creation-not-performed"
+            )
+        elif criterion.kind is CriterionKind.RESEARCHED:
+            passed = any(_research_completed(item) for item in outputs)
+            evidence = "bounded-research-plan-observed" if passed else "research-plan-missing"
         elif criterion.kind is CriterionKind.E2E_VERIFIED:
             passed = _direct_e2e(goal, project_root, outputs, capabilities)
             evidence = "public-boundary-reverified" if passed else "e2e-recheck-failed"
@@ -413,6 +687,84 @@ class AutonomyRuntime:
             initial_attempts=record.attempts,
         )
 
+    def undo(self, session_id: str, step: int = 1) -> dict[str, object]:
+        """Restore one of the last five durable mutation checkpoints."""
+        if type(step) is not int or not 1 <= step <= 5:
+            raise ValueError("undo step must be between 1 and 5")
+        checkpoints = self.tasks.list_checkpoints(
+            session_id, statuses=frozenset({"discarded"}), limit=5
+        )
+        if len(checkpoints) < step:
+            raise ValueError("requested undo step is not available")
+        checkpoint = checkpoints[step - 1]
+        result = self.checkpoints.restore(checkpoint)
+        verification = self.audit.verify()
+        return {
+            "session_id": session_id,
+            "step": step,
+            "checkpoint_id": result.checkpoint_id,
+            "restored": result.restored,
+            "diagnostic": result.diagnostic,
+            "audit_ok": verification.ok,
+            "remaining_undo": max(0, len(checkpoints) - step),
+        }
+
+    def audit_status(self) -> dict[str, object]:
+        verification = self.audit.verify()
+        return {
+            "ok": verification.ok,
+            "code": verification.code,
+            "sequence": verification.sequence,
+            "head_hash": verification.head_hash,
+        }
+
+    def audit_events(self, limit: int = 100) -> tuple[dict[str, object], ...]:
+        """Expose bounded sanitized events for the local process viewer."""
+        return self.audit.recent_events(limit=limit)
+
+    def export_audit_log(self, session_id: str | None = None) -> dict[str, object]:
+        """Persist a redacted audit snapshot beneath the project Protokolle folder."""
+        if session_id is not None and (
+            type(session_id) is not str or not session_id.startswith("session-")
+        ):
+            raise ValueError("session id is invalid")
+        events = self.audit.recent_events(limit=200)
+        if session_id is not None:
+            events = tuple(
+                event for event in events if event["session_id"] == session_id
+            )
+        directory = self.config.paths.project_root / "Protokolle"
+        if directory.exists() and directory.is_symlink():
+            raise ValueError("audit directory must not be a symlink")
+        directory.mkdir(mode=0o700, exist_ok=True)
+        filename = f"audit-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
+        destination = directory / filename
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".audit-", dir=directory)
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, 0o600)
+            payload = json.dumps(
+                {"session_id": session_id, "events": list(events)},
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            with os.fdopen(descriptor, "wb", closefd=True) as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            temporary.unlink(missing_ok=True)
+            raise
+        return {
+            "path": destination.relative_to(self.config.paths.project_root).as_posix(),
+            "event_count": len(events),
+        }
+
     def _execute(
         self,
         session_id: str,
@@ -426,6 +778,40 @@ class AutonomyRuntime:
         outputs: list[Mapping[str, object]] = list(initial_outputs)
         loops = LoopDetector()
         attempts = initial_attempts
+        assessment = self.planner.assess(plan, self.config.paths.project_root)
+        problem_solving: list[Mapping[str, object]] = [
+            {
+                "phase": "planning",
+                "strategy": "preflight-dependency-graph",
+                "valid": assessment.valid,
+                "risk": assessment.risk,
+                "ordered_step_ids": list(assessment.ordered_step_ids),
+                "issues": list(assessment.issues),
+            }
+        ]
+        if not assessment.valid:
+            report = self.completion.evaluate(
+                goal,
+                self.config.paths.project_root,
+                tuple(outputs),
+                self.capabilities,
+            )
+            self.tasks.transition(
+                session_id,
+                status="failed",
+                current_step=start_step,
+                attempts=attempts,
+                completion=report.to_dict(),
+                outcome="plan-preflight-failed",
+            )
+            return RuntimeResult(
+                session_id,
+                "failed",
+                report,
+                tuple(outputs),
+                tuple(problem_solving),
+                assessment.to_dict(),
+            )
         for index in range(start_step, len(plan)):
             step = plan[index]
             checkpoint = (
@@ -435,6 +821,7 @@ class AutonomyRuntime:
                 else None
             )
             succeeded = False
+            recovery_attempted = False
             for _attempt in range(3):
                 attempts += 1
                 self.tasks.transition(
@@ -446,15 +833,125 @@ class AutonomyRuntime:
                 )
                 output = self._execute_step(session_id, step)
                 outputs.append(output)
+                if step.kind is StepKind.ENSURE_CAPABILITY:
+                    research = output.get("data")
+                    if isinstance(research, Mapping) and isinstance(
+                        research.get("research_source"), str
+                    ):
+                        problem_solving.append(
+                            {
+                                "phase": "research",
+                                "step_id": step.step_id,
+                                "capability": step.tool,
+                                "source": research["research_source"],
+                                "package_manager": research.get("package_manager"),
+                                "package": research.get("package"),
+                                "reboot_required": research.get("reboot_required"),
+                                "outcome": (
+                                    "available"
+                                    if output.get("success") is True
+                                    else "blocked-or-unavailable"
+                                ),
+                            }
+                        )
+                if step.tool == "system.research-goal":
+                    research = output.get("data")
+                    if isinstance(research, Mapping) and research.get(
+                        "research_completed"
+                    ) is True:
+                        problem_solving.append(
+                            {
+                                "phase": "research",
+                                "step_id": step.step_id,
+                                "goal_class": research.get("goal_class"),
+                                "browser_opened": research.get("browser_opened"),
+                                "network_used": research.get("network_used"),
+                                "outcome": "bounded-plan-created",
+                            }
+                        )
                 if output.get("success") is True:
                     succeeded = True
                     break
                 analysis = self.failures.analyze(step, output)
                 fingerprint = loops.observe(step, analysis.category, output)
-                repair = self.replanner.decide(
-                    analysis,
-                    repeated=loops.repeated(fingerprint),
-                    mutation_started=checkpoint is not None,
+                problem_solving.append(
+                    {
+                        "phase": "diagnosis",
+                        "step_id": step.step_id,
+                        "category": analysis.category.value,
+                        "root_cause": analysis.root_cause,
+                        "evidence": list(analysis.evidence),
+                        "missing_dependency": analysis.missing_dependency,
+                        "candidate_actions": list(analysis.candidate_actions),
+                    }
+                )
+                if analysis.missing_dependency is not None:
+                    problem_solving.append(
+                        {
+                            "phase": "research",
+                            "step_id": step.step_id,
+                            "dependency": analysis.missing_dependency,
+                            "source": "local-runtime-diagnostics",
+                            "browser_opened": False,
+                            "outcome": "package-policy-required-before-install",
+                        }
+                    )
+                if (
+                    step.kind is StepKind.TOOL
+                    and analysis.missing_capability is not None
+                    and not recovery_attempted
+                ):
+                    recovery_attempted = True
+                    recovery_step = PlanStep(
+                        step_id=f"recover-capability-{analysis.missing_capability}",
+                        kind=StepKind.ENSURE_CAPABILITY,
+                        tool=analysis.missing_capability,
+                        arguments={"name": analysis.missing_capability},
+                        target=self.config.paths.project_root,
+                        mutates=False,
+                    )
+                    recovery_output = self._execute_step(session_id, recovery_step)
+                    outputs.append(recovery_output)
+                    recovery_ok = recovery_output.get("success") is True
+                    problem_solving.append(
+                        {
+                            "phase": "replan",
+                            "step_id": step.step_id,
+                            "strategy": "provision-missing-capability",
+                            "capability": analysis.missing_capability,
+                            "outcome": "verified" if recovery_ok else "unavailable",
+                        }
+                    )
+                    if recovery_ok:
+                        self.tasks.transition(
+                            session_id,
+                            status="recovering",
+                            current_step=index,
+                            attempts=attempts,
+                            failure_fingerprint=fingerprint,
+                            outcome="capability-provisioned-retry",
+                        )
+                        continue
+                repair = (
+                    RepairAction.STOP
+                    if (
+                        analysis.missing_dependency is not None
+                        or _capability_install_blocked(output)
+                    )
+                    else self.replanner.decide(
+                        analysis,
+                        repeated=loops.repeated(fingerprint),
+                        mutation_started=checkpoint is not None,
+                    )
+                )
+                problem_solving.append(
+                    {
+                        "phase": "replan",
+                        "step_id": step.step_id,
+                        "strategy": repair.value,
+                        "outcome": "continue" if repair is not RepairAction.STOP else "stop",
+                        "reason": analysis.root_cause,
+                    }
                 )
                 self.tasks.transition(
                     session_id,
@@ -491,7 +988,14 @@ class AutonomyRuntime:
                     completion=report.to_dict(),
                     outcome="verified-failure",
                 )
-                return RuntimeResult(session_id, "failed", report, tuple(outputs))
+                return RuntimeResult(
+                    session_id,
+                    "failed",
+                    report,
+                    tuple(outputs),
+                    tuple(problem_solving),
+                    assessment.to_dict(),
+                )
             self.tasks.transition(
                 session_id,
                 status="running",
@@ -514,9 +1018,18 @@ class AutonomyRuntime:
             completion=report.to_dict(),
             outcome="verified-complete" if report.completed else "completion-rejected",
         )
-        return RuntimeResult(session_id, status, report, tuple(outputs))
+        return RuntimeResult(
+            session_id,
+            status,
+            report,
+            tuple(outputs),
+            tuple(problem_solving),
+            assessment.to_dict(),
+        )
 
     def _execute_step(self, session_id: str, step: PlanStep) -> Mapping[str, object]:
+        if step.tool == "system.local-model-goal":
+            return self._execute_model_step(session_id, step)
         if step.kind is StepKind.ENSURE_CAPABILITY:
             current = self.capabilities.discover(step.tool)
             if current.available:
@@ -560,6 +1073,191 @@ class AutonomyRuntime:
         context = self._execution_context(session_id, step.target)
         tool_result = self.tools.execute(step.tool, step.arguments, context)
         return _tool_output(step, tool_result)
+
+    def _execute_model_step(
+        self, session_id: str, step: PlanStep
+    ) -> Mapping[str, object]:
+        goal = step.arguments.get("goal")
+        if not isinstance(goal, str):
+            return {
+                "step_id": step.step_id,
+                "success": False,
+                "status": "error",
+                "diagnostic_code": "invalid-model-goal",
+                "diagnostic": "model goal is invalid",
+                "data": None,
+            }
+        action_number = 0
+        mutation_checkpoints: list[CheckpointRecord] = []
+
+        def rollback_model_mutations() -> None:
+            for checkpoint in reversed(mutation_checkpoints):
+                try:
+                    self.checkpoints.restore(checkpoint)
+                except (OSError, RuntimeError, ValueError):
+                    # The runtime still reports failure; recovery remains auditable.
+                    pass
+            mutation_checkpoints.clear()
+
+        def discard_model_mutations() -> None:
+            for checkpoint in mutation_checkpoints:
+                self.checkpoints.discard(checkpoint)
+            mutation_checkpoints.clear()
+
+        def dispatch(
+            tool_name: str, arguments: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            nonlocal action_number
+            action_number += 1
+            action_id = f"model-action-{action_number}"
+            if tool_name == "project.read-file":
+                raw_path = arguments.get("path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-path"}
+                target = (self.config.paths.project_root / raw_path).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "path-outside-project"}
+                action_step = PlanStep(
+                    action_id,
+                    StepKind.TOOL,
+                    tool_name,
+                    {"path": str(target)},
+                    target,
+                    False,
+                )
+                return _tool_output(action_step, self.tools.execute(
+                    tool_name,
+                    action_step.arguments,
+                    self._execution_context(session_id, target),
+                ))
+            if tool_name == "project.write-file":
+                raw_path = arguments.get("path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-path"}
+                content = arguments.get("content")
+                if not isinstance(content, str):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-content"}
+                target = (self.config.paths.project_root / raw_path).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "path-outside-project"}
+                try:
+                    checkpoint = self.checkpoints.create(session_id, action_id, target)
+                    mutation_checkpoints.append(checkpoint)
+                    action_step = PlanStep(
+                        action_id,
+                        StepKind.TOOL,
+                        tool_name,
+                        {"path": str(target), "content": content},
+                        target,
+                        True,
+                    )
+                    result = _tool_output(action_step, self.tools.execute(
+                        tool_name,
+                        action_step.arguments,
+                        self._execution_context(session_id, target),
+                    ))
+                    if result.get("success") is not True:
+                        self.checkpoints.restore(checkpoint)
+                        mutation_checkpoints.remove(checkpoint)
+                    return result
+                except (OSError, RuntimeError, ValueError) as error:
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "diagnostic_code": "model-write-failed",
+                        "diagnostic": str(error)[:240],
+                    }
+            if tool_name == "project.run-process":
+                raw_argv = arguments.get("argv")
+                if not isinstance(raw_argv, list) or not raw_argv or not all(
+                    isinstance(item, str) for item in raw_argv
+                ):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-argv"}
+                cwd = arguments.get("cwd", ".")
+                if not isinstance(cwd, str):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-cwd"}
+                target = (self.config.paths.project_root / cwd).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "cwd-outside-project"}
+                action_step = PlanStep(
+                    action_id,
+                    StepKind.TOOL,
+                    tool_name,
+                    {"argv": raw_argv, "cwd": str(target)},
+                    target,
+                    not _command_is_read_only(tuple(raw_argv)),
+                )
+                process_checkpoint: CheckpointRecord | None = None
+                try:
+                    if action_step.mutates:
+                        process_checkpoint = self.checkpoints.create(
+                            session_id, action_id, target
+                        )
+                        mutation_checkpoints.append(process_checkpoint)
+                    result = _tool_output(action_step, self.tools.execute(
+                        tool_name,
+                        action_step.arguments,
+                        self._execution_context(session_id, target),
+                    ))
+                except (OSError, RuntimeError, ValueError) as error:
+                    if process_checkpoint is not None:
+                        self.checkpoints.restore(process_checkpoint)
+                        mutation_checkpoints.remove(process_checkpoint)
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "diagnostic_code": "model-process-failed",
+                        "diagnostic": str(error)[:240],
+                    }
+                if result.get("success") is not True and process_checkpoint is not None:
+                    self.checkpoints.restore(process_checkpoint)
+                    mutation_checkpoints.remove(process_checkpoint)
+                data = result.get("data")
+                if result.get("success") is True and isinstance(data, Mapping):
+                    result = dict(result)
+                    result["verified"] = data.get("exit_code") == 0
+                return result
+            return {"success": False, "status": "denied", "diagnostic_code": "model-tool-denied"}
+
+        try:
+            model_run = LocalModelRunner().run(goal, dispatch)
+        except LocalModelError as error:
+            rollback_model_mutations()
+            return {
+                "step_id": step.step_id,
+                "success": False,
+                "status": "error",
+                "diagnostic_code": "local-model-unavailable",
+                "diagnostic": str(error),
+                "data": {"completed": False, "verified": False, "actions": []},
+            }
+        if model_run.completed and model_run.verified:
+            discard_model_mutations()
+        else:
+            rollback_model_mutations()
+        return {
+            "step_id": step.step_id,
+            "success": model_run.completed and model_run.verified,
+            "status": "ok" if model_run.completed and model_run.verified else "error",
+            "diagnostic_code": (
+                None
+                if model_run.completed
+                else (
+                    "model-loop-detected"
+                    if "loop detected" in model_run.summary.casefold()
+                    else "model-did-not-verify"
+                )
+            ),
+            "diagnostic": model_run.summary,
+            "data": {
+                "model": model_run.model,
+                "completed": model_run.completed,
+                "verified": model_run.verified,
+                "turns": model_run.turns,
+                "actions": list(model_run.actions),
+                "summary": model_run.summary,
+            },
+        }
 
     def _execution_context(
         self, session_id: str, target: Path
@@ -617,6 +1315,109 @@ def _tool_output(step: PlanStep, result: ToolResult) -> Mapping[str, object]:
     }
 
 
+def _failure_evidence(result: Mapping[str, object]) -> tuple[str, ...]:
+    """Extract bounded, non-secret diagnostics for explainable recovery."""
+    evidence: list[str] = []
+    diagnostic_code = result.get("diagnostic_code")
+    if isinstance(diagnostic_code, str) and diagnostic_code:
+        evidence.append(f"diagnostic:{diagnostic_code[:80]}")
+    data = result.get("data")
+    if isinstance(data, Mapping):
+        exit_code = data.get("exit_code")
+        if type(exit_code) is int:
+            evidence.append(f"exit-code:{exit_code}")
+        for name in ("stderr", "stdout"):
+            value = data.get(name)
+            if isinstance(value, str) and value.strip():
+                compact = " ".join(value.split())[:240]
+                evidence.append(f"{name}:{compact}")
+    return tuple(evidence[:6])
+
+
+def _effective_outputs(
+    outputs: tuple[Mapping[str, object], ...],
+) -> tuple[Mapping[str, object], ...]:
+    """Keep the last observation for each step after bounded retries/replans."""
+    latest: dict[str, tuple[int, Mapping[str, object]]] = {}
+    unkeyed: list[tuple[int, Mapping[str, object]]] = []
+    for index, output in enumerate(outputs):
+        step_id = output.get("step_id")
+        if not isinstance(step_id, str) or not step_id:
+            unkeyed.append((index, output))
+            continue
+        latest[step_id] = (index, output)
+    selected = [*unkeyed, *latest.values()]
+    selected.sort(key=lambda item: item[0])
+    return tuple(item[1] for item in selected)
+
+
+def _missing_capability(
+    step: PlanStep, result: Mapping[str, object]
+) -> str | None:
+    """Identify a safe executable candidate from a command-not-found result."""
+    if step.kind is StepKind.ENSURE_CAPABILITY:
+        return step.tool
+    data = result.get("data")
+    parts: list[str] = []
+    if isinstance(data, Mapping):
+        for name in ("stderr", "stdout"):
+            value = data.get(name)
+            if isinstance(value, str):
+                parts.append(value)
+        exit_code = data.get("exit_code")
+        if exit_code == 127:
+            parts.append("exit-code-127")
+    diagnostic = result.get("diagnostic")
+    if isinstance(diagnostic, str):
+        parts.append(diagnostic)
+    text = "\n".join(parts)
+    match = re.search(
+        r"(?:^|[:\s])([A-Za-z0-9][A-Za-z0-9._+-]{0,63}):\s*(?:command not found|not found)"
+        r"|(?:command not found[: ]+|not found[: ]+|No such file or directory[: ]*)"
+        r"([A-Za-z0-9][A-Za-z0-9._+-]{0,63})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    candidate = match.group(1) or match.group(2)
+    if candidate is None:
+        return None
+    if candidate in {"command", "file", "directory"}:
+        return None
+    return candidate
+
+
+def _missing_python_module(result: Mapping[str, object]) -> str | None:
+    data = result.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    text = "\n".join(
+        value for name in ("stderr", "stdout")
+        if isinstance(value := data.get(name), str)
+    )
+    match = re.search(
+        r"No module named ['\"]?([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return None if match is None else match.group(1)
+
+
+def _capability_install_blocked(result: Mapping[str, object]) -> bool:
+    """Return true when trusted research explicitly forbids unattended install."""
+    data = result.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    return data.get("diagnostic") in {
+        "untrusted-or-unsupported-tool",
+        "installed-reboot-required",
+    } or (
+        data.get("research_source") == "host-profile"
+        and data.get("package_manager") == "rpm-ostree"
+    )
+
+
 def _goal_document(goal: NormalizedGoal) -> dict[str, object]:
     return {
         "original": goal.original,
@@ -646,6 +1447,8 @@ def _step_document(step: PlanStep) -> dict[str, object]:
         "arguments": dict(step.arguments),
         "target": str(step.target),
         "mutates": step.mutates,
+        "depends_on": list(step.depends_on),
+        "purpose": step.purpose,
     }
 
 
@@ -689,6 +1492,9 @@ def _plan_from_documents(
         arguments = document.get("arguments")
         if not isinstance(arguments, Mapping):
             raise TypeError("persisted plan arguments are invalid")
+        raw_dependencies = document.get("depends_on", [])
+        if not isinstance(raw_dependencies, list):
+            raise TypeError("persisted plan dependencies are invalid")
         steps.append(
             PlanStep(
                 step_id=str(document["step_id"]),
@@ -697,6 +1503,8 @@ def _plan_from_documents(
                 arguments=dict(arguments),
                 target=Path(str(document["target"])),
                 mutates=bool(document["mutates"]),
+                depends_on=tuple(str(item) for item in raw_dependencies),
+                purpose=str(document.get("purpose", "")),
             )
         )
     return tuple(steps)
@@ -741,10 +1549,40 @@ def _direct_e2e(
             return False
     if goal.kind in {GoalKind.READ_FILE, GoalKind.LIST_FILES}:
         return any(item.get("data") is not None for item in outputs)
+    if goal.kind is GoalKind.ANALYZE_PROJECT:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("languages"), Mapping
+            ) and isinstance(data.get("files"), int):
+                return True
+        return False
+    if goal.kind is GoalKind.SECURITY_SCAN:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("files_scanned"), int
+            ) and isinstance(data.get("findings"), list):
+                return True
+        return False
+    if goal.kind is GoalKind.HOST_SECURITY_SCAN:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("checks"), list
+            ) and isinstance(data.get("findings"), list):
+                return True
+        return False
     if goal.kind is GoalKind.RUN_COMMAND:
         return any(_exit_code_zero(item) for item in outputs)
     if goal.kind is GoalKind.INSTALL_TOOL:
         return capabilities.discover(_required(goal.target)).available
+    if goal.kind is GoalKind.VM_BUILD:
+        return any(_vm_created(item) for item in outputs)
+    if goal.kind is GoalKind.RESEARCH_TASK:
+        if goal.target == "research-only":
+            return any(_research_completed(item) for item in outputs)
+        return any(_model_verified(item) for item in outputs)
     return False
 
 
@@ -754,9 +1592,90 @@ def _required(value: str | None) -> str:
     return value
 
 
+def _command_is_read_only(argv: tuple[str, ...]) -> bool:
+    """Avoid tree snapshots for commands that cannot mutate the project.
+
+    A whole-project checkpoint is intentionally bounded.  Large repositories
+    should still be able to run diagnostics and probes; only commands with a
+    credible mutation path require the expensive rollback snapshot.
+    """
+    if not argv:
+        return False
+    executable = Path(argv[0]).name.casefold()
+    if executable in {
+        "cat",
+        "echo",
+        "find",
+        "grep",
+        "head",
+        "ls",
+        "printf",
+        "pwd",
+        "rg",
+        "tail",
+        "true",
+        "false",
+        "which",
+    }:
+        return True
+    if executable == "git":
+        return len(argv) > 1 and argv[1].casefold() in {
+            "branch",
+            "diff",
+            "log",
+            "ls-files",
+            "status",
+            "show",
+            "rev-parse",
+        }
+    if executable in {"python", "python3", "python3.12", "python3.14"}:
+        command = " ".join(argv[1:]).casefold()
+        if "-c" not in command and "-m" not in command:
+            return False
+        return not any(
+            marker in command
+            for marker in (
+                "open(",
+                ".write(",
+                ".unlink(",
+                ".rename(",
+                ".replace(",
+                ".mkdir(",
+                ".rmdir(",
+                "subprocess",
+                "shutil.",
+                "os.system",
+            )
+        )
+    return False
+
+
 def _exit_code_zero(output: Mapping[str, object]) -> bool:
     data = output.get("data")
     return isinstance(data, Mapping) and data.get("exit_code") == 0
+
+
+def _vm_created(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return (
+        isinstance(data, Mapping)
+        and data.get("created") is True
+        and data.get("verified") is True
+    )
+
+
+def _research_completed(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return isinstance(data, Mapping) and data.get("research_completed") is True
+
+
+def _model_verified(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return (
+        isinstance(data, Mapping)
+        and data.get("completed") is True
+        and data.get("verified") is True
+    )
 
 
 __all__ = [
@@ -767,6 +1686,7 @@ __all__ = [
     "FailureAnalyzer",
     "FailureCategory",
     "LoopDetector",
+    "PlanAssessment",
     "PlanStep",
     "Planner",
     "RepairAction",

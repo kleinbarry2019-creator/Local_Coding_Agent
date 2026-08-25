@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class RecoveryAuthority:
@@ -78,7 +78,7 @@ class RecoveryAuthority:
 
         history.append(
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "decision": self.decision,
                 "result": result
             }

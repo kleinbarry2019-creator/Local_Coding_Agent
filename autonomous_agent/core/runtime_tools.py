@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import os
+import re
 import shutil
 import stat
 import subprocess  # nosec B404
@@ -17,11 +19,19 @@ from autonomous_agent.core.tools import ExecutionContext, ToolRegistry, ToolSpec
 _MAX_FILE_BYTES = 1_048_576
 _MAX_ENTRIES = 2_000
 _MAX_ARGUMENTS = 256
+_MAX_ANALYSIS_FILES = 4_000
+_MAX_SECURITY_FILES = 2_000
+_MAX_SECURITY_FILE_BYTES = 256_000
+_MAX_SECURITY_FINDINGS = 128
 _TRUSTED_EXECUTABLE_ROOTS = (
     Path("/usr/bin"),
     Path("/bin"),
     Path("/usr/local/bin"),
     Path("/home/linuxbrew/.linuxbrew/bin"),
+)
+_PROTECTED_PROJECT_PARTS = frozenset({".git", ".ssh", ".gnupg"})
+_PROTECTED_PROJECT_NAMES = frozenset(
+    {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
 )
 
 
@@ -65,6 +75,26 @@ class ListFilesOutput:
 
 
 @dataclass(frozen=True)
+class AnalyzeProjectInput:
+    path: Path
+
+
+@dataclass(frozen=True)
+class AnalyzeProjectOutput:
+    path: str
+    files: int
+    directories: int
+    bytes: int
+    languages: dict[str, int]
+    manifests: list[str]
+    test_hints: list[str]
+    architecture: dict[str, list[str]]
+    test_files: list[str]
+    test_commands: list[str]
+    truncated: bool
+
+
+@dataclass(frozen=True)
 class RunProcessInput:
     argv: list[str]
     cwd: Path
@@ -76,6 +106,29 @@ class RunProcessOutput:
     exit_code: int
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class SecurityScanInput:
+    path: Path
+
+
+@dataclass(frozen=True)
+class SecurityFinding:
+    path: str
+    line: int
+    rule: str
+    severity: str
+    message: str
+
+
+@dataclass(frozen=True)
+class SecurityScanOutput:
+    path: str
+    clean: bool
+    files_scanned: int
+    findings: list[SecurityFinding]
+    truncated: bool
 
 
 class ProjectPathResolver:
@@ -187,6 +240,24 @@ class ProjectToolRuntime:
         )
         registry.register(
             ToolSpec(
+                name="project.analyze",
+                version="1.1.0",
+                description="Analyze bounded project structure, architecture, and test plan.",
+                input_type=AnalyzeProjectInput,
+                output_type=AnalyzeProjectOutput,
+                capabilities=frozenset({"project.read"}),
+                side_effect=SideEffect.READ_ONLY,
+                network=NetworkKind.NONE,
+                requires_elevation=False,
+                requires_recovery=False,
+                default_timeout_s=10.0,
+                max_output_bytes=131_072,
+                handler=self.analyze_project,
+                target_resolver=lambda item: (item.path,),
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="project.run-process",
                 version="1.0.0",
                 description="Run a command without a shell in a networkless sandbox.",
@@ -203,6 +274,24 @@ class ProjectToolRuntime:
                 target_resolver=lambda item: (item.cwd,),
             )
         )
+        registry.register(
+            ToolSpec(
+                name="project.security-scan",
+                version="1.0.0",
+                description="Scan bounded project text for common secrets and dangerous execution patterns.",
+                input_type=SecurityScanInput,
+                output_type=SecurityScanOutput,
+                capabilities=frozenset({"project.security-scan"}),
+                side_effect=SideEffect.READ_ONLY,
+                network=NetworkKind.NONE,
+                requires_elevation=False,
+                requires_recovery=False,
+                default_timeout_s=15.0,
+                max_output_bytes=131_072,
+                handler=self.security_scan,
+                target_resolver=lambda item: (item.path,),
+            )
+        )
         return registry
 
     def read_file(
@@ -210,6 +299,7 @@ class ProjectToolRuntime:
     ) -> ReadFileOutput:
         del context
         path = self.paths.resolve(request.path)
+        _reject_protected_project_path(path, self.project_root)
         if not path.is_file():
             raise RuntimeToolError("read target is not a regular file")
         payload = path.read_bytes()
@@ -233,6 +323,7 @@ class ProjectToolRuntime:
         if len(payload) > _MAX_FILE_BYTES:
             raise RuntimeToolError("write content exceeds the byte limit")
         path = self.paths.resolve(request.path, allow_missing=True)
+        _reject_protected_project_path(path, self.project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{path.name}.", dir=path.parent
@@ -281,6 +372,115 @@ class ProjectToolRuntime:
             entries=entries,
         )
 
+    def analyze_project(
+        self, request: AnalyzeProjectInput, context: ExecutionContext
+    ) -> AnalyzeProjectOutput:
+        del context
+        path = self.paths.resolve(request.path)
+        if not path.is_dir():
+            raise RuntimeToolError("analysis target is not a directory")
+        languages: dict[str, int] = {}
+        manifests: list[str] = []
+        test_hints: list[str] = []
+        architecture: dict[str, list[str]] = {}
+        test_files: list[str] = []
+        total_bytes = 0
+        files = 0
+        directories = 0
+        truncated = False
+        extensions = {
+            ".py": "Python",
+            ".js": "JavaScript",
+            ".jsx": "JavaScript/JSX",
+            ".ts": "TypeScript",
+            ".tsx": "TypeScript/TSX",
+            ".java": "Java",
+            ".kt": "Kotlin",
+            ".go": "Go",
+            ".rs": "Rust",
+            ".c": "C",
+            ".h": "C/C++ headers",
+            ".cpp": "C++",
+            ".cs": "C#",
+            ".swift": "Swift",
+            ".rb": "Ruby",
+            ".php": "PHP",
+            ".dart": "Dart",
+            ".scala": "Scala",
+            ".sh": "Shell",
+            ".sql": "SQL",
+            ".html": "HTML",
+            ".css": "CSS",
+        }
+        known_manifests = {
+            "pyproject.toml": "Python project metadata",
+            "package.json": "Node.js project metadata",
+            "Cargo.toml": "Rust project metadata",
+            "go.mod": "Go module metadata",
+            "pom.xml": "Maven project metadata",
+            "build.gradle": "Gradle project metadata",
+            "composer.json": "PHP Composer metadata",
+            "Gemfile": "Ruby Bundler metadata",
+            "Package.swift": "Swift package metadata",
+            "CMakeLists.txt": "CMake build metadata",
+            "Makefile": "Make build metadata",
+        }
+        for item in sorted(path.rglob("*")):
+            if item.is_symlink():
+                continue
+            if item.is_dir():
+                directories += 1
+                continue
+            if not item.is_file():
+                continue
+            files += 1
+            relative = item.relative_to(self.project_root).as_posix()
+            if item.name in known_manifests and len(manifests) < 64:
+                manifests.append(f"{relative}: {known_manifests[item.name]}")
+            if (
+                item.name
+                in {"pytest.ini", "tox.ini", "setup.cfg", "jest.config.js", "vitest.config.ts"}
+                and len(test_hints) < 64
+            ):
+                test_hints.append(relative)
+            if _is_test_file(relative) and len(test_files) < 256:
+                test_files.append(relative)
+            language = extensions.get(item.suffix.casefold())
+            if language is not None:
+                languages[language] = languages.get(language, 0) + 1
+                if len(architecture) < 256 and _is_source_file(item):
+                    imports = _extract_imports(item, language)
+                    if imports:
+                        architecture[relative] = imports
+            try:
+                total_bytes += item.stat().st_size
+            except OSError:
+                pass
+            if files >= _MAX_ANALYSIS_FILES:
+                truncated = True
+                break
+        for manifest in manifests:
+            if manifest.endswith("pyproject.toml: Python project metadata"):
+                test_hints.append("Python: pytest/unittest discovery should be checked")
+            elif manifest.endswith("package.json: Node.js project metadata"):
+                test_hints.append("Node.js: package scripts should be inspected")
+            elif manifest.endswith("Cargo.toml: Rust project metadata"):
+                test_hints.append("Rust: cargo test/check should be inspected")
+        test_commands = _test_commands(manifests, test_hints, languages)
+        return AnalyzeProjectOutput(
+            path=path.relative_to(self.project_root).as_posix() or ".",
+            files=files,
+            directories=directories,
+            bytes=total_bytes,
+            languages=dict(sorted(languages.items())),
+            manifests=manifests,
+            test_hints=list(dict.fromkeys(test_hints)),
+            architecture={key: architecture[key] for key in sorted(architecture)},
+            test_files=sorted(test_files),
+            test_commands=test_commands,
+            truncated=truncated,
+        )
+
     def run_process(
         self, request: RunProcessInput, context: ExecutionContext
     ) -> RunProcessOutput:
@@ -319,6 +519,64 @@ class ProjectToolRuntime:
             stderr=result.stderr[:cap].decode("utf-8", errors="replace"),
         )
 
+    def security_scan(
+        self, request: SecurityScanInput, context: ExecutionContext
+    ) -> SecurityScanOutput:
+        del context
+        root = self.paths.resolve(request.path)
+        if not root.is_dir():
+            raise RuntimeToolError("security scan target is not a directory")
+        rules = (
+            ("private-key", "critical", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+            ("cloud-access-key", "high", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+            ("token-assignment", "high", re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*['\"][^'\"]{8,}")),
+            ("shell-execution", "high", re.compile(r"(?i)\bshell\s*=\s*True\b|\bcurl\b[^\n|]*\|\s*(?:sh|bash)\b")),
+            ("dynamic-eval", "medium", re.compile(r"\b(?:eval|exec)\s*\(")),
+        )
+        findings: list[SecurityFinding] = []
+        files_scanned = 0
+        truncated = False
+        for candidate in sorted(root.rglob("*")):
+            if files_scanned >= _MAX_SECURITY_FILES:
+                truncated = True
+                break
+            if candidate.is_symlink() or not candidate.is_file() or ".git" in candidate.parts:
+                continue
+            try:
+                payload = candidate.read_bytes()
+            except OSError:
+                continue
+            if len(payload) > _MAX_SECURITY_FILE_BYTES or b"\x00" in payload:
+                continue
+            files_scanned += 1
+            text = payload.decode("utf-8", errors="replace")
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                for rule, severity, pattern in rules:
+                    if pattern.search(line):
+                        findings.append(
+                            SecurityFinding(
+                                path=candidate.relative_to(self.project_root).as_posix(),
+                                line=line_number,
+                                rule=rule,
+                                severity=severity,
+                                message="Pattern requires review; secret values are never included.",
+                            )
+                        )
+                        if len(findings) >= _MAX_SECURITY_FINDINGS:
+                            truncated = True
+                            break
+                if len(findings) >= _MAX_SECURITY_FINDINGS:
+                    break
+            if len(findings) >= _MAX_SECURITY_FINDINGS:
+                break
+        return SecurityScanOutput(
+            path=root.relative_to(self.project_root).as_posix() or ".",
+            clean=not findings,
+            files_scanned=files_scanned,
+            findings=findings,
+            truncated=truncated,
+        )
+
 
 def _trusted_executable(command: str, project_root: Path) -> Path:
     if not command or "/" in command or "\x00" in command:
@@ -342,6 +600,84 @@ def _trusted_executable(command: str, project_root: Path) -> Path:
     if discovered is not None:
         return Path(discovered).resolve(strict=True)
     raise RuntimeToolError("process executable is unavailable")
+
+
+def _reject_protected_project_path(path: Path, project_root: Path) -> None:
+    """Keep repository metadata and common credential files out of tool I/O."""
+    relative = path.relative_to(project_root)
+    if any(part in _PROTECTED_PROJECT_PARTS for part in relative.parts) or path.name in _PROTECTED_PROJECT_NAMES:
+        raise RuntimeToolError("protected project path is not available to the agent")
+
+
+_IMPORT_PATTERNS = (
+    re.compile(r"^\s*import\s+([A-Za-z0-9_.$]+)", re.MULTILINE),
+    re.compile(r"^\s*from\s+([A-Za-z0-9_.$/:-]+)\s+import\b", re.MULTILINE),
+    re.compile(r"(?:import|require)\s*\(?\s*[\"']([^\"']+)[\"']", re.MULTILINE),
+)
+
+
+def _is_test_file(relative: str) -> bool:
+    name = Path(relative).name.casefold()
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+        or Path(relative).parts[0:1] == ("tests",)
+    )
+
+
+def _is_source_file(path: Path) -> bool:
+    return path.suffix.casefold() in {
+        ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go",
+        ".rs", ".c", ".h", ".cpp", ".cs", ".swift", ".rb", ".php",
+        ".dart", ".scala",
+    }
+
+
+def _extract_imports(path: Path, language: str) -> list[str]:
+    try:
+        source = path.read_text(encoding="utf-8", errors="replace")[:_MAX_FILE_BYTES]
+    except OSError:
+        return []
+    found: list[str] = []
+    if language == "Python":
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except (SyntaxError, ValueError):
+            tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    found.extend(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    found.append("." * node.level + node.module)
+    else:
+        for pattern in _IMPORT_PATTERNS:
+            found.extend(pattern.findall(source))
+    return list(dict.fromkeys(item[:160] for item in found if item))[:16]
+
+
+def _test_commands(
+    manifests: list[str], test_hints: list[str], languages: dict[str, int]
+) -> list[str]:
+    names = {Path(item.split(":", 1)[0]).name for item in manifests}
+    commands: list[str] = []
+    if "pyproject.toml" in names or "pytest.ini" in test_hints or "Python" in languages:
+        commands.append("python -m pytest")
+    if "package.json" in names:
+        commands.append("npm test")
+    if "Cargo.toml" in names:
+        commands.append("cargo test")
+    if "go.mod" in names:
+        commands.append("go test ./...")
+    if "pom.xml" in names:
+        commands.append("mvn test")
+    if "build.gradle" in names:
+        commands.append("gradle test")
+    if "Makefile" in names:
+        commands.append("make test")
+    return list(dict.fromkeys(commands))[:8]
 
 
 def sandbox_command(
@@ -392,6 +728,8 @@ def sandbox_command(
 
 
 __all__ = [
+    "AnalyzeProjectInput",
+    "AnalyzeProjectOutput",
     "ListFilesInput",
     "ListFilesOutput",
     "ProjectPathResolver",
@@ -401,6 +739,9 @@ __all__ = [
     "RunProcessInput",
     "RunProcessOutput",
     "RuntimeToolError",
+    "SecurityFinding",
+    "SecurityScanInput",
+    "SecurityScanOutput",
     "WriteFileInput",
     "WriteFileOutput",
     "sandbox_command",

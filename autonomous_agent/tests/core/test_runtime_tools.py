@@ -91,6 +91,22 @@ def test_shared_registry_denies_scope_mismatch(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+def test_shared_registry_blocks_repository_metadata_and_credentials(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    (root / ".git").mkdir()
+    registry = ProjectToolRuntime(root).registry()
+
+    for relative in (".git/config", ".env", ".ssh/id_ed25519"):
+        target = root / relative
+        result = registry.execute(
+            "project.write-file",
+            {"path": str(target), "content": "must-not-write"},
+            _context(root, (target,)),
+        )
+        assert result.status is ToolStatus.ERROR
+        assert not target.exists()
+
+
 def test_shared_registry_rejects_symlink_escape(tmp_path: Path) -> None:
     root = (tmp_path / "project").resolve()
     root.mkdir()
@@ -124,3 +140,71 @@ def test_process_runs_without_shell_in_networkless_bubblewrap(tmp_path: Path) ->
     assert result.data is not None
     assert result.data["exit_code"] == 0
     assert result.data["stdout"] == "E2E_OK\n"
+
+
+def test_project_analysis_detects_languages_manifests_and_test_hints(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    (root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    (root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    (root / "web.ts").write_text("export const ok = true\n", encoding="utf-8")
+    result = ProjectToolRuntime(root).registry().execute(
+        "project.analyze",
+        {"path": str(root)},
+        _context(root, (root,)),
+    )
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["files"] == 4
+    assert result.data["languages"] == {"Python": 1, "TypeScript": 1}
+    assert "pytest.ini" in result.data["test_hints"]
+    assert any("Python project metadata" in item for item in result.data["manifests"])
+
+
+def test_project_analysis_builds_bounded_architecture_and_test_plan(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    (root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    (root / "app.py").write_text("from helper import run\nrun()\n", encoding="utf-8")
+    (root / "helper.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_app.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+
+    result = ProjectToolRuntime(root).registry().execute(
+        "project.analyze",
+        {"path": str(root)},
+        _context(root, (root,)),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["architecture"] == {"app.py": ["helper"]}
+    assert result.data["test_files"] == ["tests/test_app.py"]
+    assert result.data["test_commands"] == ["python -m pytest"]
+
+
+def test_security_scan_reports_findings_without_secret_values(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    (root / "app.py").write_text(
+        "API_KEY = 'not-a-real-secret-value'\nsubprocess.run(cmd, shell=True)\n",
+        encoding="utf-8",
+    )
+    result = ProjectToolRuntime(root).registry().execute(
+        "project.security-scan",
+        {"path": str(root)},
+        _context(root, (root,)),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["clean"] is False
+    findings = result.data["findings"]
+    assert isinstance(findings, list)
+    assert {item["rule"] for item in findings} == {
+        "token-assignment",
+        "shell-execution",
+    }
+    assert all("not-a-real-secret-value" not in str(item) for item in findings)

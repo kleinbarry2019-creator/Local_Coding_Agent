@@ -421,6 +421,25 @@ def test_first_session_starts_at_genesis_and_commits_state_atomically(
     assert json.loads(str(snapshot[0])) == _config(tmp_path).redacted_dict()
 
 
+def test_recent_events_returns_newest_bounded_sanitized_view(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    log = AuditLog(store)
+    _start(log, tmp_path)
+    log.append(_event(payload={"tool_name": "doctor.git", "status": "error", "diagnostic_code": "probe_failed"}))
+
+    events = log.recent_events(limit=1)
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "tool.failed"
+    assert events[0]["payload"] == {
+        "diagnostic_code": "probe_failed",
+        "status": "error",
+        "tool_name": "doctor.git",
+    }
+    with pytest.raises(ValueError):
+        log.recent_events(limit=201)
+
+
 def test_restart_continues_one_global_chain_and_verifies_from_genesis(
     tmp_path: Path,
 ) -> None:

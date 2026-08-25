@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -7,11 +8,17 @@ import pytest
 
 from autonomous_agent.core.autonomy import (
     AutonomyRuntime,
+    CompletionEvaluator,
     FailureAnalysis,
+    FailureAnalyzer,
     FailureCategory,
+    Planner,
+    PlanStep,
     RepairAction,
     Replanner,
+    StepKind,
 )
+from autonomous_agent.core.capabilities import CapabilityRegistry
 from autonomous_agent.core.config import (
     AgentConfig,
     ConfigError,
@@ -19,6 +26,24 @@ from autonomous_agent.core.config import (
     ResolvedPaths,
     ResourceLimits,
 )
+from autonomous_agent.core.goals import GoalNormalizer
+from autonomous_agent.core.local_model import (
+    LocalModelError,
+    LocalModelRunner,
+    ModelRun,
+)
+
+
+@pytest.fixture(autouse=True)
+def no_live_model_calls_in_runtime_unit_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the core suite deterministic; the integration test below supplies a fake model."""
+
+    def unavailable(*_args: object, **_kwargs: object) -> ModelRun:
+        raise LocalModelError("live local model disabled in unit tests")
+
+    monkeypatch.setattr(LocalModelRunner, "run", unavailable)
 
 
 def _config(tmp_path: Path) -> AgentConfig:
@@ -57,7 +82,270 @@ def test_runtime_completes_only_after_independent_file_readback(tmp_path: Path) 
     assert persisted.status == "completed"
     assert persisted.completion is not None
     assert persisted.completion["completed"] is True
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["valid"] is True
+    assert result.plan_assessment["ordered_step_ids"] == ["step-write"]
     assert runtime.audit.verify().ok
+
+
+def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    (config.paths.project_root / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
+    (config.paths.project_root / "main.py").write_text(
+        "print('ok')\n", encoding="utf-8"
+    )
+    result = AutonomyRuntime(config).run(
+        "Analysiere das Projekt und seine Programmiersprachen"
+    )
+    assert result.status == "completed"
+    assert result.completion.completed
+    analysis = result.outputs[-1]["data"]
+    assert isinstance(analysis, dict)
+    assert analysis["languages"] == {"Python": 1}
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["valid"] is True
+
+
+def test_runtime_completes_security_scan_with_findings_evidence(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    (config.paths.project_root / "app.py").write_text(
+        "API_KEY = 'not-a-real-secret-value'\n", encoding="utf-8"
+    )
+
+    result = AutonomyRuntime(config).run(
+        "Führe einen Sicherheitsscan des Projekts aus"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert result.outputs[0]["step_id"] == "step-security-scan"
+    assert result.outputs[0]["data"]["clean"] is False
+
+
+def test_runtime_completes_host_security_scan_without_mutation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    before = sorted(path.name for path in config.paths.project_root.iterdir())
+
+    result = AutonomyRuntime(config).run(
+        "Prüfe die Systemsicherheit und offene Ports"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert result.outputs[0]["step_id"] == "step-host-security-scan"
+    assert sorted(path.name for path in config.paths.project_root.iterdir()) == before
+
+
+def test_runtime_executes_explicit_command_with_verification_wording(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Run python3 -c 'print(42)' and verify the result"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+
+
+def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "autonomous_agent.core.capabilities.PrivilegedSystemExecutor.install",
+        lambda _self, _recipe: 1,
+    )
+    config = _config(tmp_path)
+    result = AutonomyRuntime(config).run(
+        "Baue mir eine Windows VM mit Zugriff auf CPU, GPU und Speicher"
+    )
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.original_goal_matched is False
+    assert any(
+        criterion.criterion_id == "created"
+        and criterion.evidence == "vm-creation-not-performed"
+        for criterion in result.completion.criteria
+    )
+    assert any(
+        item.get("phase") == "research"
+        and item.get("capability") == "qemu-system-x86_64"
+        for item in result.problem_solving
+    )
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["ordered_step_ids"] == [
+        "step-vm-hypervisor",
+        "step-vm-preflight",
+    ]
+
+
+def test_missing_python_module_is_classified_without_unbounded_install_retry(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Run python3 -c 'import module_that_is_not_installed_for_acb_stress'"
+    )
+
+    assert result.status == "failed"
+    diagnosis = next(
+        item for item in result.problem_solving if item.get("phase") == "diagnosis"
+    )
+    assert diagnosis["category"] == "dependency-missing"
+    assert diagnosis["missing_dependency"] == "module_that_is_not_installed_for_acb_stress"
+    assert any(
+        item.get("phase") == "research"
+        and item.get("dependency") == "module_that_is_not_installed_for_acb_stress"
+        and item.get("browser_opened") is False
+        for item in result.problem_solving
+    )
+
+
+def test_unfamiliar_complex_goal_gets_browserless_bounded_research(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Implementiere eine Android-App mit Offline-Synchronisierung"
+    )
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert any(
+        item.get("phase") == "research"
+        and item.get("browser_opened") is False
+        and item.get("network_used") is False
+        for item in result.problem_solving
+    )
+    assert [item["step_id"] for item in result.outputs] == [
+        "step-research-goal",
+        "step-model-execution",
+    ]
+
+
+def test_complex_goal_uses_local_model_tools_and_verifies_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def execute(
+        _self: LocalModelRunner,
+        _goal: str,
+        dispatch: Callable[[str, Mapping[str, object]], Mapping[str, object]],
+    ) -> ModelRun:
+        dispatch_fn = dispatch
+        write = dispatch_fn(
+            "project.write-file",
+            {"path": "generated.py", "content": "print(42)\n"},
+        )
+        verify = dispatch_fn(
+            "project.run-process",
+            {"argv": ["python3", "generated.py"], "cwd": "."},
+        )
+        assert write["success"] is True
+        assert verify["verified"] is True
+        return ModelRun(
+            "test-local-model", True, True,
+            ({"tool": "project.write-file"}, {"tool": "project.run-process"}),
+            "generated and verified", 3,
+        )
+
+    monkeypatch.setattr(LocalModelRunner, "run", execute)
+    config = _config(tmp_path)
+    result = AutonomyRuntime(config).run(
+        "Implementiere eine kleine Python-Anwendung und teste sie vollständig"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert (config.paths.project_root / "generated.py").read_text() == "print(42)\n"
+    model_output = result.outputs[-1]
+    assert model_output["step_id"] == "step-model-execution"
+    assert model_output["data"]["verified"] is True
+
+
+def test_standalone_research_goal_completes_with_bounded_browserless_evidence(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Recherchiere autonom im Hintergrund nach vertrauenswürdigen Quellen"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert any(
+        item.get("phase") == "research"
+        and item.get("browser_opened") is False
+        for item in result.problem_solving
+    )
+
+
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Research trusted sources and write the findings to research.txt",
+        "Recherchiere vertrauenswürdige Quellen und speichere die Ergebnisse in findings.md",
+    ],
+)
+def test_research_artifact_goal_never_claims_completion_without_artifact(
+    tmp_path: Path, goal_text: str
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(goal_text)
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.e2e_verified is False
+    assert not (tmp_path / "project" / "research.txt").exists()
+    assert not (tmp_path / "project" / "findings.md").exists()
+
+
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Recherchiere im Hintergrund nach neuen KI-Sicherheitsverfahren und implementiere die geprüften Verbesserungen",
+        "Read README.md and summarize it in summary.md",
+    ],
+)
+def test_multi_step_research_goals_never_claim_bounded_research_as_completion(
+    tmp_path: Path, goal_text: str
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(goal_text)
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.e2e_verified is False
+
+
+def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runtime = AutonomyRuntime(config)
+    result = runtime.run("Erstelle `undo-me.txt` mit dem Inhalt `temporary`")
+    target = config.paths.project_root / "undo-me.txt"
+    assert target.exists()
+
+    undone = runtime.undo(result.session_id)
+
+    assert undone["restored"] is True
+    assert undone["audit_ok"] is True
+    assert not target.exists()
+    assert runtime.audit_status()["ok"] is True
+
+
+def test_runtime_exports_redacted_audit_log_to_project_protocols(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runtime = AutonomyRuntime(config)
+    result = runtime.run("Erstelle `export-me.txt` mit dem Inhalt `logged`")
+
+    exported = runtime.export_audit_log(result.session_id)
+    path = config.paths.project_root / str(exported["path"])
+
+    assert exported["event_count"] > 0
+    assert path.parent.name == "Protokolle"
+    assert path.is_file()
+    assert result.session_id in path.read_text(encoding="utf-8")
 
 
 def test_runtime_rejects_state_inside_project(tmp_path: Path) -> None:
@@ -92,6 +380,76 @@ def test_exit_zero_is_required_but_not_sufficient_without_e2e(tmp_path: Path) ->
     assert not result.completion.completed
     assert not result.completion.e2e_verified
     assert any(output.get("success") is False for output in result.outputs)
+    assert result.problem_solving
+    assert any(
+        event.get("category") == "command-failed"
+        for event in result.problem_solving
+    )
+
+
+def test_completion_uses_latest_verified_observation_after_a_replan(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    goal = GoalNormalizer().normalize("Write `replanned.txt` with content stable")
+    (config.paths.project_root / "replanned.txt").write_text(
+        "stable", encoding="utf-8"
+    )
+    report = CompletionEvaluator().evaluate(
+        goal,
+        config.paths.project_root,
+        (
+            {"step_id": "step-write", "success": False, "status": "error"},
+            {
+                "step_id": "step-write",
+                "success": True,
+                "status": "ok",
+                "data": {"written": True},
+            },
+        ),
+        CapabilityRegistry(config.paths.project_root),
+    )
+    assert report.completed
+
+
+def test_failure_analyzer_extracts_missing_command_and_recovery_options() -> None:
+    step = PlanStep(
+        "step-process",
+        StepKind.TOOL,
+        "project.run-process",
+        {"argv": ["bash", "-lc", "missing-tool --version"]},
+        Path("/tmp/project"),
+        True,
+    )
+    analysis = FailureAnalyzer().analyze(
+        step,
+        {
+            "success": False,
+            "status": "error",
+            "diagnostic_code": "process_failed",
+            "data": {
+                "exit_code": 127,
+                "stderr": "bash: missing-tool: command not found",
+            },
+        },
+    )
+    assert analysis.category is FailureCategory.DEPENDENCY_MISSING
+    assert analysis.missing_capability == "missing-tool"
+    assert "verify-capability" in analysis.candidate_actions
+
+
+def test_planner_rejects_dependency_cycles_before_execution(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    plan = (
+        PlanStep(
+            "a", StepKind.TOOL, "project.list-files", {}, project, False, ("b",)
+        ),
+        PlanStep(
+            "b", StepKind.TOOL, "project.list-files", {}, project, False, ("a",)
+        ),
+    )
+    assessment = Planner().assess(plan, project)
+    assert assessment.valid is False
+    assert any(item.startswith("dependency-cycle:") for item in assessment.issues)
 
 
 def test_real_sandbox_command_is_e2e_verified(tmp_path: Path) -> None:
@@ -104,6 +462,19 @@ def test_real_sandbox_command_is_e2e_verified(tmp_path: Path) -> None:
     assert isinstance(process_output, dict)
     assert process_output["stdout"] == "RUNTIME_E2E_OK\n"
     assert result.completion.e2e_verified
+
+
+def test_read_only_command_does_not_require_a_full_tree_checkpoint(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    goal = GoalNormalizer().normalize(
+        "Run python3 -c 'print(42)' and verify the result"
+    )
+
+    plan = Planner().create_plan(goal, project)
+
+    assert plan[-1].tool == "project.run-process"
+    assert plan[-1].mutates is False
 
 
 def test_completed_task_can_be_recovered_after_runtime_restart(tmp_path: Path) -> None:
