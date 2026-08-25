@@ -179,6 +179,25 @@ def test_standalone_research_goal_completes_with_bounded_browserless_evidence(
     )
 
 
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Research trusted sources and write the findings to research.txt",
+        "Recherchiere vertrauenswürdige Quellen und speichere die Ergebnisse in findings.md",
+    ],
+)
+def test_research_artifact_goal_never_claims_completion_without_artifact(
+    tmp_path: Path, goal_text: str
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(goal_text)
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.e2e_verified is False
+    assert not (tmp_path / "project" / "research.txt").exists()
+    assert not (tmp_path / "project" / "findings.md").exists()
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)

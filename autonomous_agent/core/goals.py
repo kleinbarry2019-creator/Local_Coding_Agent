@@ -71,6 +71,12 @@ class GoalNormalizer:
             return self._vm_build(goal)
         if self._is_complex_research_request(lowered):
             return self._research_task(goal)
+        if self._is_research_artifact_request(lowered):
+            # A research request that promises a report/file is not a bounded
+            # background-research task.  Keep it in the complex workflow so
+            # the completion evaluator cannot claim success without the
+            # requested artifact actually being produced and verified.
+            return self._research_task(goal)
         if self._is_standalone_research_request(lowered):
             return self._research_task(goal, research_only=True)
         if _starts_with(lowered, ("install ", "installiere ")):
@@ -198,6 +204,48 @@ class GoalNormalizer:
                 "rechercheergebnis",
             ),
         )
+
+    @staticmethod
+    def _is_research_artifact_request(lowered: str) -> bool:
+        """Detect research requests whose promised output is an artifact.
+
+        Standalone research deliberately completes after bounded evidence is
+        collected.  Once the user asks to write/save findings, however, a
+        completion claim must also be backed by the requested file/report.
+        Keep this check separate from filename parsing so ``research.txt`` in
+        an ordinary write request remains a normal write goal.
+        """
+        research_intent = _contains_word(
+            lowered,
+            (
+                "research",
+                "recherche",
+                "recherchiere",
+                "recherchieren",
+                "trusted sources",
+                "vertrauenswürdige quellen",
+                "vertrauenswuerdige quellen",
+            ),
+        )
+        artifact_intent = _contains_word(
+            lowered,
+            (
+                "write",
+                "save",
+                "store",
+                "report",
+                "findings",
+                "proposal",
+                "create a file",
+                "schreibe",
+                "speichere",
+                "speichern",
+                "bericht",
+                "ergebnisse",
+                "rechercheergebnis",
+            ),
+        )
+        return research_intent and artifact_intent
 
     @staticmethod
     def _is_complex_research_request(lowered: str) -> bool:

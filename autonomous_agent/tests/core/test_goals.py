@@ -234,8 +234,17 @@ def test_german_create_variant_remains_a_write_goal() -> None:
         "Recherchiere vertrauenswürdige Quellen und speichere die Ergebnisse in findings.md",
     ],
 )
-def test_research_intent_has_priority_over_report_filename(goal_text: str) -> None:
+def test_research_artifact_intent_requires_complex_completion(goal_text: str) -> None:
     goal = GoalNormalizer().normalize(goal_text)
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_standalone_research_without_artifact_remains_bounded() -> None:
+    goal = GoalNormalizer().normalize(
+        "Research trusted sources for secure AI practices without opening a browser"
+    )
 
     assert goal.kind is GoalKind.RESEARCH_TASK
     assert goal.target == "research-only"
