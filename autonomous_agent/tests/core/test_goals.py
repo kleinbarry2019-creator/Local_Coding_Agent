@@ -84,6 +84,26 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Design and implement a secure operating system kernel with memory management",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Build a hardware-assisted hypervisor with VM isolation and recovery tests",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Migrate the production database to a versioned schema with rollback",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Perform a complete security audit with threat modeling and exploit verification",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
