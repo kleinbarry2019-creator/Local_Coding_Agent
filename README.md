@@ -157,7 +157,9 @@ benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
 Wiederholte niedrige Bewertungen werden dem aktiven lokalen Benutzerkonto bzw.
 dem lokalen Profil zugeordnet und in einen eigenen Qualitäts-/Regressionstest-
 Vorschlag überführt. So kann ACB Antwortstil und Hilfestellung individuell
-weiterentwickeln.
+weiterentwickeln. In `Einstellungen > Datenschutz & Recherche` lässt sich die
+automatische Anpassung des Antwortstils aus diesem Feedback unabhängig von der
+lokalen Feedback-/Chatablage deaktivieren.
 Gespeichertes Wissen wird für neue Ziele lokal und erklärbar nach Relevanz
 sortiert und kann über die authentifizierte Schnittstelle
 `/api/learning/context` als Referenzkontext abgerufen werden. Die Inhalte

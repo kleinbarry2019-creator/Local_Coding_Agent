@@ -22,9 +22,11 @@ def test_profile_defaults_are_local_and_round_trip(tmp_path: Path) -> None:
             "gendered_language": False,
             "knowledge_level": "developer",
             "simple_language": True,
+            "adaptive_response_learning": False,
         }
     )
     assert saved.theme == "dark"
+    assert saved.adaptive_response_learning is False
     assert store.load() == saved
     assert (tmp_path / "profile" / "preferences.json").stat().st_mode & 0o077 == 0
 

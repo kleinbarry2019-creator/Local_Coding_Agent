@@ -312,6 +312,21 @@ def test_controller_response_context_uses_feedback_hint(tmp_path: Path) -> None:
         controller.close()
 
 
+def test_controller_can_disable_adaptive_response_learning(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(
+        _config(tmp_path), runtime=cast(_Runtime, _FakeRuntime())
+    )
+    try:
+        controller.add_feedback("session-local", 4, "Bitte einfacher erklären.")
+        controller.update_preferences({"adaptive_response_learning": False})
+        assert controller.response_context().feedback_hint == ""
+        # Feedback remains available for the local audit/history setting; only
+        # automatic response-style adaptation is disabled.
+        assert controller.feedback_items()
+    finally:
+        controller.close()
+
+
 def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -> None:
     controller = RuntimeTaskController(_config(tmp_path))
     try:

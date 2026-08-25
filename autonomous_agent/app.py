@@ -606,6 +606,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self._check_setting(form, "store_chat_history", "Chatverlauf lokal speichern")
             self._check_setting(form, "store_task_history", "Aufgabenverlauf lokal speichern")
             self._check_setting(form, "store_personalization", "Personalisierung lokal speichern")
+            self._check_setting(form, "adaptive_response_learning", "Antwortstil aus Feedback automatisch anpassen")
             self._check_setting(form, "allow_network_research", "Vertrauenswürdige Online-Recherche erlauben")
             self._check_setting(form, "require_confirmation_for_sensitive_data", "Vor sensibler Datenfreigabe bestätigen")
 

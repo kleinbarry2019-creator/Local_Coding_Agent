@@ -64,6 +64,7 @@ class UserPreferences:
     store_chat_history: bool = True
     store_task_history: bool = True
     store_personalization: bool = True
+    adaptive_response_learning: bool = True
     allow_network_research: bool = True
     require_confirmation_for_sensitive_data: bool = True
     onboarding_complete: bool = False
@@ -210,6 +211,7 @@ def _from_mapping(value: object) -> UserPreferences:
         "store_chat_history",
         "store_task_history",
         "store_personalization",
+        "adaptive_response_learning",
         "allow_network_research",
         "require_confirmation_for_sensitive_data",
         "onboarding_complete",
