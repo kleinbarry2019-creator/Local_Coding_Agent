@@ -101,6 +101,8 @@ class GoalNormalizer:
             lowered,
             ("create", "write", "erstelle", "erstellen", "schreibe", "anlegen", "erzeuge"),
         ):
+            if self._is_ambitious_unknown_request(lowered) and not _extract_content(goal):
+                return self._research_task(goal)
             try:
                 return self._write(goal)
             except GoalError:

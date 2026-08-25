@@ -250,6 +250,15 @@ def test_mixed_repository_analysis_and_report_is_not_silently_only_a_write() -> 
     assert goal.target == "complex-task"
 
 
+def test_complex_goal_with_report_target_is_not_silently_an_empty_write() -> None:
+    goal = GoalNormalizer().normalize(
+        "Build a distributed event platform and write a complete implementation plan to architecture.md"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
 def test_write_derives_content_acceptance_criterion() -> None:
     goal = GoalNormalizer().normalize(
         "Erstelle `result.txt` mit dem Inhalt `verified`"
