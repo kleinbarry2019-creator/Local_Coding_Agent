@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -26,6 +27,23 @@ from autonomous_agent.core.config import (
     ResourceLimits,
 )
 from autonomous_agent.core.goals import GoalNormalizer
+from autonomous_agent.core.local_model import (
+    LocalModelError,
+    LocalModelRunner,
+    ModelRun,
+)
+
+
+@pytest.fixture(autouse=True)
+def no_live_model_calls_in_runtime_unit_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the core suite deterministic; the integration test below supplies a fake model."""
+
+    def unavailable(*_args: object, **_kwargs: object) -> ModelRun:
+        raise LocalModelError("live local model disabled in unit tests")
+
+    monkeypatch.setattr(LocalModelRunner, "run", unavailable)
 
 
 def _config(tmp_path: Path) -> AgentConfig:
@@ -171,7 +189,49 @@ def test_unfamiliar_complex_goal_gets_browserless_bounded_research(
         and item.get("network_used") is False
         for item in result.problem_solving
     )
-    assert len(result.outputs) == 1
+    assert [item["step_id"] for item in result.outputs] == [
+        "step-research-goal",
+        "step-model-execution",
+    ]
+
+
+def test_complex_goal_uses_local_model_tools_and_verifies_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def execute(
+        _self: LocalModelRunner,
+        _goal: str,
+        dispatch: Callable[[str, Mapping[str, object]], Mapping[str, object]],
+    ) -> ModelRun:
+        dispatch_fn = dispatch
+        write = dispatch_fn(
+            "project.write-file",
+            {"path": "generated.py", "content": "print(42)\n"},
+        )
+        verify = dispatch_fn(
+            "project.run-process",
+            {"argv": ["python3", "generated.py"], "cwd": "."},
+        )
+        assert write["success"] is True
+        assert verify["verified"] is True
+        return ModelRun(
+            "test-local-model", True, True,
+            ({"tool": "project.write-file"}, {"tool": "project.run-process"}),
+            "generated and verified", 3,
+        )
+
+    monkeypatch.setattr(LocalModelRunner, "run", execute)
+    config = _config(tmp_path)
+    result = AutonomyRuntime(config).run(
+        "Implementiere eine kleine Python-Anwendung und teste sie vollständig"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert (config.paths.project_root / "generated.py").read_text() == "print(42)\n"
+    model_output = result.outputs[-1]
+    assert model_output["step_id"] == "step-model-execution"
+    assert model_output["data"]["verified"] is True
 
 
 def test_standalone_research_goal_completes_with_bounded_browserless_evidence(

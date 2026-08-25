@@ -31,11 +31,12 @@ from autonomous_agent.core.goals import (
     GoalNormalizer,
     NormalizedGoal,
 )
+from autonomous_agent.core.local_model import LocalModelError, LocalModelRunner
 from autonomous_agent.core.policy import AuthorityGrant, PolicyContext, ScopeEvidence
 from autonomous_agent.core.runtime_tools import ProjectToolRuntime
 from autonomous_agent.core.state import CoreStateStore
 from autonomous_agent.core.system_tools import register_system_tools
-from autonomous_agent.core.task_state import TaskStateStore
+from autonomous_agent.core.task_state import CheckpointRecord, TaskStateStore
 from autonomous_agent.core.tools import (
     ExecutionContext,
     SchemaLimits,
@@ -269,15 +270,28 @@ class Planner:
                 ),
             )
         if goal.kind is GoalKind.RESEARCH_TASK:
+            research_step = PlanStep(
+                "step-research-goal",
+                StepKind.TOOL,
+                "system.research-goal",
+                {"goal": goal.original, "project_root": str(root)},
+                root,
+                False,
+                purpose="research-an-unfamiliar-complex-goal-without-opening-a-browser",
+            )
+            if goal.target == "research-only":
+                return (research_step,)
             return (
+                research_step,
                 PlanStep(
-                    "step-research-goal",
+                    "step-model-execution",
                     StepKind.TOOL,
-                    "system.research-goal",
+                    "system.local-model-goal",
                     {"goal": goal.original, "project_root": str(root)},
                     root,
                     False,
-                    purpose="research-an-unfamiliar-complex-goal-without-opening-a-browser",
+                    depends_on=("step-research-goal",),
+                    purpose="execute-the-researched-goal-through-bounded-local-model-tools",
                 ),
             )
         raise ValueError("normalized goal kind is unsupported")
@@ -378,16 +392,20 @@ class FailureAnalyzer:
             if capability_blocked
             else actions[category]
         )
+        retryable = category in {
+            FailureCategory.DEPENDENCY_MISSING,
+            FailureCategory.TIMEOUT,
+            FailureCategory.TOOL_FAILED,
+        } and not capability_blocked
+        if result.get("diagnostic_code") in {
+            "local-model-unavailable",
+            "model-loop-detected",
+        }:
+            retryable = False
         return FailureAnalysis(
             category=category,
             root_cause=causes[category],
-            retryable=category
-            in {
-                FailureCategory.DEPENDENCY_MISSING,
-                FailureCategory.TIMEOUT,
-                FailureCategory.TOOL_FAILED,
-            }
-            and not capability_blocked,
+            retryable=retryable,
             evidence=evidence,
             missing_capability=missing_capability,
             missing_dependency=missing_dependency,
@@ -986,6 +1004,8 @@ class AutonomyRuntime:
         )
 
     def _execute_step(self, session_id: str, step: PlanStep) -> Mapping[str, object]:
+        if step.tool == "system.local-model-goal":
+            return self._execute_model_step(session_id, step)
         if step.kind is StepKind.ENSURE_CAPABILITY:
             current = self.capabilities.discover(step.tool)
             if current.available:
@@ -1029,6 +1049,191 @@ class AutonomyRuntime:
         context = self._execution_context(session_id, step.target)
         tool_result = self.tools.execute(step.tool, step.arguments, context)
         return _tool_output(step, tool_result)
+
+    def _execute_model_step(
+        self, session_id: str, step: PlanStep
+    ) -> Mapping[str, object]:
+        goal = step.arguments.get("goal")
+        if not isinstance(goal, str):
+            return {
+                "step_id": step.step_id,
+                "success": False,
+                "status": "error",
+                "diagnostic_code": "invalid-model-goal",
+                "diagnostic": "model goal is invalid",
+                "data": None,
+            }
+        action_number = 0
+        mutation_checkpoints: list[CheckpointRecord] = []
+
+        def rollback_model_mutations() -> None:
+            for checkpoint in reversed(mutation_checkpoints):
+                try:
+                    self.checkpoints.restore(checkpoint)
+                except (OSError, RuntimeError, ValueError):
+                    # The runtime still reports failure; recovery remains auditable.
+                    pass
+            mutation_checkpoints.clear()
+
+        def discard_model_mutations() -> None:
+            for checkpoint in mutation_checkpoints:
+                self.checkpoints.discard(checkpoint)
+            mutation_checkpoints.clear()
+
+        def dispatch(
+            tool_name: str, arguments: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            nonlocal action_number
+            action_number += 1
+            action_id = f"model-action-{action_number}"
+            if tool_name == "project.read-file":
+                raw_path = arguments.get("path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-path"}
+                target = (self.config.paths.project_root / raw_path).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "path-outside-project"}
+                action_step = PlanStep(
+                    action_id,
+                    StepKind.TOOL,
+                    tool_name,
+                    {"path": str(target)},
+                    target,
+                    False,
+                )
+                return _tool_output(action_step, self.tools.execute(
+                    tool_name,
+                    action_step.arguments,
+                    self._execution_context(session_id, target),
+                ))
+            if tool_name == "project.write-file":
+                raw_path = arguments.get("path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-path"}
+                content = arguments.get("content")
+                if not isinstance(content, str):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-content"}
+                target = (self.config.paths.project_root / raw_path).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "path-outside-project"}
+                try:
+                    checkpoint = self.checkpoints.create(session_id, action_id, target)
+                    mutation_checkpoints.append(checkpoint)
+                    action_step = PlanStep(
+                        action_id,
+                        StepKind.TOOL,
+                        tool_name,
+                        {"path": str(target), "content": content},
+                        target,
+                        True,
+                    )
+                    result = _tool_output(action_step, self.tools.execute(
+                        tool_name,
+                        action_step.arguments,
+                        self._execution_context(session_id, target),
+                    ))
+                    if result.get("success") is not True:
+                        self.checkpoints.restore(checkpoint)
+                        mutation_checkpoints.remove(checkpoint)
+                    return result
+                except (OSError, RuntimeError, ValueError) as error:
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "diagnostic_code": "model-write-failed",
+                        "diagnostic": str(error)[:240],
+                    }
+            if tool_name == "project.run-process":
+                raw_argv = arguments.get("argv")
+                if not isinstance(raw_argv, list) or not raw_argv or not all(
+                    isinstance(item, str) for item in raw_argv
+                ):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-argv"}
+                cwd = arguments.get("cwd", ".")
+                if not isinstance(cwd, str):
+                    return {"success": False, "status": "error", "diagnostic_code": "invalid-model-cwd"}
+                target = (self.config.paths.project_root / cwd).resolve(strict=False)
+                if not target.is_relative_to(self.config.paths.project_root):
+                    return {"success": False, "status": "denied", "diagnostic_code": "cwd-outside-project"}
+                action_step = PlanStep(
+                    action_id,
+                    StepKind.TOOL,
+                    tool_name,
+                    {"argv": raw_argv, "cwd": str(target)},
+                    target,
+                    not _command_is_read_only(tuple(raw_argv)),
+                )
+                process_checkpoint: CheckpointRecord | None = None
+                try:
+                    if action_step.mutates:
+                        process_checkpoint = self.checkpoints.create(
+                            session_id, action_id, target
+                        )
+                        mutation_checkpoints.append(process_checkpoint)
+                    result = _tool_output(action_step, self.tools.execute(
+                        tool_name,
+                        action_step.arguments,
+                        self._execution_context(session_id, target),
+                    ))
+                except (OSError, RuntimeError, ValueError) as error:
+                    if process_checkpoint is not None:
+                        self.checkpoints.restore(process_checkpoint)
+                        mutation_checkpoints.remove(process_checkpoint)
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "diagnostic_code": "model-process-failed",
+                        "diagnostic": str(error)[:240],
+                    }
+                if result.get("success") is not True and process_checkpoint is not None:
+                    self.checkpoints.restore(process_checkpoint)
+                    mutation_checkpoints.remove(process_checkpoint)
+                data = result.get("data")
+                if result.get("success") is True and isinstance(data, Mapping):
+                    result = dict(result)
+                    result["verified"] = data.get("exit_code") == 0
+                return result
+            return {"success": False, "status": "denied", "diagnostic_code": "model-tool-denied"}
+
+        try:
+            model_run = LocalModelRunner().run(goal, dispatch)
+        except LocalModelError as error:
+            rollback_model_mutations()
+            return {
+                "step_id": step.step_id,
+                "success": False,
+                "status": "error",
+                "diagnostic_code": "local-model-unavailable",
+                "diagnostic": str(error),
+                "data": {"completed": False, "verified": False, "actions": []},
+            }
+        if model_run.completed and model_run.verified:
+            discard_model_mutations()
+        else:
+            rollback_model_mutations()
+        return {
+            "step_id": step.step_id,
+            "success": model_run.completed and model_run.verified,
+            "status": "ok" if model_run.completed and model_run.verified else "error",
+            "diagnostic_code": (
+                None
+                if model_run.completed
+                else (
+                    "model-loop-detected"
+                    if "loop detected" in model_run.summary.casefold()
+                    else "model-did-not-verify"
+                )
+            ),
+            "diagnostic": model_run.summary,
+            "data": {
+                "model": model_run.model,
+                "completed": model_run.completed,
+                "verified": model_run.verified,
+                "turns": model_run.turns,
+                "actions": list(model_run.actions),
+                "summary": model_run.summary,
+            },
+        }
 
     def _execution_context(
         self, session_id: str, target: Path
@@ -1335,9 +1540,9 @@ def _direct_e2e(
     if goal.kind is GoalKind.VM_BUILD:
         return any(_vm_created(item) for item in outputs)
     if goal.kind is GoalKind.RESEARCH_TASK:
-        return goal.target == "research-only" and any(
-            _research_completed(item) for item in outputs
-        )
+        if goal.target == "research-only":
+            return any(_research_completed(item) for item in outputs)
+        return any(_model_verified(item) for item in outputs)
     return False
 
 
@@ -1422,6 +1627,15 @@ def _vm_created(output: Mapping[str, object]) -> bool:
 def _research_completed(output: Mapping[str, object]) -> bool:
     data = output.get("data")
     return isinstance(data, Mapping) and data.get("research_completed") is True
+
+
+def _model_verified(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return (
+        isinstance(data, Mapping)
+        and data.get("completed") is True
+        and data.get("verified") is True
+    )
 
 
 __all__ = [

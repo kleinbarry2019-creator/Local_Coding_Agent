@@ -647,6 +647,14 @@ class GoalNormalizer:
     def _research_task(
         self, goal: str, *, research_only: bool = False
     ) -> NormalizedGoal:
+        criteria = [
+            AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+            AcceptanceCriterion("research", CriterionKind.RESEARCHED),
+        ]
+        artifact = _extract_path(goal) if not research_only else None
+        if artifact is not None and self._is_research_artifact_request(goal.casefold()):
+            criteria.append(AcceptanceCriterion("artifact", CriterionKind.FILE_EXISTS, artifact))
+        criteria.append(AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED))
         return _goal(
             goal,
             GoalKind.RESEARCH_TASK,
@@ -656,11 +664,7 @@ class GoalNormalizer:
                 "Research uses the local capability matrix and trusted background sources without opening a browser.",
                 "Do not claim execution until an implementation plan and independent E2E evidence exist.",
             ),
-            criteria=(
-                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
-                AcceptanceCriterion("research", CriterionKind.RESEARCHED),
-                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
-            ),
+            criteria=tuple(criteria),
         )
 
     def _write(self, goal: str) -> NormalizedGoal:
