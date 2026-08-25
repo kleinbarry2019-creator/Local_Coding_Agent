@@ -26,6 +26,7 @@ from autonomous_agent.core.config import (
     ResolvedPaths,
     ResourceLimits,
 )
+from autonomous_agent.core.learning import KnowledgeItem
 from autonomous_agent.core.task_state import TaskRecord
 from autonomous_agent.ui import (
     UI_NAME,
@@ -261,6 +262,39 @@ def test_controller_honors_network_research_preference(tmp_path: Path) -> None:
         assert controller.learning_status().network_enabled is False
         result = controller.research_now()
         assert result["status"] == "offline"
+    finally:
+        controller.close()
+
+
+def test_controller_attaches_relevant_learning_context_to_task(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(
+        _config(tmp_path), runtime=cast(_Runtime, _FakeRuntime())
+    )
+    controller.learning.store.add_knowledge(
+        KnowledgeItem(
+            item_id="knowledge-context",
+            title="List files security guidance",
+            url="https://arxiv.org/abs/1234.7777",
+            source="test",
+            topic="security",
+            summary="safe list files workflow",
+            published_at=None,
+            discovered_at="2026-08-25T00:00:00+00:00",
+            trust="allow-listed-feed",
+        )
+    )
+    try:
+        task = controller.submit("list files")
+        assert task.to_dict()["learning_context"]
+        for _ in range(50):
+            current = controller.task(task.request_id)
+            assert current is not None
+            if current.status == "completed":
+                break
+            time.sleep(0.01)
+        assert current is not None
+        assert current.result is not None
+        assert "learning_context" in current.result
     finally:
         controller.close()
 

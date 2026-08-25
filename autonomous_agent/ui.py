@@ -91,6 +91,7 @@ class UiTask:
     progress_percent: int = 0
     remaining_steps: int = 0
     estimated_remaining_seconds: int = 0
+    learning_context: tuple[Mapping[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         document: dict[str, object] = {
@@ -102,6 +103,8 @@ class UiTask:
             "remaining_steps": self.remaining_steps,
             "estimated_remaining_seconds": self.estimated_remaining_seconds,
         }
+        if self.learning_context:
+            document["learning_context"] = [dict(item) for item in self.learning_context]
         if self.session_id is not None:
             document["session_id"] = self.session_id
         if self.result is not None:
@@ -250,6 +253,7 @@ class RuntimeTaskController:
             goal=goal,
             status="queued",
             created_at=_timestamp(),
+            learning_context=self.learning_context(clean_goal),
         )
         with self._lock:
             self._tasks[request_id] = task
@@ -281,6 +285,7 @@ class RuntimeTaskController:
                 status="recovering",
                 created_at=record.created_at,
                 session_id=record.session_id,
+                learning_context=self.learning_context(record.original_goal),
             )
             with self._lock:
                 self._tasks[request_id] = task
@@ -370,6 +375,8 @@ class RuntimeTaskController:
             result = operation()
             document = result.to_dict()
             session_id = result.session_id
+            if self.preferences().store_task_history:
+                document["learning_context"] = list(self.learning_context(goal))
             try:
                 document["protocol"] = self.export_audit_log(session_id)
             except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
