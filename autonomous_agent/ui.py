@@ -205,7 +205,9 @@ class RuntimeTaskController:
                 occupation="",
                 gender_identity="",
             )
-        return build_response_context(preferences)
+        context = build_response_context(preferences)
+        hint = self.learning.response_hint(self._active_account_id or "local-profile")
+        return replace(context, feedback_hint=hint) if hint else context
 
     def assistive_hints(self) -> AssistiveHints:
         return detect_assistive_hints()

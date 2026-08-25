@@ -77,6 +77,7 @@ class ResponseContext:
     pronouns: str
     audience_age: int | None
     next_steps: str
+    feedback_hint: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -88,6 +89,7 @@ class ResponseContext:
             "pronouns": self.pronouns,
             "audience_age": self.audience_age,
             "next_steps": self.next_steps,
+            "feedback_hint": self.feedback_hint,
         }
 
 

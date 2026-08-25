@@ -808,10 +808,20 @@ class LearningService:
             }
         ratings_by_user[user_id] = rating
         ratings_by_user = dict(list(ratings_by_user.items())[-100:])
+        feedback_hint = _feedback_hint(note) if rating <= 6 else None
+        raw_hints = metadata.get("feedback_hints_by_user", {})
+        hints_by_user = dict(raw_hints) if isinstance(raw_hints, dict) else {}
+        user_hints = dict(hints_by_user.get(user_id, {}))
+        if feedback_hint is not None:
+            user_hints[feedback_hint] = user_hints.get(feedback_hint, 0) + 1
+            user_hints = dict(list(user_hints.items())[-8:])
+            hints_by_user[user_id] = user_hints
+        hints_by_user = dict(list(hints_by_user.items())[-100:])
         self.store.update_metadata(
             {
                 "low_feedback_by_user": by_user,
                 "last_feedback_rating_by_user": ratings_by_user,
+                "feedback_hints_by_user": hints_by_user,
             }
         )
         if low_feedback_count >= 2:
@@ -835,6 +845,31 @@ class LearningService:
                     updated_at=now,
                 )
             )
+
+    def response_hint(self, user_id: str = "local-profile") -> str:
+        """Return a conservative, explainable style hint learned from feedback."""
+        if type(user_id) is not str or not user_id:
+            return ""
+        raw = self.store.metadata().get("feedback_hints_by_user", {})
+        if not isinstance(raw, dict):
+            return ""
+        values = raw.get(user_id)
+        if not isinstance(values, dict):
+            return ""
+        counts = {
+            key: value
+            for key, value in values.items()
+            if isinstance(key, str) and type(value) is int and value > 0
+        }
+        if not counts:
+            return ""
+        hint = max(counts, key=lambda key: counts[key])
+        return {
+            "more-detail": "mehr Details und Beispiele geben",
+            "simple-language": "einfacher und schrittweise formulieren",
+            "concise": "kürzer und direkter antworten",
+            "technical": "technischer und mit prüfbaren Details antworten",
+        }.get(hint, "")
 
     def record_gate_result(
         self,
@@ -1189,6 +1224,19 @@ def _learning_tokens(value: str) -> set[str]:
         for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]{3,}", value.casefold())
         if token not in {"the", "and", "oder", "und", "für", "mit", "von"}
     }
+
+
+def _feedback_hint(comment: str) -> str | None:
+    lowered = comment.casefold()
+    if any(token in lowered for token in ("zu knapp", "mehr detail", "ausführlicher", "ausfuehrlicher")):
+        return "more-detail"
+    if any(token in lowered for token in ("zu kompliziert", "einfacher", "verständlicher", "verstaendlicher")):
+        return "simple-language"
+    if any(token in lowered for token in ("zu lang", "kürzer", "kuerzer")):
+        return "concise"
+    if any(token in lowered for token in ("technischer", "code", "präziser", "praeziser")):
+        return "technical"
+    return None
 
 
 def asdict_account(account: UserAccount) -> dict[str, object]:

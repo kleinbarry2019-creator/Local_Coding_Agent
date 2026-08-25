@@ -221,6 +221,15 @@ def test_feedback_pattern_counts_are_isolated_per_user(tmp_path: Path) -> None:
     )
 
 
+def test_feedback_drives_per_user_response_hint(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.record_feedback(
+        "session-one", 4, "Bitte einfacher und verständlicher erklären.", user_id="account-a"
+    )
+    assert service.response_hint("account-a") == "einfacher und schrittweise formulieren"
+    assert service.response_hint("account-b") == ""
+
+
 def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:
     payload = b"""<rss><channel><item>
       <title>Evidence source</title>
