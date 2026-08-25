@@ -659,3 +659,21 @@ def test_ui_learning_context_endpoint_is_bounded(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_ui_capability_matrix_reports_limits_and_gates(tmp_path: Path) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0)
+    thread = _start(server)
+    try:
+        status, matrix, _ = _get_json(
+            f"{server.url}api/capabilities", token=server.token
+        )
+        assert status == 200
+        assert matrix["schema_version"] == 1
+        entries = {item["id"]: item for item in matrix["capabilities"]}
+        assert entries["coding.autonomous"]["status"] == "available"
+        assert entries["learning.self-update"]["status"] == "gated"
+        assert entries["security.remote-control"]["limits"]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

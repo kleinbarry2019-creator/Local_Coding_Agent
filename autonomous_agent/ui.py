@@ -17,6 +17,7 @@ from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from autonomous_agent.core.autonomy import AutonomyRuntime, RuntimeResult
+from autonomous_agent.core.capability_matrix import capability_matrix
 from autonomous_agent.core.config import AgentConfig
 from autonomous_agent.core.goals import GoalError, GoalNormalizer
 from autonomous_agent.core.learning import (
@@ -415,6 +416,9 @@ class RuntimeTaskController:
     def learning_status(self) -> LearningStatus:
         return self.learning.status()
 
+    def capability_matrix(self) -> dict[str, object]:
+        return capability_matrix()
+
     def knowledge(self, limit: int = 50) -> tuple[KnowledgeItem, ...]:
         return self.learning.store.knowledge(limit)
 
@@ -583,6 +587,9 @@ class AcbUiServer:
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
 
+    def capability_matrix(self) -> dict[str, object]:
+        return self._controller.capability_matrix()
+
     def learning_context(self, goal: str, *, limit: int = 5) -> list[dict[str, object]]:
         return list(self._controller.learning_context(goal, limit=limit))
 
@@ -735,6 +742,12 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"name": UI_NAME, "status": "ok", "runtime": "ready"},
             )
+            return
+        if path == "/api/capabilities":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(HTTPStatus.OK, self._app().capability_matrix())
             return
         if path == "/api/tasks":
             if not self._authorized():

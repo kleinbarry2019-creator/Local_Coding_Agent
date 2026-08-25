@@ -103,6 +103,12 @@ Verzeichnisstruktur sowie testbare nächste Hinweise. Die Analyse liest keine
 externen Quellen und führt keinen gefundenen Code aus; sie liefert nur
 verifizierbare Grundlage für die anschließende Planung.
 
+Die authentifizierte lokale Schnittstelle `/api/capabilities` liefert außerdem
+die zentrale Capability-Matrix mit Status (`available`, `conditional` oder
+`gated`), Voraussetzungen und Grenzen. Damit kann die GUI einem Benutzer
+verständlich anzeigen, welche Coding-, Lern-, Recovery-, Security-, Sprach- und
+Kompatibilitätsfunktionen auf dem aktuellen System tatsächlich nutzbar sind.
+
 ## Grafische Oberfläche
 
 ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und
