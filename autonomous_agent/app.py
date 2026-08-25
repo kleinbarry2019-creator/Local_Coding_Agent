@@ -196,16 +196,32 @@ def _run_gtk(config: AgentConfig) -> int:
             main.set_margin_start(28)
             main.set_margin_end(28)
 
+            heading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            heading.add_css_class("page-heading")
+            eyebrow = Gtk.Label(label="ARBEITSBEREICH · OFFLINE")
+            eyebrow.set_xalign(0)
+            eyebrow.add_css_class("eyebrow")
+            heading.append(eyebrow)
             title = Gtk.Label(label="Neuer Auftrag")
             title.set_xalign(0)
-            title.add_css_class("section-title")
-            main.append(title)
+            title.add_css_class("page-title")
+            heading.append(title)
+            description = Gtk.Label(
+                label="Beschreibe dein Ziel in einem Satz. ACB plant, führt aus und prüft das Ergebnis lokal."
+            )
+            description.set_xalign(0)
+            description.set_wrap(True)
+            description.add_css_class("muted")
+            heading.append(description)
+            main.append(heading)
 
             scroll = Gtk.ScrolledWindow()
             scroll.set_vexpand(True)
             scroll.set_hexpand(True)
+            scroll.add_css_class("conversation-frame")
             self.current = Gtk.Label(
-                label="ACB ist bereit. Aufgaben werden lokal ausgeführt und persistiert."
+                label="Bereit für deinen nächsten Auftrag.\n\n"
+                "Aufgaben werden lokal ausgeführt, geprüft und dauerhaft gespeichert."
             )
             self.current.set_wrap(True)
             self.current.set_selectable(True)
@@ -230,6 +246,13 @@ def _run_gtk(config: AgentConfig) -> int:
             self.send.connect("clicked", self._submit)
             composer.append(self.send)
             main.append(composer)
+            composer_hint = Gtk.Label(
+                label="Beispiele: ‚Erstelle notes.txt …‘ · ‚Lies README.md‘ · ‚Analysiere das Projekt‘"
+            )
+            composer_hint.set_xalign(0)
+            composer_hint.set_wrap(True)
+            composer_hint.add_css_class("composer-hint")
+            main.append(composer_hint)
             main.append(self._feedback_panel())
 
             self.stack.add_titled(self._welcome_page(), "welcome", "Willkommen")
@@ -780,34 +803,43 @@ def _run_gtk(config: AgentConfig) -> int:
 
         def _sidebar(self) -> Any:
             sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            sidebar.set_size_request(250, -1)
+            sidebar.set_size_request(268, -1)
             sidebar.add_css_class("sidebar")
+            navigation = Gtk.Label(label="NAVIGATION")
+            navigation.set_xalign(0)
+            navigation.add_css_class("eyebrow")
+            sidebar.append(navigation)
             if self.stack is not None:
                 switcher = Gtk.StackSwitcher()
                 switcher.set_stack(self.stack)
                 switcher.set_halign(Gtk.Align.FILL)
+                switcher.add_css_class("nav-switcher")
                 sidebar.append(switcher)
+            workspace = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            workspace.add_css_class("workspace-card")
             project_title = Gtk.Label(label="Arbeitsbereich")
             project_title.set_xalign(0)
-            project_title.add_css_class("section-title")
-            sidebar.append(project_title)
+            project_title.add_css_class("card-title")
+            workspace.append(project_title)
             project = Gtk.Label(label=str(config.paths.project_root))
             project.set_wrap(True)
             project.set_xalign(0)
             project.add_css_class("muted")
-            sidebar.append(project)
+            workspace.append(project)
             state = Gtk.Label(label="Persistenter Task-State aktiv")
             state.set_wrap(True)
             state.set_xalign(0)
             state.add_css_class("state-good")
-            sidebar.append(state)
+            workspace.append(state)
+            sidebar.append(workspace)
             history_title = Gtk.Label(label="Aufgabenverlauf")
             history_title.set_xalign(0)
             history_title.set_margin_top(22)
-            history_title.add_css_class("section-title")
+            history_title.add_css_class("card-title")
             sidebar.append(history_title)
             self.history = Gtk.ListBox()
             self.history.set_selection_mode(Gtk.SelectionMode.NONE)
+            self.history.add_css_class("history-list")
             sidebar.append(self.history)
             return sidebar
 
@@ -1197,26 +1229,45 @@ def _run_gtk(config: AgentConfig) -> int:
             css = gtk.CssProvider()
             css.load_from_data(
                 b"""
-                .app-shell { background: #0b1220; color: #e7edf8; }
-                .topbar { background: #111c2f; padding: 20px 28px; }
-                .brand { color: #5eead4; font-size: 27px; font-weight: 800; }
-                .subtitle, .muted { color: #9fb0ca; }
-                .offline { color: #5eead4; font-size: 12px; font-weight: 700; }
-                .sidebar { background: #0e1829; padding: 24px 18px; }
-                .section-title { color: #dbeafe; font-size: 16px; font-weight: 700; }
-                .state-good { color: #5eead4; font-size: 12px; }
-                .conversation { background: #121c2e; border-radius: 14px; padding: 24px; font-size: 17px; }
-                .composer { background: #121c2e; border-radius: 12px; padding: 12px; }
-                button.suggested-action { background: #5eead4; color: #052e2b; font-weight: 700; }
-                .theme-light .app-shell { background: #f7f9fc; color: #172033; }
-                .theme-light .topbar, .theme-light .sidebar { background: #e8edf5; }
-                .theme-light .conversation, .theme-light .composer { background: #ffffff; }
-                .theme-light .section-title { color: #172033; }
+                .app-shell { background: #09111f; color: #e8eef8; }
+                .topbar { background: #101d32; padding: 14px 24px; border-bottom: 1px solid #233653; }
+                .brand { color: #64e6d1; font-size: 26px; font-weight: 800; letter-spacing: 1px; }
+                .subtitle, .muted { color: #9aacc6; }
+                .offline { color: #64e6d1; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
+                .sidebar { background: #0d192b; padding: 22px 16px; border-right: 1px solid #20334f; }
+                .page-heading { padding: 4px 2px 2px; }
+                .eyebrow { color: #6f87a8; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; }
+                .page-title { color: #f1f5fb; font-size: 27px; font-weight: 800; }
+                .section-title, .card-title { color: #dbeafe; font-size: 16px; font-weight: 700; }
+                .card-title { font-size: 14px; }
+                .state-good { color: #64e6d1; font-size: 12px; font-weight: 700; }
+                .nav-switcher { margin-bottom: 8px; }
+                .workspace-card { background: #13243b; border: 1px solid #253d5d; border-radius: 14px; padding: 14px; }
+                .history-list { background: transparent; }
+                .history-list row { background: #122239; border-radius: 9px; margin-bottom: 5px; padding: 7px 9px; }
+                .conversation-frame { background: #0f1c30; border: 1px solid #203653; border-radius: 16px; }
+                .conversation { background: #111f34; border-radius: 16px; padding: 26px; font-size: 17px; }
+                .composer { background: #13243b; border: 1px solid #2a4567; border-radius: 14px; padding: 10px; }
+                .composer-hint { color: #7890af; font-size: 12px; padding: 0 4px; }
+                entry { background: #0d192b; color: #edf4ff; border: 1px solid #314d70; border-radius: 10px; padding: 11px 13px; min-height: 20px; }
+                entry:focus { border-color: #64e6d1; }
+                button { border-radius: 9px; padding: 8px 12px; }
+                button.suggested-action { background: #64e6d1; color: #062c2a; font-weight: 800; padding-left: 18px; padding-right: 18px; }
+                button.suggested-action:hover { background: #8af2e1; }
+                .theme-light .app-shell { background: #f4f7fb; color: #172033; }
+                .theme-light .topbar { background: #ffffff; border-bottom-color: #dbe3ef; }
+                .theme-light .sidebar { background: #eaf0f8; border-right-color: #d4deec; }
+                .theme-light .workspace-card { background: #f8fbff; border-color: #d7e1ef; }
+                .theme-light .history-list row { background: #f8fbff; }
+                .theme-light .conversation-frame { background: #ffffff; border-color: #d7e1ef; }
+                .theme-light .conversation, .theme-light .composer { background: #ffffff; border-color: #d7e1ef; }
+                .theme-light .page-title, .theme-light .section-title, .theme-light .card-title { color: #172033; }
                 .theme-light .muted, .theme-light .subtitle { color: #53627a; }
-                .theme-light entry, .theme-light combobox { background: #ffffff; color: #172033; }
+                .theme-light .composer-hint, .theme-light .eyebrow { color: #6b7d97; }
+                .theme-light entry, .theme-light combobox { background: #ffffff; color: #172033; border-color: #cbd7e7; }
                 .theme-dark .app-shell { background: #070c16; }
                 .large-text .conversation, .large-text entry, .large-text button { font-size: 21px; }
-                .high-contrast .conversation, .high-contrast .composer { border: 2px solid #ffffff; }
+                .high-contrast .conversation, .high-contrast .composer, .high-contrast entry { border: 2px solid #ffffff; }
                 .high-contrast .muted { color: #ffffff; }
                 .color-red-green .state-good, .color-red-green .offline { color: #00b7ff; }
                 .color-blue-yellow .state-good, .color-blue-yellow .offline { color: #ff7b00; }
