@@ -23,6 +23,7 @@ class GoalKind(str, Enum):
     ANALYZE_PROJECT = "analyze-project"
     RUN_COMMAND = "run-command"
     INSTALL_TOOL = "install-tool"
+    VM_BUILD = "vm-build"
 
 
 class CriterionKind(str, Enum):
@@ -33,6 +34,8 @@ class CriterionKind(str, Enum):
     PROJECT_ANALYZED = "project-analyzed"
     COMMAND_EXITED_ZERO = "command-exited-zero"
     TOOL_AVAILABLE = "tool-available"
+    VM_READY = "vm-ready"
+    VM_CREATED = "vm-created"
     E2E_VERIFIED = "e2e-verified"
 
 
@@ -62,6 +65,8 @@ class GoalNormalizer:
     def normalize(self, raw_goal: str) -> NormalizedGoal:
         goal = _validated_goal(raw_goal)
         lowered = goal.casefold()
+        if self._is_windows_vm_request(lowered):
+            return self._vm_build(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
             return self._install(goal)
         if _starts_with(
@@ -89,6 +94,40 @@ class GoalNormalizer:
         ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
             return self._analyze(goal)
         raise GoalError("goal is not a supported simple coding or system task")
+
+    @staticmethod
+    def _is_windows_vm_request(lowered: str) -> bool:
+        return (
+            _contains_word(lowered, ("windows",))
+            and _contains_word(
+                lowered,
+                ("vm", "virtual machine", "virtuelle maschine", "virtualisierung"),
+            )
+            and _contains_word(
+                lowered,
+                ("baue", "bauen", "erstelle", "erstellen", "build", "create"),
+            )
+        )
+
+    def _vm_build(self, goal: str) -> NormalizedGoal:
+        return _goal(
+            goal,
+            GoalKind.VM_BUILD,
+            "Build and verify a Windows VM with bounded hardware preflight",
+            target="windows-vm",
+            implicit_requirements=(
+                "QEMU/KVM or an equivalent trusted hypervisor",
+                "a user-provided Windows installation ISO and license",
+                "IOMMU/VFIO support for dedicated GPU passthrough",
+                "a bounded VM disk and memory allocation",
+            ),
+            criteria=(
+                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+                AcceptanceCriterion("preflight", CriterionKind.VM_READY),
+                AcceptanceCriterion("created", CriterionKind.VM_CREATED),
+                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
 
     def _write(self, goal: str) -> NormalizedGoal:
         target = _extract_path(goal)
@@ -277,6 +316,7 @@ def _goal(
     target: str | None = None,
     content: str | None = None,
     argv: tuple[str, ...] = (),
+    implicit_requirements: tuple[str, ...] = (),
     criteria: tuple[AcceptanceCriterion, ...],
 ) -> NormalizedGoal:
     return NormalizedGoal(
@@ -287,6 +327,7 @@ def _goal(
         content=content,
         argv=argv,
         implicit_requirements=(
+            *implicit_requirements,
             "Stay inside the canonical project scope.",
             "Preserve an auditable persistent task state.",
             "Recover or roll back safely after a failed mutation.",

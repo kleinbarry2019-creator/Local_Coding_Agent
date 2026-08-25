@@ -87,6 +87,11 @@ def capability_matrix() -> dict[str, object]:
             ("Kein offener Netzwerkdienst ohne späteres explizites Pairing.",),
         ),
         CapabilityEntry(
+            "virtualization.windows-vm-preflight", "virtualization", "available",
+            "Prüft Hypervisor, KVM, Installationsmedium und GPU-Passthrough-Voraussetzungen, ohne den Host zu verändern.",
+            ("Die VM-Erstellung bleibt bis zu verifizierten Medien, Ressourcen und einem sicheren Gast-Test unvollständig.",),
+        ),
+        CapabilityEntry(
             "interface.desktop-browser", "interface", "available",
             "GTK-Desktop-App und loopback-gebundene Browser-Oberfläche.",
             ("GTK 4 ist für die native App erforderlich.",),

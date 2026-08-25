@@ -90,6 +90,26 @@ def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) ->
     assert result.plan_assessment["valid"] is True
 
 
+def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    result = AutonomyRuntime(config).run(
+        "Baue mir eine Windows VM mit Zugriff auf CPU, GPU und Speicher"
+    )
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.original_goal_matched is False
+    assert any(
+        criterion.criterion_id == "created"
+        and criterion.evidence == "vm-creation-not-performed"
+        for criterion in result.completion.criteria
+    )
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["ordered_step_ids"] == ["step-vm-preflight"]
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)

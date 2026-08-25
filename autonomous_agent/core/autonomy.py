@@ -245,6 +245,18 @@ class Planner:
                     purpose="provision-and-verify-the-requested-tool",
                 ),
             )
+        if goal.kind is GoalKind.VM_BUILD:
+            return (
+                PlanStep(
+                    "step-vm-preflight",
+                    StepKind.TOOL,
+                    "system.vm-preflight",
+                    {"project_root": str(root)},
+                    root,
+                    False,
+                    purpose="verify-hypervisor-kvm-iso-and-gpu-passthrough-prerequisites",
+                ),
+            )
         raise ValueError("normalized goal kind is unsupported")
 
     def assess(
@@ -484,6 +496,25 @@ class CompletionEvaluator:
             capability = capabilities.discover(_required(criterion.target))
             passed = capability.available and capability.version is not None
             evidence = "version-probe-passed" if passed else "tool-unavailable"
+        elif criterion.kind is CriterionKind.VM_READY:
+            preflight = next(
+                (
+                    item.get("data")
+                    for item in outputs
+                    if isinstance(item.get("data"), Mapping)
+                    and item.get("step_id") == "step-vm-preflight"
+                ),
+                None,
+            )
+            passed = isinstance(preflight, Mapping) and preflight.get("ready") is True
+            evidence = "vm-prerequisites-verified" if passed else "vm-prerequisites-missing"
+        elif criterion.kind is CriterionKind.VM_CREATED:
+            passed = any(_vm_created(item) for item in outputs)
+            evidence = (
+                "vm-artifact-and-guest-checks-observed"
+                if passed
+                else "vm-creation-not-performed"
+            )
         elif criterion.kind is CriterionKind.E2E_VERIFIED:
             passed = _direct_e2e(goal, project_root, outputs, capabilities)
             evidence = "public-boundary-reverified" if passed else "e2e-recheck-failed"
@@ -1171,6 +1202,8 @@ def _direct_e2e(
         return any(_exit_code_zero(item) for item in outputs)
     if goal.kind is GoalKind.INSTALL_TOOL:
         return capabilities.discover(_required(goal.target)).available
+    if goal.kind is GoalKind.VM_BUILD:
+        return any(_vm_created(item) for item in outputs)
     return False
 
 
@@ -1183,6 +1216,15 @@ def _required(value: str | None) -> str:
 def _exit_code_zero(output: Mapping[str, object]) -> bool:
     data = output.get("data")
     return isinstance(data, Mapping) and data.get("exit_code") == 0
+
+
+def _vm_created(output: Mapping[str, object]) -> bool:
+    data = output.get("data")
+    return (
+        isinstance(data, Mapping)
+        and data.get("created") is True
+        and data.get("verified") is True
+    )
 
 
 __all__ = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,26 @@ class EnsureToolOutput:
     executable: str | None
     version: str | None
     diagnostic: str
+
+
+@dataclass(frozen=True)
+class VmPreflightInput:
+    project_root: Path
+
+
+@dataclass(frozen=True)
+class VmPreflightOutput:
+    ready: bool
+    qemu_available: bool
+    qemu_version: str | None
+    kvm_available: bool
+    cpu_count: int
+    memory_kib: int
+    iommu_groups: int
+    gpu_devices: int
+    iso_candidates: list[str]
+    missing: list[str]
+    warnings: list[str]
 
 
 def register_system_tools(
@@ -69,6 +90,86 @@ def register_system_tools(
             target_resolver=lambda request: (request.project_root,),
         )
     )
+    def vm_preflight(
+        request: VmPreflightInput, context: ExecutionContext
+    ) -> VmPreflightOutput:
+        del context
+        if request.project_root != root:
+            raise PermissionError("system preflight project scope is invalid")
+        qemu = capabilities.discover("qemu-system-x86_64")
+        kvm = Path("/dev/kvm")
+        kvm_ready = kvm.is_char_device() and os.access(kvm, os.R_OK | os.W_OK)
+        iommu_root = Path("/sys/kernel/iommu_groups")
+        iommu_groups = (
+            len(tuple(iommu_root.glob("[0-9]*"))) if iommu_root.is_dir() else 0
+        )
+        gpu_devices = tuple(Path("/sys/class/drm").glob("card[0-9]"))
+        iso_candidates = tuple(
+            sorted(
+                item.name
+                for item in root.iterdir()
+                if item.is_file() and item.suffix.casefold() == ".iso"
+            )
+        )
+        memory_kib = 0
+        try:
+            for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+                if line.startswith("MemTotal:"):
+                    memory_kib = int(line.split()[1])
+                    break
+        except (OSError, ValueError, IndexError):
+            memory_kib = 0
+        missing: list[str] = []
+        if not qemu.available or qemu.version is None:
+            missing.append("qemu-system-x86_64")
+        if not kvm_ready:
+            missing.append("writable /dev/kvm")
+        if not iso_candidates:
+            missing.append("Windows installation ISO in the project folder")
+        if iommu_groups == 0:
+            missing.append("IOMMU groups for GPU passthrough")
+        warnings = [
+            "GPU passthrough requires a dedicated GPU and VFIO binding; the host display GPU must remain available.",
+            "A Windows license and user-approved VM disk size are required before creation.",
+        ]
+        return VmPreflightOutput(
+            ready=not missing,
+            qemu_available=qemu.available,
+            qemu_version=qemu.version,
+            kvm_available=kvm_ready,
+            cpu_count=os.cpu_count() or 0,
+            memory_kib=memory_kib,
+            iommu_groups=iommu_groups,
+            gpu_devices=len(gpu_devices),
+            iso_candidates=list(iso_candidates),
+            missing=missing,
+            warnings=warnings,
+        )
+
+    registry.register(
+        ToolSpec(
+            name="system.vm-preflight",
+            version="1.0.0",
+            description="Inspect bounded virtualization and Windows VM prerequisites without changing the host.",
+            input_type=VmPreflightInput,
+            output_type=VmPreflightOutput,
+            capabilities=frozenset({"system.virtualization-preflight"}),
+            side_effect=SideEffect.READ_ONLY,
+            network=NetworkKind.NONE,
+            requires_elevation=False,
+            requires_recovery=False,
+            default_timeout_s=5.0,
+            max_output_bytes=16_384,
+            handler=vm_preflight,
+            target_resolver=lambda request: (request.project_root,),
+        )
+    )
 
 
-__all__ = ["EnsureToolInput", "EnsureToolOutput", "register_system_tools"]
+__all__ = [
+    "EnsureToolInput",
+    "EnsureToolOutput",
+    "VmPreflightInput",
+    "VmPreflightOutput",
+    "register_system_tools",
+]
