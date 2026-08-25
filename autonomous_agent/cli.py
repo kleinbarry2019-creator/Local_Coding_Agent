@@ -301,10 +301,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             from autonomous_agent.ui import AcbUiServer
 
+            research_enabled = os.environ.get("ACB_RESEARCH_NETWORK", "1").lower() not in {
+                "0",
+                "false",
+                "off",
+                "no",
+            }
             server = AcbUiServer(
                 config,
                 host=namespace.host,
                 port=namespace.port,
+                start_learning=True,
+                research_network=research_enabled,
             )
             if namespace.open:
                 webbrowser.open(server.url)

@@ -266,6 +266,30 @@ def test_controller_honors_network_research_preference(tmp_path: Path) -> None:
         controller.close()
 
 
+def test_browser_ui_research_endpoint_runs_without_opening_a_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0, research_network=True)
+    monkeypatch.setattr(
+        server._controller,
+        "research_now",
+        lambda: {"status": "ok", "items": 2, "sources": [{"name": "test"}]},
+    )
+    thread = _start(server)
+    try:
+        status, result = _post_json(
+            f"{server.url}api/learning/research",
+            {},
+            token=server.token,
+        )
+        assert status == 200
+        assert result["status"] == "ok"
+        assert result["items"] == 2
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_controller_attaches_relevant_learning_context_to_task(tmp_path: Path) -> None:
     controller = RuntimeTaskController(
         _config(tmp_path), runtime=cast(_Runtime, _FakeRuntime())

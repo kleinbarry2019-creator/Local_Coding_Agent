@@ -536,11 +536,18 @@ class AcbUiServer:
         host: str = DEFAULT_UI_HOST,
         port: int = DEFAULT_UI_PORT,
         runtime: _Runtime | None = None,
+        start_learning: bool = False,
+        research_network: bool = False,
     ) -> None:
         self.host = validate_ui_host(host)
         self.port = _validate_port(port)
         self.token = secrets.token_urlsafe(24)
-        self._controller = RuntimeTaskController(config, runtime=runtime)
+        self._controller = RuntimeTaskController(
+            config,
+            runtime=runtime,
+            start_learning=start_learning,
+            research_network=research_network,
+        )
         self.runtime = self._controller.runtime
         self._serving = threading.Event()
         self._httpd = _AcbHttpServer((self.host, self.port), _AcbRequestHandler, self)
@@ -591,6 +598,10 @@ class AcbUiServer:
 
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
+
+    def research_now(self) -> dict[str, object]:
+        """Run one allow-listed research pass without opening a browser."""
+        return self._controller.research_now()
 
     def capability_matrix(self) -> dict[str, object]:
         return self._controller.capability_matrix()
@@ -910,6 +921,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/learning/gate",
             "/api/learning/context",
             "/api/learning/profile/reset",
+            "/api/learning/research",
             "/api/audit/export",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
@@ -1017,6 +1029,14 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "learning profile reset failed")
                 return
             self._send_json(HTTPStatus.OK, profile)
+            return
+        if path == "/api/learning/research":
+            try:
+                result = self._app().research_now()
+            except (TypeError, ValueError, RuntimeError, OSError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "research failed")
+                return
+            self._send_json(HTTPStatus.OK, result)
             return
         if path == "/api/audit/export":
             session_id = payload.get("session_id")
@@ -1269,10 +1289,10 @@ _HTML = """<!doctype html>
 <main>
   <header><div><div class="label">Lokaler Autonomie-Runtime</div><h1><span>ACB</span> Butler</h1><p>Natürliche Aufträge ausführen, prüfen und dauerhaft nachvollziehbar machen.</p></div><div class="badge" id="health">Runtime wird geprüft …</div></header>
   <section class="panel"><div class="label">Neuer Auftrag</div><form id="task-form"><textarea id="goal" required placeholder="Zum Beispiel: Erstelle die Datei notes.txt mit dem Inhalt Hallo ACB"></textarea><button id="submit" type="submit">Auftrag ausführen</button></form><div id="state">Bereit. Die Oberfläche ist ausschließlich auf diesem Rechner erreichbar.</div></section>
-  <div class="grid"><section class="panel"><div class="label">Aktueller Status</div><div id="current">Noch kein Auftrag gestartet.</div></section><section class="panel"><div class="label">Verlauf</div><div id="history">Keine Aufträge in dieser Sitzung.</div></section><section class="panel"><div class="label">Wissen &amp; Verbesserungen</div><div id="learning">Lernstatus wird geladen …</div></section></div>
+  <div class="grid"><section class="panel"><div class="label">Aktueller Status</div><div id="current">Noch kein Auftrag gestartet.</div></section><section class="panel"><div class="label">Verlauf</div><div id="history">Keine Aufträge in dieser Sitzung.</div></section><section class="panel"><div class="label">Wissen &amp; Verbesserungen</div><div id="learning">Lernstatus wird geladen …</div><button id="research" type="button">Nach vertrauenswürdigen Quellen suchen</button><div id="research-state"></div></section></div>
 </main>
 <script>
-const TOKEN = __ACB_TOKEN__; const form = document.getElementById('task-form'); const goal = document.getElementById('goal'); const submit = document.getElementById('submit'); const state = document.getElementById('state'); const current = document.getElementById('current'); const history = document.getElementById('history'); const learning = document.getElementById('learning');
+const TOKEN = __ACB_TOKEN__; const form = document.getElementById('task-form'); const goal = document.getElementById('goal'); const submit = document.getElementById('submit'); const state = document.getElementById('state'); const current = document.getElementById('current'); const history = document.getElementById('history'); const learning = document.getElementById('learning'); const research = document.getElementById('research'); const researchState = document.getElementById('research-state');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 async function request(path, options={}) { const response = await fetch(path, {...options, headers:{'Content-Type':'application/json','X-ACB-Token':TOKEN,...(options.headers||{})}}); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Anfrage fehlgeschlagen'); return data; }
 function renderTask(task) { const result = task.result || {}; const completion = result.completion || {}; const criteria = (completion.criteria || []).map(item => `<div>${item.passed ? '✓' : '✗'} ${esc(item.criterion_id)}: ${esc(item.evidence)}</div>`).join(''); current.innerHTML = `<strong class="${task.status === 'completed' ? 'success' : task.status === 'failed' || task.status === 'rejected' ? 'error' : ''}">${esc(task.status)}</strong><p>${esc(task.goal)}</p><div>Fortschritt: ${esc(task.progress_percent)}% · verbleibende Schritte: ${esc(task.remaining_steps)} · geschätzt: ${esc(task.estimated_remaining_seconds)}s</div>${task.session_id ? `<div>Session: <code>${esc(task.session_id)}</code></div>` : ''}${criteria ? `<p>${criteria}</p>` : ''}${task.error ? `<p class="error">${esc(task.error)}</p>` : ''}${result.outputs ? `<details><summary>Ausgabe</summary><pre>${esc(JSON.stringify(result.outputs,null,2))}</pre></details>` : ''}`; }
@@ -1280,6 +1300,7 @@ async function refresh() { try { const data = await request('/api/tasks',{header
 async function refreshLearning() { try { const data = await request('/api/learning',{headers:{}}); const status = data.status || {}; const suggestions = data.suggestions || []; const updates = data.self_updates || []; learning.innerHTML = `<div>Wissen: ${esc(status.knowledge_count || 0)} · Vorschläge: ${esc(status.suggestion_count || 0)} · Self-Updates: ${esc(status.self_update_count || 0)}</div>${suggestions.slice(0,3).map(item => `<p><strong>${esc(item.title)}</strong><br>${esc(item.description)}</p>`).join('')}${updates.slice(0,2).map(item => `<p><strong>Self-Update:</strong> ${esc(item.title)}</p>`).join('')}`; } catch (error) { learning.textContent = 'Lernstatus nicht verfügbar.'; } }
 async function poll(id) { try { const task = await request(`/api/tasks/${encodeURIComponent(id)}`,{headers:{}}); renderTask(task); await refresh(); if (['queued','running'].includes(task.status)) setTimeout(() => poll(id), 600); else { submit.disabled=false; state.textContent = task.status === 'completed' ? 'Auftrag vollständig verifiziert.' : 'Auftrag beendet; bitte Evidenz prüfen.'; state.className = task.status === 'completed' ? 'success' : 'error'; } } catch (error) { submit.disabled=false; state.textContent=error.message; state.className='error'; } }
 form.addEventListener('submit', async event => { event.preventDefault(); submit.disabled=true; state.textContent='Auftrag angenommen …'; state.className=''; try { const task=await request('/api/tasks',{method:'POST',body:JSON.stringify({goal:goal.value})}); renderTask(task); goal.value=''; poll(task.request_id); } catch(error) { submit.disabled=false; state.textContent=error.message; state.className='error'; } });
+research.addEventListener('click', async () => { research.disabled=true; researchState.textContent='Recherche läuft …'; try { const result=await request('/api/learning/research',{method:'POST',body:'{}'}); researchState.textContent=result.status === 'offline' ? 'Online-Recherche ist in den Datenschutzeinstellungen deaktiviert.' : `Recherche abgeschlossen: ${esc(result.items || 0)} neue Einträge.`; await refreshLearning(); } catch(error) { researchState.textContent=error.message; } finally { research.disabled=false; } });
 request('/api/health',{headers:{}}).then(data => { document.getElementById('health').textContent = data.status === 'ok' ? '● Runtime bereit' : 'Runtime prüfen'; }).catch(() => { document.getElementById('health').textContent='Runtime nicht erreichbar'; }); refresh(); refreshLearning();
 </script>
 </body>

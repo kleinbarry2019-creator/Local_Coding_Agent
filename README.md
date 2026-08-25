@@ -141,6 +141,13 @@ werden. Der Standard ist `http://127.0.0.1:8765/`. Jeder Schreibauftrag benötig
 ein zufälliges Sitzungstoken, das nur der lokal ausgelieferten Oberfläche bekannt
 ist. Netzwerkzugriff auf die UI wird nicht akzeptiert.
 
+Die Browser-Oberfläche startet den lokalen Lern-Scheduler und bietet im Bereich
+„Wissen & Verbesserungen“ eine Schaltfläche für eine manuelle Recherche. Dabei
+werden ausschließlich die konfigurierte Quellen-Allowlist und die
+Datenschutzpräferenz verwendet; es öffnet sich kein externes Browserfenster.
+Mit `ACB_RESEARCH_NETWORK=0 acb ui` kann der Netzwerkzugriff für diese UI
+vollständig deaktiviert werden.
+
 ## Lokale Desktop-App und Offline-Fortsetzung
 
 Für die installierte Anwendung gibt es zusätzlich eine native GTK-Desktop-App:
