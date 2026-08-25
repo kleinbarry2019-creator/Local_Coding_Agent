@@ -211,6 +211,18 @@ class Planner:
                     purpose="map-project-languages-manifests-and-test-hints",
                 ),
             )
+        if goal.kind is GoalKind.SECURITY_SCAN:
+            return (
+                PlanStep(
+                    "step-security-scan",
+                    StepKind.TOOL,
+                    "project.security-scan",
+                    {"path": str(root)},
+                    root,
+                    False,
+                    purpose="scan-project-text-for-bounded-security-findings",
+                ),
+            )
         if goal.kind is GoalKind.RUN_COMMAND:
             executable = goal.argv[0]
             return (
@@ -1531,6 +1543,14 @@ def _direct_e2e(
             if isinstance(data, Mapping) and isinstance(
                 data.get("languages"), Mapping
             ) and isinstance(data.get("files"), int):
+                return True
+        return False
+    if goal.kind is GoalKind.SECURITY_SCAN:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("files_scanned"), int
+            ) and isinstance(data.get("findings"), list):
                 return True
         return False
     if goal.kind is GoalKind.RUN_COMMAND:

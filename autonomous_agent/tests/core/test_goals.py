@@ -382,6 +382,13 @@ def test_research_word_in_filename_does_not_override_write_intent() -> None:
     assert goal.content == "verified"
 
 
+def test_security_scan_is_a_read_only_first_class_goal() -> None:
+    goal = GoalNormalizer().normalize("Führe einen Sicherheitsscan des Projekts aus")
+
+    assert goal.kind is GoalKind.SECURITY_SCAN
+    assert goal.target == "."
+
+
 @pytest.mark.parametrize(
     "goal_text",
     ["", "do something clever", "read ../../etc/passwd", "install ruff extra"],

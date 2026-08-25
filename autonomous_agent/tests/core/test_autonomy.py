@@ -108,6 +108,23 @@ def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) ->
     assert result.plan_assessment["valid"] is True
 
 
+def test_runtime_completes_security_scan_with_findings_evidence(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    (config.paths.project_root / "app.py").write_text(
+        "API_KEY = 'not-a-real-secret-value'\n", encoding="utf-8"
+    )
+
+    result = AutonomyRuntime(config).run(
+        "Führe einen Sicherheitsscan des Projekts aus"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert result.outputs[0]["step_id"] == "step-security-scan"
+    assert result.outputs[0]["data"]["clean"] is False
+
+
 def test_runtime_executes_explicit_command_with_verification_wording(
     tmp_path: Path,
 ) -> None:

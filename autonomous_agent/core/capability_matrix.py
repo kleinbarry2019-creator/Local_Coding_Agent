@@ -92,6 +92,11 @@ def capability_matrix() -> dict[str, object]:
             ("Keine dauerhafte Root-Ausführung.",),
         ),
         CapabilityEntry(
+            "security.project-scan", "security", "available",
+            "Prüft Projekttext bounded auf häufige Secrets, private Schlüssel und gefährliche Ausführungsmuster.",
+            ("Read-only; Fundstellen werden gemeldet, Secret-Inhalte niemals ausgegeben.",),
+        ),
+        CapabilityEntry(
             "security.remote-control", "connectivity", "gated",
             "Lokale Browser- und Desktop-Oberfläche; Remote-Zugriff ist vorbereitet.",
             ("Kein offener Netzwerkdienst ohne späteres explizites Pairing.",),

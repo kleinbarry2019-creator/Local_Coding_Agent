@@ -24,6 +24,7 @@ class GoalKind(str, Enum):
     RUN_COMMAND = "run-command"
     INSTALL_TOOL = "install-tool"
     VM_BUILD = "vm-build"
+    SECURITY_SCAN = "security-scan"
     RESEARCH_TASK = "research-task"
 
 
@@ -67,6 +68,8 @@ class GoalNormalizer:
     def normalize(self, raw_goal: str) -> NormalizedGoal:
         goal = _validated_goal(raw_goal)
         lowered = goal.casefold()
+        if self._is_security_scan_request(lowered):
+            return self._security_scan(goal)
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
         if self._is_complex_research_request(lowered):
@@ -157,6 +160,27 @@ class GoalNormalizer:
         if self._is_ambitious_unknown_request(lowered):
             return self._research_task(goal)
         raise GoalError("goal is not a supported simple coding or system task")
+
+    @staticmethod
+    def _is_security_scan_request(lowered: str) -> bool:
+        scan_intent = _contains_word(
+            lowered,
+            (
+                "security scan",
+                "sicherheits-scan",
+                "sicherheitsscan",
+                "sicherheitsprüfung",
+                "security audit",
+                "sicherheitsanalyse",
+            ),
+        )
+        scope_hint = any(
+            token in lowered for token in ("project", "projekt", "repo", "repository", "code")
+        )
+        return scan_intent and scope_hint and not _contains_word(
+            lowered,
+            ("fix", "behebe", "beheben", "implement", "implementiere", "apply", "anwenden"),
+        )
 
     @staticmethod
     def _is_windows_vm_request(lowered: str) -> bool:
@@ -731,6 +755,19 @@ class GoalNormalizer:
             criteria=(
                 AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
                 AcceptanceCriterion("analysis", CriterionKind.PROJECT_ANALYZED),
+                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
+
+    def _security_scan(self, goal: str) -> NormalizedGoal:
+        return _goal(
+            goal,
+            GoalKind.SECURITY_SCAN,
+            "Bounded project security scan",
+            target=".",
+            criteria=(
+                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+                AcceptanceCriterion("findings", CriterionKind.OUTPUT_PRODUCED),
                 AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
             ),
         )

@@ -20,11 +20,18 @@ _MAX_FILE_BYTES = 1_048_576
 _MAX_ENTRIES = 2_000
 _MAX_ARGUMENTS = 256
 _MAX_ANALYSIS_FILES = 4_000
+_MAX_SECURITY_FILES = 2_000
+_MAX_SECURITY_FILE_BYTES = 256_000
+_MAX_SECURITY_FINDINGS = 128
 _TRUSTED_EXECUTABLE_ROOTS = (
     Path("/usr/bin"),
     Path("/bin"),
     Path("/usr/local/bin"),
     Path("/home/linuxbrew/.linuxbrew/bin"),
+)
+_PROTECTED_PROJECT_PARTS = frozenset({".git", ".ssh", ".gnupg"})
+_PROTECTED_PROJECT_NAMES = frozenset(
+    {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
 )
 
 
@@ -99,6 +106,29 @@ class RunProcessOutput:
     exit_code: int
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class SecurityScanInput:
+    path: Path
+
+
+@dataclass(frozen=True)
+class SecurityFinding:
+    path: str
+    line: int
+    rule: str
+    severity: str
+    message: str
+
+
+@dataclass(frozen=True)
+class SecurityScanOutput:
+    path: str
+    clean: bool
+    files_scanned: int
+    findings: list[SecurityFinding]
+    truncated: bool
 
 
 class ProjectPathResolver:
@@ -244,6 +274,24 @@ class ProjectToolRuntime:
                 target_resolver=lambda item: (item.cwd,),
             )
         )
+        registry.register(
+            ToolSpec(
+                name="project.security-scan",
+                version="1.0.0",
+                description="Scan bounded project text for common secrets and dangerous execution patterns.",
+                input_type=SecurityScanInput,
+                output_type=SecurityScanOutput,
+                capabilities=frozenset({"project.security-scan"}),
+                side_effect=SideEffect.READ_ONLY,
+                network=NetworkKind.NONE,
+                requires_elevation=False,
+                requires_recovery=False,
+                default_timeout_s=15.0,
+                max_output_bytes=131_072,
+                handler=self.security_scan,
+                target_resolver=lambda item: (item.path,),
+            )
+        )
         return registry
 
     def read_file(
@@ -251,6 +299,7 @@ class ProjectToolRuntime:
     ) -> ReadFileOutput:
         del context
         path = self.paths.resolve(request.path)
+        _reject_protected_project_path(path, self.project_root)
         if not path.is_file():
             raise RuntimeToolError("read target is not a regular file")
         payload = path.read_bytes()
@@ -274,6 +323,7 @@ class ProjectToolRuntime:
         if len(payload) > _MAX_FILE_BYTES:
             raise RuntimeToolError("write content exceeds the byte limit")
         path = self.paths.resolve(request.path, allow_missing=True)
+        _reject_protected_project_path(path, self.project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{path.name}.", dir=path.parent
@@ -469,6 +519,64 @@ class ProjectToolRuntime:
             stderr=result.stderr[:cap].decode("utf-8", errors="replace"),
         )
 
+    def security_scan(
+        self, request: SecurityScanInput, context: ExecutionContext
+    ) -> SecurityScanOutput:
+        del context
+        root = self.paths.resolve(request.path)
+        if not root.is_dir():
+            raise RuntimeToolError("security scan target is not a directory")
+        rules = (
+            ("private-key", "critical", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+            ("cloud-access-key", "high", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+            ("token-assignment", "high", re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*['\"][^'\"]{8,}")),
+            ("shell-execution", "high", re.compile(r"(?i)\bshell\s*=\s*True\b|\bcurl\b[^\n|]*\|\s*(?:sh|bash)\b")),
+            ("dynamic-eval", "medium", re.compile(r"\b(?:eval|exec)\s*\(")),
+        )
+        findings: list[SecurityFinding] = []
+        files_scanned = 0
+        truncated = False
+        for candidate in sorted(root.rglob("*")):
+            if files_scanned >= _MAX_SECURITY_FILES:
+                truncated = True
+                break
+            if candidate.is_symlink() or not candidate.is_file() or ".git" in candidate.parts:
+                continue
+            try:
+                payload = candidate.read_bytes()
+            except OSError:
+                continue
+            if len(payload) > _MAX_SECURITY_FILE_BYTES or b"\x00" in payload:
+                continue
+            files_scanned += 1
+            text = payload.decode("utf-8", errors="replace")
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                for rule, severity, pattern in rules:
+                    if pattern.search(line):
+                        findings.append(
+                            SecurityFinding(
+                                path=candidate.relative_to(self.project_root).as_posix(),
+                                line=line_number,
+                                rule=rule,
+                                severity=severity,
+                                message="Pattern requires review; secret values are never included.",
+                            )
+                        )
+                        if len(findings) >= _MAX_SECURITY_FINDINGS:
+                            truncated = True
+                            break
+                if len(findings) >= _MAX_SECURITY_FINDINGS:
+                    break
+            if len(findings) >= _MAX_SECURITY_FINDINGS:
+                break
+        return SecurityScanOutput(
+            path=root.relative_to(self.project_root).as_posix() or ".",
+            clean=not findings,
+            files_scanned=files_scanned,
+            findings=findings,
+            truncated=truncated,
+        )
+
 
 def _trusted_executable(command: str, project_root: Path) -> Path:
     if not command or "/" in command or "\x00" in command:
@@ -492,6 +600,13 @@ def _trusted_executable(command: str, project_root: Path) -> Path:
     if discovered is not None:
         return Path(discovered).resolve(strict=True)
     raise RuntimeToolError("process executable is unavailable")
+
+
+def _reject_protected_project_path(path: Path, project_root: Path) -> None:
+    """Keep repository metadata and common credential files out of tool I/O."""
+    relative = path.relative_to(project_root)
+    if any(part in _PROTECTED_PROJECT_PARTS for part in relative.parts) or path.name in _PROTECTED_PROJECT_NAMES:
+        raise RuntimeToolError("protected project path is not available to the agent")
 
 
 _IMPORT_PATTERNS = (
@@ -624,6 +739,9 @@ __all__ = [
     "RunProcessInput",
     "RunProcessOutput",
     "RuntimeToolError",
+    "SecurityFinding",
+    "SecurityScanInput",
+    "SecurityScanOutput",
     "WriteFileInput",
     "WriteFileOutput",
     "sandbox_command",
