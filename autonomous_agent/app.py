@@ -440,6 +440,26 @@ def _run_gtk(config: AgentConfig) -> int:
             note.set_wrap(True)
             note.add_css_class("muted")
             page.append(note)
+            login_title = Gtk.Label(label="Anmelden")
+            login_title.set_xalign(0)
+            login_title.add_css_class("section-title")
+            page.append(login_title)
+            login_username = Gtk.Entry()
+            login_username.set_placeholder_text("Benutzername")
+            page.append(login_username)
+            login_password = Gtk.Entry()
+            login_password.set_placeholder_text("Passwort")
+            login_password.set_visibility(False)
+            page.append(login_password)
+            login = Gtk.Button(label="Lokal anmelden")
+            login.set_halign(Gtk.Align.START)
+            login.connect(
+                "clicked",
+                lambda *_args: self._authenticate_account(
+                    login_username, login_password
+                ),
+            )
+            page.append(login)
             username = Gtk.Entry()
             username.set_placeholder_text("Benutzername (3–32 Zeichen)")
             page.append(username)
@@ -1056,6 +1076,18 @@ def _run_gtk(config: AgentConfig) -> int:
             )
             if self.stack is not None:
                 self.stack.set_visible_child_name("tasks")
+
+        def _authenticate_account(self, username: Any, password: Any) -> None:
+            account = self.controller.authenticate(
+                username.get_text().strip(), password.get_text()
+            )
+            password.set_text("")
+            if account is None:
+                self.account_status.set_text("Anmeldung fehlgeschlagen. Prüfe Benutzername und Passwort.")
+                return
+            self.account_status.set_text(
+                f"Lokal angemeldet als {account.username}. Geräte-ID: {account.device_id}"
+            )
 
         def _reset_account(self, username: Any, answer: Any, password: Any) -> None:
             try:
