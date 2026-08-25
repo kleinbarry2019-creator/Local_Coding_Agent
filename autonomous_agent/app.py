@@ -24,7 +24,9 @@ from autonomous_agent.core.config import (
     ExecutionMode,
     load_config,
 )
+from autonomous_agent.core.goals import GoalError
 from autonomous_agent.core.preferences import THEMES
+from autonomous_agent.core.user_experience import TaskAccessError
 from autonomous_agent.ui import RuntimeTaskController, UiTask
 
 APP_NAME = "ACB – Autonome Computing Butler"
@@ -813,7 +815,27 @@ def _run_gtk(config: AgentConfig) -> int:
             goal = self.input.get_text().strip()
             if not goal:
                 return
-            task = self.controller.submit(goal)
+            try:
+                task = self.controller.submit(goal)
+            except GoalError:
+                self.current.set_text(
+                    "Auftrag nicht verstanden.\n"
+                    "Nutze zum Beispiel: ‚Erstelle notes.txt mit dem Inhalt Hallo‘, "
+                    "‚Lies README.md‘ oder ‚Analysiere das Projekt‘."
+                )
+                self.send.set_sensitive(True)
+                return
+            except TaskAccessError as error:
+                self.current.set_text(f"Auftrag geschützt:\n{error}")
+                self.send.set_sensitive(True)
+                return
+            except (RuntimeError, ValueError):
+                self.current.set_text(
+                    "Auftrag konnte nicht gestartet werden.\n"
+                    "Prüfe Projektordner und lokalen Task-State."
+                )
+                self.send.set_sensitive(True)
+                return
             self.input.set_text("")
             self.send.set_sensitive(False)
             self._show_task(task, recovered=False)
@@ -852,6 +874,16 @@ def _run_gtk(config: AgentConfig) -> int:
             )
             if active is None:
                 self.send.set_sensitive(True)
+                latest = tasks[-1] if tasks else None
+                if latest is not None and latest.status in {
+                    "completed",
+                    "failed",
+                    "rejected",
+                }:
+                    detail = latest.error or "Auftrag geprüft und abgeschlossen."
+                    self.current.set_text(
+                        f"{latest.goal}\nStatus: {latest.status}\n{detail}"
+                    )
                 latest_completed = next(
                     (item for item in reversed(self.controller.tasks())
                      if item.status == "completed" and item.session_id),
