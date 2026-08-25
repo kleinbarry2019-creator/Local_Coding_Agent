@@ -157,6 +157,10 @@ def _run_gtk(config: AgentConfig) -> int:
             self.feedback_status: Any = None
             self.feedback_session: str | None = None
             self.research_thread: threading.Thread | None = None
+            self.research_button: Any = None
+            self.research_status_view: Any = None
+            self.research_status_message: str | None = None
+            self.network_indicator: Any = None
             self.persisted_history = self.controller.persisted_sessions()
             self.recovered = self.controller.recover_pending()
 
@@ -373,10 +377,12 @@ def _run_gtk(config: AgentConfig) -> int:
             status.set_xalign(0)
             status.set_wrap(True)
             status.add_css_class("muted")
+            self.research_status_view = status
             page.append(status)
             research = Gtk.Button(label="Jetzt nach vertrauenswürdigen Quellen suchen")
             research.set_halign(Gtk.Align.START)
             research.connect("clicked", self._research_now)
+            self.research_button = research
             page.append(research)
             scroll = Gtk.ScrolledWindow()
             scroll.set_vexpand(True)
@@ -794,10 +800,12 @@ def _run_gtk(config: AgentConfig) -> int:
             self.speak_button = Gtk.Button(label="🔊 Vorlesen")
             self.speak_button.connect("clicked", self._speak_current)
             bar.append(self.speak_button)
-            offline = Gtk.Label(label="● OFFLINE · LOKAL")
+            offline = Gtk.Label(label="● ONLINE-FREIGABE WIRD GEPRÜFT")
             offline.set_hexpand(True)
             offline.set_xalign(1)
             offline.add_css_class("offline")
+            self.network_indicator = offline
+            self._update_network_indicator(self.controller.learning_status())
             bar.append(offline)
             return bar
 
@@ -1088,6 +1096,13 @@ def _run_gtk(config: AgentConfig) -> int:
 
         def _refresh_learning(self) -> None:
             status = self.controller.learning_status()
+            self._update_network_indicator(status)
+            if self.research_status_view is not None and self.research_status_message is None:
+                self.research_status_view.set_text(
+                    "Online-Recherche ist freigegeben."
+                    if status.network_enabled
+                    else "Online-Recherche ist deaktiviert. Aktiviere sie unter Einstellungen → Datenschutz & Recherche."
+                )
             if self.knowledge_view is not None:
                 items = self.controller.knowledge(30)
                 self.knowledge_view.set_text(
@@ -1149,6 +1164,21 @@ def _run_gtk(config: AgentConfig) -> int:
         def _research_now(self, *_args: object) -> None:
             if self.research_thread is not None and self.research_thread.is_alive():
                 return
+            if not self.controller.learning_status().network_enabled:
+                if self.research_status_view is not None:
+                    self.research_status_message = (
+                        "Recherche nicht gestartet: Online-Zugriff ist deaktiviert. "
+                        "Aktiviere ihn unter Einstellungen → Datenschutz & Recherche."
+                    )
+                    self.research_status_view.set_text(self.research_status_message)
+                return
+            if self.research_status_view is not None:
+                self.research_status_message = (
+                    "Recherche läuft … vertrauenswürdige Quellen werden geprüft."
+                )
+                self.research_status_view.set_text(self.research_status_message)
+            if self.research_button is not None:
+                self.research_button.set_sensitive(False)
             self.research_thread = threading.Thread(
                 target=self._run_research,
                 name="acb-research-now",
@@ -1157,10 +1187,60 @@ def _run_gtk(config: AgentConfig) -> int:
             self.research_thread.start()
 
         def _run_research(self) -> None:
+            result: dict[str, object]
             try:
-                self.controller.research_now()
+                result = self.controller.research_now()
+            except Exception:  # noqa: BLE001 - UI worker must always re-enable the button
+                result = {
+                    "status": "error",
+                    "message": "Die Recherche konnte nicht abgeschlossen werden.",
+                }
             finally:
                 self.research_thread = None
+            GLib.idle_add(self._show_research_result, result)
+
+        def _show_research_result(self, result: dict[str, object]) -> bool:
+            status = str(result.get("status", "error"))
+            if status == "ok":
+                message = (
+                    "Recherche abgeschlossen: "
+                    f"{result.get('items', 0)} neue Wissenseinträge aus "
+                    f"{len(result.get('sources', []))} Quellen."
+                )
+            elif status == "partial":
+                message = (
+                    "Recherche teilweise abgeschlossen: "
+                    f"{result.get('items', 0)} Einträge gespeichert; "
+                    "einige Quellen waren nicht erreichbar."
+                )
+            elif status == "offline":
+                message = "Recherche nicht ausgeführt: Online-Zugriff ist deaktiviert."
+            else:
+                message = str(result.get("message", "Recherche fehlgeschlagen."))
+            if self.research_status_view is not None:
+                self.research_status_message = message
+                self.research_status_view.set_text(message)
+            if self.research_button is not None:
+                self.research_button.set_sensitive(True)
+            self._refresh_learning()
+            return False
+
+        def _update_network_indicator(self, status: Any) -> None:
+            if self.network_indicator is None:
+                return
+            if not status.network_enabled:
+                label = "● OFFLINE · RECHERCHE DEAKTIVIERT"
+                css = "offline-disabled"
+            elif status.network_available:
+                label = "● ONLINE · QUELLEN ERREICHBAR"
+                css = "online"
+            else:
+                label = "● ONLINE-FREIGABE AKTIV"
+                css = "online-ready"
+            self.network_indicator.set_text(label)
+            for name in ("offline", "offline-disabled", "online", "online-ready"):
+                self.network_indicator.remove_css_class(name)
+            self.network_indicator.add_css_class(css)
 
         def _create_account(
             self,
@@ -1233,7 +1313,9 @@ def _run_gtk(config: AgentConfig) -> int:
                 .topbar { background: #101d32; padding: 14px 24px; border-bottom: 1px solid #233653; }
                 .brand { color: #64e6d1; font-size: 26px; font-weight: 800; letter-spacing: 1px; }
                 .subtitle, .muted { color: #9aacc6; }
-                .offline { color: #64e6d1; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
+                .offline, .online-ready { color: #f4c96b; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
+                .online { color: #64e6d1; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
+                .offline-disabled { color: #ff8b8b; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
                 .sidebar { background: #0d192b; padding: 22px 16px; border-right: 1px solid #20334f; }
                 .page-heading { padding: 4px 2px 2px; }
                 .eyebrow { color: #6f87a8; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; }
@@ -1263,14 +1345,17 @@ def _run_gtk(config: AgentConfig) -> int:
                 .theme-light .conversation, .theme-light .composer { background: #ffffff; border-color: #d7e1ef; }
                 .theme-light .page-title, .theme-light .section-title, .theme-light .card-title { color: #172033; }
                 .theme-light .muted, .theme-light .subtitle { color: #53627a; }
+                .theme-light .offline, .theme-light .online-ready { color: #9b6a00; }
+                .theme-light .online { color: #087f6e; }
+                .theme-light .offline-disabled { color: #b42318; }
                 .theme-light .composer-hint, .theme-light .eyebrow { color: #6b7d97; }
                 .theme-light entry, .theme-light combobox { background: #ffffff; color: #172033; border-color: #cbd7e7; }
                 .theme-dark .app-shell { background: #070c16; }
                 .large-text .conversation, .large-text entry, .large-text button { font-size: 21px; }
                 .high-contrast .conversation, .high-contrast .composer, .high-contrast entry { border: 2px solid #ffffff; }
                 .high-contrast .muted { color: #ffffff; }
-                .color-red-green .state-good, .color-red-green .offline { color: #00b7ff; }
-                .color-blue-yellow .state-good, .color-blue-yellow .offline { color: #ff7b00; }
+                .color-red-green .state-good, .color-red-green .offline, .color-red-green .online, .color-red-green .online-ready { color: #00b7ff; }
+                .color-blue-yellow .state-good, .color-blue-yellow .offline, .color-blue-yellow .online, .color-blue-yellow .online-ready { color: #ff7b00; }
                 .color-monochrome .app-shell, .color-monochrome .topbar, .color-monochrome .sidebar { background: #111111; color: #ffffff; }
                 """
             )
