@@ -139,6 +139,9 @@ def test_completed_task_review_is_persisted_as_improvement(tmp_path: Path) -> No
     assert len(suggestions) == 1
     assert suggestions[0].kind == "task-review"
     assert suggestions[0].release_gate_required is True
+    experiences = service.store.experiences()
+    assert len(experiences) == 1
+    assert experiences[0].outcome == "completed"
 
 
 def test_failed_task_review_becomes_high_priority_learning_lead(tmp_path: Path) -> None:
@@ -159,6 +162,8 @@ def test_failed_task_review_becomes_high_priority_learning_lead(tmp_path: Path) 
     assert suggestion.priority == "high"
     assert "recovery" in suggestion.description
     assert suggestion.auto_apply is False
+    context = service.knowledge_context("sichere Wiederaufnahme")
+    assert context[0]["topic"] == "experience"
 
 
 def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:

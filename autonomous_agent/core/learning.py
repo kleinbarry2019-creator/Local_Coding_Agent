@@ -37,6 +37,7 @@ MAX_ITEMS_PER_FEED = 20
 MAX_KNOWLEDGE_ITEMS = 300
 MAX_SUGGESTIONS = 200
 MAX_SELF_UPDATES = 100
+MAX_EXPERIENCES = 200
 MAX_GATE_EVIDENCE = 12
 MAX_GATE_EVIDENCE_TEXT = 240
 RESEARCH_INTERVAL_S = 6 * 60 * 60
@@ -99,6 +100,28 @@ class KnowledgeItem:
             "published_at": self.published_at,
             "discovered_at": self.discovered_at,
             "trust": self.trust,
+        }
+
+
+@dataclass(frozen=True)
+class ExperienceItem:
+    """A bounded local lesson extracted from a completed task review."""
+
+    experience_id: str
+    goal: str
+    outcome: str
+    lesson: str
+    failed_criteria: tuple[str, ...]
+    created_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "experience_id": self.experience_id,
+            "goal": self.goal,
+            "outcome": self.outcome,
+            "lesson": self.lesson,
+            "failed_criteria": list(self.failed_criteria),
+            "created_at": self.created_at,
         }
 
 
@@ -223,6 +246,11 @@ class LearningStore:
         items = [_knowledge_from_dict(item) for item in raw if isinstance(item, dict)]
         return tuple(items[:_bounded_limit(limit, MAX_KNOWLEDGE_ITEMS)])
 
+    def experiences(self, limit: int = 50) -> tuple[ExperienceItem, ...]:
+        raw = self._read_list("experiences.json")
+        items = [_experience_from_dict(item) for item in raw if isinstance(item, dict)]
+        return tuple(items[:_bounded_limit(limit, MAX_EXPERIENCES)])
+
     def suggestions(self, limit: int = 50) -> tuple[ImprovementSuggestion, ...]:
         raw = self._read_list("suggestions.json")
         items = [_suggestion_from_dict(item) for item in raw if isinstance(item, dict)]
@@ -244,6 +272,20 @@ class LearningStore:
                 return False
             values = [item.to_dict(), *raw]
             self._write_list("knowledge.json", values[:MAX_KNOWLEDGE_ITEMS])
+            return True
+
+    def add_experience(self, item: ExperienceItem) -> bool:
+        with self._lock:
+            raw = self._read_list("experiences.json")
+            if any(
+                isinstance(value, dict)
+                and value.get("experience_id") == item.experience_id
+                for value in raw
+            ):
+                return False
+            self._write_list(
+                "experiences.json", [item.to_dict(), *raw][:MAX_EXPERIENCES]
+            )
             return True
 
     def add_suggestion(self, suggestion: ImprovementSuggestion) -> bool:
@@ -557,6 +599,22 @@ class LearningService:
             for item in context
             if isinstance(item.get("item_id"), str)
         )
+        outcome = "completed" if completed else "failed"
+        lesson = (
+            "A verified task can be reused as a regression-tested workflow."
+            if completed
+            else "Reproduce the missing criteria before changing the planner or tools."
+        )
+        self.store.add_experience(
+            ExperienceItem(
+                experience_id=f"experience-{uuid.uuid4().hex}",
+                goal=goal[:400],
+                outcome=outcome,
+                lesson=lesson,
+                failed_criteria=failed_criteria[:8],
+                created_at=now,
+            )
+        )
         if completed:
             title = f"Nachprüfung: {goal[:96]}"
             description = (
@@ -618,13 +676,41 @@ class LearningService:
             ranked.append((score, item))
         ranked.sort(key=lambda value: (-value[0], value[1].discovered_at))
         bounded = ranked[: min(limit, 20)]
-        return tuple(
+        knowledge_context: list[dict[str, object]] = [
             {
                 **item.to_dict(),
                 "relevance": round(score, 4),
             }
             for score, item in bounded
-        )
+        ]
+        experience_ranked: list[tuple[float, ExperienceItem]] = []
+        for experience in self.store.experiences(MAX_EXPERIENCES):
+            overlap = wanted & _learning_tokens(
+                f"{experience.goal} {experience.lesson}"
+            )
+            if overlap:
+                experience_ranked.append(
+                    (len(overlap) / max(1, len(wanted)) + 0.05, experience)
+                )
+        experience_ranked.sort(key=lambda value: (-value[0], value[1].created_at))
+        experience_context: list[dict[str, object]] = [
+            {
+                "item_id": experience.experience_id,
+                "title": f"ACB-Erfahrung: {experience.goal[:120]}",
+                "url": "",
+                "source": "lokales Erfahrungs-Gedächtnis",
+                "topic": "experience",
+                "summary": experience.lesson,
+                "published_at": None,
+                "discovered_at": experience.created_at,
+                "trust": "local-experience",
+                "outcome": experience.outcome,
+                "failed_criteria": list(experience.failed_criteria),
+                "relevance": round(score, 4),
+            }
+            for score, experience in experience_ranked[: min(limit, 20)]
+        ]
+        return tuple((experience_context + knowledge_context)[: min(limit, 20)])
 
     def record_feedback(self, session_id: str, rating: int, comment: str = "") -> None:
         """Convert explicit user feedback into a bounded improvement proposal."""
@@ -1040,6 +1126,21 @@ def _knowledge_from_dict(value: dict[str, object]) -> KnowledgeItem:
     )
 
 
+def _experience_from_dict(value: dict[str, object]) -> ExperienceItem:
+    raw_criteria = value.get("failed_criteria", [])
+    criteria = raw_criteria if isinstance(raw_criteria, (list, tuple)) else []
+    return ExperienceItem(
+        experience_id=str(value["experience_id"]),
+        goal=str(value["goal"]),
+        outcome=str(value["outcome"]),
+        lesson=str(value["lesson"]),
+        failed_criteria=tuple(
+            str(item) for item in criteria if isinstance(item, str)
+        )[:8],
+        created_at=str(value["created_at"]),
+    )
+
+
 def _suggestion_from_dict(value: dict[str, object]) -> ImprovementSuggestion:
     raw_sources = value.get("source_ids", [])
     sources = raw_sources if isinstance(raw_sources, (list, tuple)) else []
@@ -1094,6 +1195,7 @@ def _account_from_dict(value: dict[str, object]) -> UserAccount:
 __all__ = [
     "RESEARCH_INTERVAL_S",
     "RESEARCH_SOURCES",
+    "ExperienceItem",
     "ImprovementSuggestion",
     "KnowledgeItem",
     "LearningScheduler",

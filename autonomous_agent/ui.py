@@ -463,6 +463,10 @@ class RuntimeTaskController:
         return {
             "status": self.learning_status().to_dict(),
             "knowledge": [item.to_dict() for item in self.knowledge(50)],
+            "experiences": [
+                item.to_dict()
+                for item in self.learning.store.experiences(50)
+            ],
             "suggestions": [item.to_dict() for item in self.suggestions(50)],
             "self_updates": [item.to_dict() for item in self.self_updates(50)],
         }
