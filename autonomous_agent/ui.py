@@ -443,6 +443,11 @@ class RuntimeTaskController:
             evidence=evidence,
         ).to_dict()
 
+    def reset_response_profile(self) -> dict[str, object]:
+        return self.learning.reset_response_profile(
+            self._active_account_id or "local-profile"
+        )
+
     def create_account(
         self,
         username: str,
@@ -593,6 +598,9 @@ class AcbUiServer:
             gate_status=gate_status,
             evidence=evidence,
         )
+
+    def reset_response_profile(self) -> dict[str, object]:
+        return self._controller.reset_response_profile()
 
     def authenticate(self, username: str, password: str) -> dict[str, object] | None:
         account = self._controller.authenticate(username, password)
@@ -871,6 +879,7 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
             "/api/account",
             "/api/learning/gate",
             "/api/learning/context",
+            "/api/learning/profile/reset",
             "/api/audit/export",
         }:
             self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
@@ -970,6 +979,14 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, "learning context is invalid")
                 return
             self._send_json(HTTPStatus.OK, {"context": context})
+            return
+        if path == "/api/learning/profile/reset":
+            try:
+                profile = self._app().reset_response_profile()
+            except (TypeError, ValueError, RuntimeError):
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "learning profile reset failed")
+                return
+            self._send_json(HTTPStatus.OK, profile)
             return
         if path == "/api/audit/export":
             session_id = payload.get("session_id")

@@ -887,6 +887,27 @@ class LearningService:
             "confidence": round(counts[hint] / max(1, total), 3),
         }
 
+    def reset_response_profile(self, user_id: str = "local-profile") -> dict[str, object]:
+        """Clear only the per-user response-style signals learned from feedback."""
+        if type(user_id) is not str or not user_id or len(user_id) > 160:
+            raise ValueError("feedback user is invalid")
+        metadata = self.store.metadata()
+        changes: dict[str, object] = {}
+        for name in (
+            "low_feedback_by_user",
+            "last_feedback_rating_by_user",
+            "feedback_hints_by_user",
+        ):
+            raw = metadata.get(name)
+            if not isinstance(raw, dict) or user_id not in raw:
+                continue
+            remaining = dict(raw)
+            del remaining[user_id]
+            changes[name] = remaining
+        if changes:
+            self.store.update_metadata(changes)
+        return self.response_hint_profile(user_id)
+
     def record_gate_result(
         self,
         update_id: str,

@@ -138,6 +138,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.suggestion_view: Any = None
             self.update_view: Any = None
             self.experience_view: Any = None
+            self.learning_profile_status: Any = None
             self.account_status: Any = None
             self.preference_status: Any = None
             self.preference_controls: dict[str, Any] = {}
@@ -433,6 +434,15 @@ def _run_gtk(config: AgentConfig) -> int:
             self.experience_view.add_css_class("conversation")
             experience_scroll.set_child(self.experience_view)
             page.append(experience_scroll)
+            profile_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            reset_profile = Gtk.Button(label="Persönliches Antwort-Lernprofil zurücksetzen")
+            reset_profile.connect("clicked", self._reset_response_profile)
+            profile_row.append(reset_profile)
+            self.learning_profile_status = Gtk.Label(label="")
+            self.learning_profile_status.set_xalign(0)
+            self.learning_profile_status.add_css_class("muted")
+            profile_row.append(self.learning_profile_status)
+            page.append(profile_row)
             return page
 
         def _account_page(self) -> Any:
@@ -1057,6 +1067,19 @@ def _run_gtk(config: AgentConfig) -> int:
                     f"{self.controller.sync_manifest().get('device_id')}\n"
                     f"Letzte Recherche: {status.last_research_at or 'noch nicht'} · "
                     f"Netzwerk: {'aktiv' if status.network_enabled else 'offline'}"
+                )
+
+        def _reset_response_profile(self, *_args: object) -> None:
+            try:
+                profile = self.controller.reset_response_profile()
+            except (TypeError, ValueError, RuntimeError):
+                if self.learning_profile_status is not None:
+                    self.learning_profile_status.set_text("Lernprofil konnte nicht zurückgesetzt werden.")
+                return
+            if self.learning_profile_status is not None:
+                self.learning_profile_status.set_text(
+                    "Zurückgesetzt. Aktive Hinweise: "
+                    + str(profile.get("preferred_hint") or "keine")
                 )
 
         def _research_now(self, *_args: object) -> None:

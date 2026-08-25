@@ -159,7 +159,9 @@ dem lokalen Profil zugeordnet und in einen eigenen Qualitäts-/Regressionstest-
 Vorschlag überführt. So kann ACB Antwortstil und Hilfestellung individuell
 weiterentwickeln. In `Einstellungen > Datenschutz & Recherche` lässt sich die
 automatische Anpassung des Antwortstils aus diesem Feedback unabhängig von der
-lokalen Feedback-/Chatablage deaktivieren.
+lokalen Feedback-/Chatablage deaktivieren. Im Reiter `Selbstentwicklung` kann
+das aktive persönliche Antwort-Lernprofil jederzeit zurückgesetzt werden; die
+ursprünglichen Aufgaben- und Chat-Audits bleiben dabei erhalten.
 Gespeichertes Wissen wird für neue Ziele lokal und erklärbar nach Relevanz
 sortiert und kann über die authentifizierte Schnittstelle
 `/api/learning/context` als Referenzkontext abgerufen werden. Die Inhalte

@@ -327,6 +327,20 @@ def test_controller_can_disable_adaptive_response_learning(tmp_path: Path) -> No
         controller.close()
 
 
+def test_controller_can_reset_active_response_profile(tmp_path: Path) -> None:
+    controller = RuntimeTaskController(
+        _config(tmp_path), runtime=cast(_Runtime, _FakeRuntime())
+    )
+    try:
+        controller.add_feedback("session-local", 4, "Bitte einfacher erklären.")
+        assert controller.response_context().feedback_hint
+        profile = controller.reset_response_profile()
+        assert profile["preferred_hint"] is None
+        assert controller.response_context().feedback_hint == ""
+    finally:
+        controller.close()
+
+
 def test_controller_honors_history_and_personalization_privacy(tmp_path: Path) -> None:
     controller = RuntimeTaskController(_config(tmp_path))
     try:

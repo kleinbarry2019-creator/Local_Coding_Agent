@@ -233,6 +233,19 @@ def test_feedback_drives_per_user_response_hint(tmp_path: Path) -> None:
     assert profile["confidence"] == 1.0
 
 
+def test_response_profile_can_be_reset_without_deleting_audit_state(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    service.record_feedback(
+        "session-one", 4, "Bitte einfacher erklären.", user_id="account-a"
+    )
+    assert service.response_hint("account-a")
+    reset = service.reset_response_profile("account-a")
+    assert reset["preferred_hint"] is None
+    assert service.response_hint("account-a") == ""
+    assert service.store.metadata()["feedback_hints_by_user"] == {}
+    assert service.store.suggestions()
+
+
 def test_self_update_requires_complete_gate_evidence(tmp_path: Path) -> None:
     payload = b"""<rss><channel><item>
       <title>Evidence source</title>
