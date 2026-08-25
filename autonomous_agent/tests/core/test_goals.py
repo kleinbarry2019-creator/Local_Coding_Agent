@@ -29,6 +29,16 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Führe einen umfassenden Sicherheits-Audit mit Bedrohungsmodell durch",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Entwickle ein Machine-Learning-Modell zur Anomalieerkennung",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
