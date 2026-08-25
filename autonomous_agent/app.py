@@ -137,6 +137,7 @@ def _run_gtk(config: AgentConfig) -> int:
             self.knowledge_view: Any = None
             self.suggestion_view: Any = None
             self.update_view: Any = None
+            self.experience_view: Any = None
             self.account_status: Any = None
             self.preference_status: Any = None
             self.preference_controls: dict[str, Any] = {}
@@ -419,6 +420,19 @@ def _run_gtk(config: AgentConfig) -> int:
             self.update_view.add_css_class("conversation")
             scroll.set_child(self.update_view)
             page.append(scroll)
+            experience_title = Gtk.Label(label="Lokales Erfahrungs-Gedächtnis")
+            experience_title.set_xalign(0)
+            experience_title.add_css_class("section-title")
+            page.append(experience_title)
+            experience_scroll = Gtk.ScrolledWindow()
+            experience_scroll.set_min_content_height(160)
+            self.experience_view = Gtk.Label(label="Noch keine Erfahrungen gespeichert.")
+            self.experience_view.set_xalign(0)
+            self.experience_view.set_yalign(0)
+            self.experience_view.set_wrap(True)
+            self.experience_view.add_css_class("conversation")
+            experience_scroll.set_child(self.experience_view)
+            page.append(experience_scroll)
             return page
 
         def _account_page(self) -> Any:
@@ -1025,6 +1039,15 @@ def _run_gtk(config: AgentConfig) -> int:
                         for item in updates
                     )
                     or "Noch keine Selbstentwicklungs-Vorschläge."
+                )
+            if self.experience_view is not None:
+                experiences = self.controller.learning.store.experiences(30)
+                self.experience_view.set_text(
+                    "\n\n".join(
+                        f"[{item.outcome}] {item.goal}\n{item.lesson}"
+                        for item in experiences
+                    )
+                    or "Noch keine Erfahrungen gespeichert."
                 )
             if self.account_status is not None:
                 accounts = self.controller.learning.store.accounts()
