@@ -677,3 +677,19 @@ def test_ui_capability_matrix_reports_limits_and_gates(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_ui_plugin_catalog_is_authenticated_and_metadata_only(tmp_path: Path) -> None:
+    server = AcbUiServer(_config(tmp_path), port=0)
+    thread = _start(server)
+    try:
+        status, payload, _ = _get_json(f"{server.url}api/plugins", token=server.token)
+        assert status == 200
+        assert payload["plugins"] == []
+        assert payload["execution"] == "policy-gated"
+        with pytest.raises(HTTPError) as error:
+            _get_json(f"{server.url}api/plugins")
+        assert error.value.code == 403
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

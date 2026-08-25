@@ -99,9 +99,18 @@ ein ungültiger Plan wird vor dem ersten Tool-Aufruf sicher beendet.
 Für Coding-Aufträge kann ACB ein Projekt lokal und offline vermessen. Der
 gemeinsame Read-only-Tool `project.analyze` erkennt bounded die vorhandenen
 Programmiersprachen, Projekt-/Build-Manifeste, Testkonfigurationen, Datei- und
-Verzeichnisstruktur sowie testbare nächste Hinweise. Die Analyse liest keine
-externen Quellen und führt keinen gefundenen Code aus; sie liefert nur
-verifizierbare Grundlage für die anschließende Planung.
+Verzeichnisstruktur, eine begrenzte Import-/Abhängigkeitskarte sowie konkrete
+Testdateien und Testbefehle. Die Analyse liest keine externen Quellen und führt
+keinen gefundenen Code aus; sie liefert nur verifizierbare Grundlage für die
+anschließende Planung und automatische Testauswahl.
+
+Erweiterungen werden nicht blind aus Python-Dateien geladen. Unter
+`.acb/plugins/*.json` kann ein Projekt ein Plugin-Manifest mit Entry-Point,
+Berechtigungen und SHA-256-Digest hinterlegen. `/api/plugins` zeigt nur
+Manifeste, deren Pfad, Schema, Berechtigungen und Entry-Point-Digest lokal
+verifiziert wurden; die Ausführung bleibt an die gemeinsame Policy-/Tool-
+Registry gebunden. Ungültige, veraltete oder manipulierte Manifeste werden
+abgewiesen und niemals importiert.
 
 Die authentifizierte lokale Schnittstelle `/api/capabilities` liefert außerdem
 die zentrale Capability-Matrix mit Status (`available`, `conditional` oder

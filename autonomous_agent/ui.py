@@ -29,6 +29,7 @@ from autonomous_agent.core.learning import (
     SelfUpdateProposal,
     UserAccount,
 )
+from autonomous_agent.core.plugins import PluginCatalog
 from autonomous_agent.core.preferences import ProfileStore, UserPreferences
 from autonomous_agent.core.task_state import TaskRecord
 from autonomous_agent.core.user_experience import (
@@ -148,6 +149,7 @@ class RuntimeTaskController:
         )
         self.onboarding = OnboardingService(self.profile_store)
         self.feedback = TaskFeedbackStore(config.paths.state_root)
+        self.plugins = PluginCatalog(config.paths.project_root)
         self.voice = VoiceService()
         self._learning_scheduler = (
             LearningScheduler(self.learning) if start_learning else None
@@ -419,6 +421,9 @@ class RuntimeTaskController:
     def capability_matrix(self) -> dict[str, object]:
         return capability_matrix()
 
+    def plugin_catalog(self) -> tuple[dict[str, object], ...]:
+        return tuple(item.to_dict() for item in self.plugins.scan())
+
     def knowledge(self, limit: int = 50) -> tuple[KnowledgeItem, ...]:
         return self.learning.store.knowledge(limit)
 
@@ -590,6 +595,9 @@ class AcbUiServer:
     def capability_matrix(self) -> dict[str, object]:
         return self._controller.capability_matrix()
 
+    def plugin_catalog(self) -> list[dict[str, object]]:
+        return list(self._controller.plugin_catalog())
+
     def learning_context(self, goal: str, *, limit: int = 5) -> list[dict[str, object]]:
         return list(self._controller.learning_context(goal, limit=limit))
 
@@ -748,6 +756,15 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
                 return
             self._send_json(HTTPStatus.OK, self._app().capability_matrix())
+            return
+        if path == "/api/plugins":
+            if not self._authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "authorization required")
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"plugins": self._app().plugin_catalog(), "execution": "policy-gated"},
+            )
             return
         if path == "/api/tasks":
             if not self._authorized():

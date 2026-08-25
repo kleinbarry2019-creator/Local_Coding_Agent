@@ -145,3 +145,26 @@ def test_project_analysis_detects_languages_manifests_and_test_hints(
     assert result.data["languages"] == {"Python": 1, "TypeScript": 1}
     assert "pytest.ini" in result.data["test_hints"]
     assert any("Python project metadata" in item for item in result.data["manifests"])
+
+
+def test_project_analysis_builds_bounded_architecture_and_test_plan(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    (root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    (root / "app.py").write_text("from helper import run\nrun()\n", encoding="utf-8")
+    (root / "helper.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_app.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+
+    result = ProjectToolRuntime(root).registry().execute(
+        "project.analyze",
+        {"path": str(root)},
+        _context(root, (root,)),
+    )
+
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["architecture"] == {"app.py": ["helper"]}
+    assert result.data["test_files"] == ["tests/test_app.py"]
+    assert result.data["test_commands"] == ["python -m pytest"]

@@ -36,8 +36,14 @@ def capability_matrix() -> dict[str, object]:
         ),
         CapabilityEntry(
             "coding.project-analysis", "coding", "available",
-            "Erkennt Projektstruktur, Programmiersprachen, Manifeste und Test-Hinweise.",
+            "Erkennt Projektstruktur, Programmiersprachen, Architektur, Manifeste und einen Testplan.",
             ("Bounded read-only Analyse; kein Code wird dabei ausgeführt.",),
+        ),
+        CapabilityEntry(
+            "extensibility.secure-plugins", "extensibility", "conditional",
+            "Prüft lokale Plugin-Manifeste, Berechtigungen und Entry-Point-Digests.",
+            ("Nur verifizierte Metadaten werden angezeigt; Plugin-Code wird nicht automatisch geladen.",),
+            ("Manifest unter .acb/plugins",),
         ),
         CapabilityEntry(
             "coding.sandboxed-process", "coding", "available",

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import os
+import re
 import shutil
 import stat
 import subprocess  # nosec B404
@@ -79,6 +81,9 @@ class AnalyzeProjectOutput:
     languages: dict[str, int]
     manifests: list[str]
     test_hints: list[str]
+    architecture: dict[str, list[str]]
+    test_files: list[str]
+    test_commands: list[str]
     truncated: bool
 
 
@@ -206,8 +211,8 @@ class ProjectToolRuntime:
         registry.register(
             ToolSpec(
                 name="project.analyze",
-                version="1.0.0",
-                description="Analyze bounded project structure, languages, manifests, and test hints.",
+                version="1.1.0",
+                description="Analyze bounded project structure, architecture, and test plan.",
                 input_type=AnalyzeProjectInput,
                 output_type=AnalyzeProjectOutput,
                 capabilities=frozenset({"project.read"}),
@@ -327,6 +332,8 @@ class ProjectToolRuntime:
         languages: dict[str, int] = {}
         manifests: list[str] = []
         test_hints: list[str] = []
+        architecture: dict[str, list[str]] = {}
+        test_files: list[str] = []
         total_bytes = 0
         files = 0
         directories = 0
@@ -386,9 +393,15 @@ class ProjectToolRuntime:
                 and len(test_hints) < 64
             ):
                 test_hints.append(relative)
+            if _is_test_file(relative) and len(test_files) < 256:
+                test_files.append(relative)
             language = extensions.get(item.suffix.casefold())
             if language is not None:
                 languages[language] = languages.get(language, 0) + 1
+                if len(architecture) < 256 and _is_source_file(item):
+                    imports = _extract_imports(item, language)
+                    if imports:
+                        architecture[relative] = imports
             try:
                 total_bytes += item.stat().st_size
             except OSError:
@@ -403,6 +416,7 @@ class ProjectToolRuntime:
                 test_hints.append("Node.js: package scripts should be inspected")
             elif manifest.endswith("Cargo.toml: Rust project metadata"):
                 test_hints.append("Rust: cargo test/check should be inspected")
+        test_commands = _test_commands(manifests, test_hints, languages)
         return AnalyzeProjectOutput(
             path=path.relative_to(self.project_root).as_posix() or ".",
             files=files,
@@ -411,6 +425,9 @@ class ProjectToolRuntime:
             languages=dict(sorted(languages.items())),
             manifests=manifests,
             test_hints=list(dict.fromkeys(test_hints)),
+            architecture={key: architecture[key] for key in sorted(architecture)},
+            test_files=sorted(test_files),
+            test_commands=test_commands,
             truncated=truncated,
         )
 
@@ -475,6 +492,77 @@ def _trusted_executable(command: str, project_root: Path) -> Path:
     if discovered is not None:
         return Path(discovered).resolve(strict=True)
     raise RuntimeToolError("process executable is unavailable")
+
+
+_IMPORT_PATTERNS = (
+    re.compile(r"^\s*import\s+([A-Za-z0-9_.$]+)", re.MULTILINE),
+    re.compile(r"^\s*from\s+([A-Za-z0-9_.$/:-]+)\s+import\b", re.MULTILINE),
+    re.compile(r"(?:import|require)\s*\(?\s*[\"']([^\"']+)[\"']", re.MULTILINE),
+)
+
+
+def _is_test_file(relative: str) -> bool:
+    name = Path(relative).name.casefold()
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+        or Path(relative).parts[0:1] == ("tests",)
+    )
+
+
+def _is_source_file(path: Path) -> bool:
+    return path.suffix.casefold() in {
+        ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go",
+        ".rs", ".c", ".h", ".cpp", ".cs", ".swift", ".rb", ".php",
+        ".dart", ".scala",
+    }
+
+
+def _extract_imports(path: Path, language: str) -> list[str]:
+    try:
+        source = path.read_text(encoding="utf-8", errors="replace")[:_MAX_FILE_BYTES]
+    except OSError:
+        return []
+    found: list[str] = []
+    if language == "Python":
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except (SyntaxError, ValueError):
+            tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    found.extend(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    found.append("." * node.level + node.module)
+    else:
+        for pattern in _IMPORT_PATTERNS:
+            found.extend(pattern.findall(source))
+    return list(dict.fromkeys(item[:160] for item in found if item))[:16]
+
+
+def _test_commands(
+    manifests: list[str], test_hints: list[str], languages: dict[str, int]
+) -> list[str]:
+    names = {Path(item.split(":", 1)[0]).name for item in manifests}
+    commands: list[str] = []
+    if "pyproject.toml" in names or "pytest.ini" in test_hints or "Python" in languages:
+        commands.append("python -m pytest")
+    if "package.json" in names:
+        commands.append("npm test")
+    if "Cargo.toml" in names:
+        commands.append("cargo test")
+    if "go.mod" in names:
+        commands.append("go test ./...")
+    if "pom.xml" in names:
+        commands.append("mvn test")
+    if "build.gradle" in names:
+        commands.append("gradle test")
+    if "Makefile" in names:
+        commands.append("make test")
+    return list(dict.fromkeys(commands))[:8]
 
 
 def sandbox_command(
