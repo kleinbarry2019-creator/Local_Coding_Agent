@@ -202,7 +202,7 @@ def _run_gtk(config: AgentConfig) -> int:
 
             heading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
             heading.add_css_class("page-heading")
-            eyebrow = Gtk.Label(label="ARBEITSBEREICH · OFFLINE")
+            eyebrow = Gtk.Label(label="ARBEITSBEREICH · LOKAL")
             eyebrow.set_xalign(0)
             eyebrow.add_css_class("eyebrow")
             heading.append(eyebrow)
@@ -218,6 +218,22 @@ def _run_gtk(config: AgentConfig) -> int:
             description.add_css_class("muted")
             heading.append(description)
             main.append(heading)
+
+            quick_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            quick_actions.add_css_class("quick-actions")
+            quick_label = Gtk.Label(label="Schnellstart")
+            quick_label.add_css_class("quick-label")
+            quick_actions.append(quick_label)
+            for label, goal in (
+                ("Projekt analysieren", "Analysiere das Projekt"),
+                ("README lesen", "Lies README.md"),
+                ("Datei erstellen", "Erstelle notes.txt mit dem Inhalt Hallo ACB"),
+            ):
+                action = Gtk.Button(label=label)
+                action.add_css_class("quick-action")
+                action.connect("clicked", self._use_quick_goal, goal)
+                quick_actions.append(action)
+            main.append(quick_actions)
 
             scroll = Gtk.ScrolledWindow()
             scroll.set_vexpand(True)
@@ -771,35 +787,43 @@ def _run_gtk(config: AgentConfig) -> int:
         def _header(self) -> Any:
             bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
             bar.add_css_class("topbar")
+            identity = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             brand = Gtk.Label(label="ACB")
             brand.add_css_class("brand")
-            bar.append(brand)
+            identity.append(brand)
             subtitle = Gtk.Label(label="Autonome Computing Butler")
             subtitle.add_css_class("subtitle")
-            bar.append(subtitle)
+            identity.append(subtitle)
+            bar.append(identity)
+            separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+            separator.add_css_class("header-separator")
+            bar.append(separator)
+            tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            tools.add_css_class("header-tools")
             self.undo_button = Gtk.Button(label="↶ Rückgängig")
             self.undo_button.set_sensitive(False)
             self.undo_button.connect("clicked", self._undo_last)
-            bar.append(self.undo_button)
+            tools.append(self.undo_button)
             self.retry_button = Gtk.Button(label="↻ Wiederholen")
             self.retry_button.set_sensitive(False)
             self.retry_button.connect("clicked", self._retry_last)
-            bar.append(self.retry_button)
+            tools.append(self.retry_button)
             self.audit_button = Gtk.Button(label="Audit prüfen")
             self.audit_button.connect("clicked", self._show_audit)
-            bar.append(self.audit_button)
+            tools.append(self.audit_button)
             terminal_button = Gtk.Button(label="🖥 Protokoll")
             terminal_button.connect("clicked", self._show_terminal_log)
-            bar.append(terminal_button)
+            tools.append(terminal_button)
             export_button = Gtk.Button(label="⇩ Export")
             export_button.connect("clicked", self._export_protocol)
-            bar.append(export_button)
+            tools.append(export_button)
             copy_button = Gtk.Button(label="⧉ Kopieren")
             copy_button.connect("clicked", self._copy_current)
-            bar.append(copy_button)
+            tools.append(copy_button)
             self.speak_button = Gtk.Button(label="🔊 Vorlesen")
             self.speak_button.connect("clicked", self._speak_current)
-            bar.append(self.speak_button)
+            tools.append(self.speak_button)
+            bar.append(tools)
             offline = Gtk.Label(label="● ONLINE-FREIGABE WIRD GEPRÜFT")
             offline.set_hexpand(True)
             offline.set_xalign(1)
@@ -818,11 +842,11 @@ def _run_gtk(config: AgentConfig) -> int:
             navigation.add_css_class("eyebrow")
             sidebar.append(navigation)
             if self.stack is not None:
-                switcher = Gtk.StackSwitcher()
-                switcher.set_stack(self.stack)
-                switcher.set_halign(Gtk.Align.FILL)
-                switcher.add_css_class("nav-switcher")
-                sidebar.append(switcher)
+                stack_navigation = Gtk.StackSidebar()
+                stack_navigation.set_stack(self.stack)
+                stack_navigation.set_vexpand(False)
+                stack_navigation.add_css_class("nav-sidebar")
+                sidebar.append(stack_navigation)
             workspace = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             workspace.add_css_class("workspace-card")
             project_title = Gtk.Label(label="Arbeitsbereich")
@@ -850,6 +874,12 @@ def _run_gtk(config: AgentConfig) -> int:
             self.history.add_css_class("history-list")
             sidebar.append(self.history)
             return sidebar
+
+        def _use_quick_goal(self, _button: Any, goal: str) -> None:
+            """Put a common task in the composer without starting it immediately."""
+            self.input.set_text(goal)
+            self.input.grab_focus()
+            self.input.set_position(-1)
 
         def _submit(self, *_args: object) -> None:
             goal = self.input.get_text().strip()
@@ -1311,6 +1341,8 @@ def _run_gtk(config: AgentConfig) -> int:
                 b"""
                 .app-shell { background: #09111f; color: #e8eef8; }
                 .topbar { background: #101d32; padding: 14px 24px; border-bottom: 1px solid #233653; }
+                .header-tools { margin-left: 2px; }
+                .header-separator { min-height: 28px; background: #2a4567; }
                 .brand { color: #64e6d1; font-size: 26px; font-weight: 800; letter-spacing: 1px; }
                 .subtitle, .muted { color: #9aacc6; }
                 .offline, .online-ready { color: #f4c96b; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
@@ -1323,7 +1355,14 @@ def _run_gtk(config: AgentConfig) -> int:
                 .section-title, .card-title { color: #dbeafe; font-size: 16px; font-weight: 700; }
                 .card-title { font-size: 14px; }
                 .state-good { color: #64e6d1; font-size: 12px; font-weight: 700; }
-                .nav-switcher { margin-bottom: 8px; }
+                .nav-sidebar { margin-bottom: 8px; }
+                .nav-sidebar row { color: #9aacc6; border-radius: 9px; padding: 8px 10px; margin-bottom: 3px; }
+                .nav-sidebar row:hover { background: #172b46; color: #edf4ff; }
+                .nav-sidebar row:selected { background: #1d3b58; color: #64e6d1; font-weight: 700; }
+                .quick-actions { padding: 2px 0 2px; }
+                .quick-label { color: #7890af; font-size: 12px; font-weight: 700; margin-right: 4px; }
+                button.quick-action { background: #122239; border: 1px solid #2a4567; color: #c8d8ed; padding: 7px 10px; }
+                button.quick-action:hover { background: #1a3452; border-color: #64e6d1; color: #ffffff; }
                 .workspace-card { background: #13243b; border: 1px solid #253d5d; border-radius: 14px; padding: 14px; }
                 .history-list { background: transparent; }
                 .history-list row { background: #122239; border-radius: 9px; margin-bottom: 5px; padding: 7px 9px; }
@@ -1338,7 +1377,14 @@ def _run_gtk(config: AgentConfig) -> int:
                 button.suggested-action:hover { background: #8af2e1; }
                 .theme-light .app-shell { background: #f4f7fb; color: #172033; }
                 .theme-light .topbar { background: #ffffff; border-bottom-color: #dbe3ef; }
+                .theme-light .header-separator { background: #d4deec; }
                 .theme-light .sidebar { background: #eaf0f8; border-right-color: #d4deec; }
+                .theme-light .nav-sidebar row { color: #53627a; }
+                .theme-light .nav-sidebar row:hover { background: #dce8f6; color: #172033; }
+                .theme-light .nav-sidebar row:selected { background: #cdeee8; color: #087f6e; }
+                .theme-light .quick-label { color: #6b7d97; }
+                .theme-light button.quick-action { background: #f8fbff; border-color: #cbd7e7; color: #34445c; }
+                .theme-light button.quick-action:hover { background: #e7f7f3; border-color: #087f6e; color: #172033; }
                 .theme-light .workspace-card { background: #f8fbff; border-color: #d7e1ef; }
                 .theme-light .history-list row { background: #f8fbff; }
                 .theme-light .conversation-frame { background: #ffffff; border-color: #d7e1ef; }
