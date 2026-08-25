@@ -418,6 +418,7 @@ def test_ui_http_boundary_requires_token_and_serves_security_headers(
         assert 'id="account-form"' in html
         assert 'id="account-create"' in html
         assert 'id="account-reset"' in html
+        assert 'id="undo"' in html
 
         status, denied = _post_json(
             f"{server.url}api/tasks", {"goal": "list files"}, token=None
