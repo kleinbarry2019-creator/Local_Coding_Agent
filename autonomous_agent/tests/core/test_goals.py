@@ -114,6 +114,31 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "research-only",
         ),
+        (
+            "Train and evaluate a reinforcement learning agent in a simulated robotics environment with reproducible benchmarks",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Create a 3D CAD model of a turbine with finite-element stress analysis and manufacturing drawings",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Port this application to WebAssembly and optimize it with SIMD while preserving behavior across browsers",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Plane autonome Forschung zu neuen KI-Sicherheitsverfahren und implementiere die verifizierten Verbesserungen",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Führe eine forensische Analyse eines unbekannten Speicherdumps durch und erstelle einen beweissicheren Bericht",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(

@@ -79,9 +79,16 @@ class GoalNormalizer:
             lowered,
             ("run ", "execute ", "führe ", "fuehre ", "starte "),
         ):
+            if self._is_ambitious_unknown_request(lowered):
+                return self._research_task(goal)
             return self._run(goal)
         if _contains_word(lowered, ("create", "write", "erstelle", "schreibe")):
-            return self._write(goal)
+            try:
+                return self._write(goal)
+            except GoalError:
+                if self._is_ambitious_unknown_request(lowered):
+                    return self._research_task(goal)
+                raise
         if _contains_word(lowered, ("read", "show", "lies", "zeige")):
             return self._read(goal)
         if _contains_word(lowered, ("list", "liste", "auflisten")):
@@ -99,6 +106,8 @@ class GoalNormalizer:
             ),
         ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
             return self._analyze(goal)
+        if self._is_ambitious_unknown_request(lowered):
+            return self._research_task(goal)
         raise GoalError("goal is not a supported simple coding or system task")
 
     @staticmethod
@@ -267,6 +276,51 @@ class GoalNormalizer:
                 "automate",
                 "build",
                 "create",
+            ),
+        )
+
+    @staticmethod
+    def _is_ambitious_unknown_request(lowered: str) -> bool:
+        """Route unfamiliar multi-step goals to bounded research, not CLI rejection."""
+        word_count = len(re.findall(r"(?<!\w)[\w]+(?!\w)", lowered))
+        if word_count < 8:
+            return False
+        return _contains_word(
+            lowered,
+            (
+                "build",
+                "create",
+                "design",
+                "develop",
+                "implement",
+                "configure",
+                "deploy",
+                "port",
+                "train",
+                "evaluate",
+                "solve",
+                "analyze",
+                "analyse",
+                "plan",
+                "plane",
+                "entwickle",
+                "entwickeln",
+                "implementiere",
+                "konfiguriere",
+                "konfigurieren",
+                "erstelle",
+                "erstellen",
+                "entwirf",
+                "entwerfen",
+                "analysiere",
+                "analysieren",
+                "untersuche",
+                "untersuchen",
+                "führe",
+                "fuehre",
+                "set up",
+                "richte",
+                "richte ein",
             ),
         )
 
