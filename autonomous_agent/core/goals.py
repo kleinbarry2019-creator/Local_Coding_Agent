@@ -85,7 +85,9 @@ class GoalNormalizer:
             lowered,
             ("run ", "execute ", "führe ", "fuehre ", "starte "),
         ):
-            if self._is_ambitious_unknown_request(lowered):
+            if self._is_ambitious_unknown_request(lowered) and not self._looks_like_explicit_command(
+                goal
+            ):
                 return self._research_task(goal)
             return self._run(goal)
         if _contains_word(
@@ -512,6 +514,36 @@ class GoalNormalizer:
                 lowered,
             )
         )
+
+    @staticmethod
+    def _looks_like_explicit_command(goal: str) -> bool:
+        """Keep verification wording from reclassifying a real CLI command."""
+        command = _after_command_verb(goal)
+        try:
+            argv = shlex.split(command, posix=True)
+        except ValueError:
+            return False
+        if not argv:
+            return False
+        executable = Path(argv[0]).name.casefold()
+        return executable in {
+            "bash",
+            "cat",
+            "echo",
+            "git",
+            "ls",
+            "mypy",
+            "node",
+            "npm",
+            "printf",
+            "python",
+            "python3",
+            "pytest",
+            "qemu-system-x86_64",
+            "ruff",
+            "sh",
+            "uv",
+        } or "/" in argv[0] or any(item.startswith("-") for item in argv[1:])
 
     def _research_task(
         self, goal: str, *, research_only: bool = False

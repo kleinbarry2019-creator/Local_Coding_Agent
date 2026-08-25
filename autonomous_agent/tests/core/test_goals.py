@@ -197,6 +197,15 @@ def test_command_is_tokenized_without_a_shell() -> None:
     }
 
 
+def test_explicit_command_with_verification_is_not_reclassified_as_research() -> None:
+    goal = GoalNormalizer().normalize(
+        "Run python3 -c 'print(42)' and verify the result"
+    )
+
+    assert goal.kind is GoalKind.RUN_COMMAND
+    assert goal.argv[:2] == ("python3", "-c")
+
+
 def test_polite_run_request_extracts_command_before_verification_text() -> None:
     goal = GoalNormalizer().normalize(
         "Could you run python3 -c 'print(42)' and verify the result"

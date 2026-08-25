@@ -90,6 +90,18 @@ def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) ->
     assert result.plan_assessment["valid"] is True
 
 
+def test_runtime_executes_explicit_command_with_verification_wording(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Run python3 -c 'print(42)' and verify the result"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+
+
 def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
