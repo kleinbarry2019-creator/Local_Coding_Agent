@@ -14,7 +14,7 @@ Name=ACB – Autonome Computing Butler
 Comment=Lokaler Offline-Agent für Coding- und Systemaufgaben
 Exec=acb app
 Terminal=false
-Categories=Development;Utility;
+Categories=Development;
 Keywords=ACB;Agent;Offline;Coding;
 """
 
@@ -36,7 +36,7 @@ Comment=Lokaler Offline-Agent für Coding- und Systemaufgaben
 TryExec={executable}
 Exec={_desktop_quote(executable)} app --project {_desktop_quote(project)} --state-dir {_desktop_quote(state)}
 Terminal=false
-Categories=Development;Utility;
+Categories=Development;
 Keywords=ACB;Agent;Offline;Coding;
 """
 
@@ -55,7 +55,10 @@ def install_desktop_entry(target: Path | None = None) -> Path:
     project.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = Path.home().resolve(strict=False) / ".local" / "state" / "local-coding-agent"
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    executable = Path(shutil.which("acb") or "acb").resolve(strict=False)
+    stable_executable = Path.home().resolve(strict=False) / ".local" / "bin" / "acb"
+    executable = stable_executable if stable_executable.is_file() else Path(
+        shutil.which("acb") or "acb"
+    ).resolve(strict=False)
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{DESKTOP_FILENAME}.", dir=destination.parent, text=True
