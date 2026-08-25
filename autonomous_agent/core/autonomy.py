@@ -1335,7 +1335,9 @@ def _direct_e2e(
     if goal.kind is GoalKind.VM_BUILD:
         return any(_vm_created(item) for item in outputs)
     if goal.kind is GoalKind.RESEARCH_TASK:
-        return False
+        return goal.target == "research-only" and any(
+            _research_completed(item) for item in outputs
+        )
     return False
 
 

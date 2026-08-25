@@ -162,6 +162,23 @@ def test_unfamiliar_complex_goal_gets_browserless_bounded_research(
     assert len(result.outputs) == 1
 
 
+def test_standalone_research_goal_completes_with_bounded_browserless_evidence(
+    tmp_path: Path,
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(
+        "Recherchiere autonom im Hintergrund nach vertrauenswürdigen Quellen"
+    )
+
+    assert result.status == "completed"
+    assert result.completion.completed is True
+    assert result.completion.e2e_verified is True
+    assert any(
+        item.get("phase") == "research"
+        and item.get("browser_opened") is False
+        for item in result.problem_solving
+    )
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)

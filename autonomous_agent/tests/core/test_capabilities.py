@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from autonomous_agent.core.capabilities import CapabilityRegistry
+from autonomous_agent.core.capabilities import (
+    CapabilityRegistry,
+    _terminate_process_group,
+)
 from autonomous_agent.core.config import ExecutionMode, ResourceLimits
 from autonomous_agent.core.policy import (
     AuthorityGrant,
@@ -107,6 +111,21 @@ def test_unknown_missing_tool_is_not_installable(tmp_path: Path) -> None:
 
     assert not result.installed
     assert result.diagnostic == "untrusted-or-unsupported-tool"
+
+
+def test_hung_installer_is_terminated_without_waiting_on_inherited_pipes() -> None:
+    process = subprocess.Popen(
+        ["/bin/sh", "-c", "sleep 30"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    started = time.monotonic()
+    _terminate_process_group(process)
+
+    assert process.poll() is not None
+    assert time.monotonic() - started < 6.0
 
 
 def test_missing_qemu_is_researched_against_trusted_catalog(tmp_path: Path) -> None:

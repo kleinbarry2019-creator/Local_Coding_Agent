@@ -212,14 +212,29 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         os.killpg(process.pid, signal.SIGTERM)
     except OSError:
         process.terminate()
+    # Package managers may delegate work to a daemon which inherits the
+    # installer pipes.  Closing our descriptors before waiting is important:
+    # otherwise a descendant can keep communicate() blocked indefinitely even
+    # after the installer itself has been terminated.
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
     try:
-        process.communicate(timeout=5.0)
+        process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except OSError:
             process.kill()
-        process.communicate()
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            # Reaping is best-effort here.  Never let a stuck package-manager
+            # daemon hold the autonomous runtime hostage forever.
+            pass
 
 
 def _installation_recipe(name: str) -> InstallationRecipe | None:

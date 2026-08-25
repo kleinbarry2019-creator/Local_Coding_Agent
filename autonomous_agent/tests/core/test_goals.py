@@ -104,6 +104,16 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Recherchiere autonom im Hintergrund nach vertrauenswürdigen Quellen",
+            GoalKind.RESEARCH_TASK,
+            "research-only",
+        ),
+        (
+            "Research trusted sources for secure AI practices without opening a browser",
+            GoalKind.RESEARCH_TASK,
+            "research-only",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(

@@ -69,6 +69,8 @@ class GoalNormalizer:
         lowered = goal.casefold()
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
+        if self._is_standalone_research_request(lowered):
+            return self._research_task(goal, research_only=True)
         if self._is_complex_research_request(lowered):
             return self._research_task(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
@@ -130,6 +132,23 @@ class GoalNormalizer:
                 AcceptanceCriterion("preflight", CriterionKind.VM_READY),
                 AcceptanceCriterion("created", CriterionKind.VM_CREATED),
                 AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
+
+    @staticmethod
+    def _is_standalone_research_request(lowered: str) -> bool:
+        return _contains_word(
+            lowered,
+            (
+                "recherchiere",
+                "recherche",
+                "recherchen",
+                "hintergrundrecherche",
+                "deep research",
+                "research",
+                "trusted sources",
+                "vertrauenswürdige quellen",
+                "vertrauenswuerdige quellen",
             ),
         )
 
@@ -251,12 +270,14 @@ class GoalNormalizer:
             ),
         )
 
-    def _research_task(self, goal: str) -> NormalizedGoal:
+    def _research_task(
+        self, goal: str, *, research_only: bool = False
+    ) -> NormalizedGoal:
         return _goal(
             goal,
             GoalKind.RESEARCH_TASK,
             "Research and bound an unfamiliar complex task before execution",
-            target="complex-task",
+            target="research-only" if research_only else "complex-task",
             implicit_requirements=(
                 "Research uses the local capability matrix and trusted background sources without opening a browser.",
                 "Do not claim execution until an implementation plan and independent E2E evidence exist.",
