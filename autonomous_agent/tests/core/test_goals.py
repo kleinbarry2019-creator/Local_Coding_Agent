@@ -259,6 +259,47 @@ def test_standalone_research_without_artifact_remains_bounded() -> None:
     assert goal.target == "research-only"
 
 
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Recherchiere im Hintergrund nach neuen KI-Sicherheitsverfahren und implementiere die geprüften Verbesserungen",
+        "Research secure deployment patterns and implement the verified improvements",
+    ],
+)
+def test_research_plus_implementation_requires_complex_completion(goal_text: str) -> None:
+    goal = GoalNormalizer().normalize(goal_text)
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_read_and_summarize_output_is_not_silently_a_read_goal() -> None:
+    goal = GoalNormalizer().normalize(
+        "Read README.md and summarize it in summary.md"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_database_migration_is_not_parsed_as_a_shell_command() -> None:
+    goal = GoalNormalizer().normalize(
+        "Führe eine Datenbankmigration mit Rollback durch"
+    )
+
+    assert goal.kind is GoalKind.RESEARCH_TASK
+    assert goal.target == "complex-task"
+
+
+def test_vm_setup_with_hypervisor_install_request_is_vm_goal() -> None:
+    goal = GoalNormalizer().normalize(
+        "Installiere qemu-system-x86_64 und richte eine Windows VM ein"
+    )
+
+    assert goal.kind is GoalKind.VM_BUILD
+    assert goal.target == "windows-vm"
+
+
 def test_mixed_repository_analysis_and_report_is_not_silently_only_a_write() -> None:
     goal = GoalNormalizer().normalize(
         "Analyze the repository and write a language report to languages.md"

@@ -210,6 +210,23 @@ def test_research_artifact_goal_never_claims_completion_without_artifact(
     assert not (tmp_path / "project" / "findings.md").exists()
 
 
+@pytest.mark.parametrize(
+    "goal_text",
+    [
+        "Recherchiere im Hintergrund nach neuen KI-Sicherheitsverfahren und implementiere die geprüften Verbesserungen",
+        "Read README.md and summarize it in summary.md",
+    ],
+)
+def test_multi_step_research_goals_never_claim_bounded_research_as_completion(
+    tmp_path: Path, goal_text: str
+) -> None:
+    result = AutonomyRuntime(_config(tmp_path)).run(goal_text)
+
+    assert result.status == "failed"
+    assert result.completion.completed is False
+    assert result.completion.e2e_verified is False
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)

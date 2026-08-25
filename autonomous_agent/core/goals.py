@@ -71,6 +71,8 @@ class GoalNormalizer:
             return self._vm_build(goal)
         if self._is_complex_research_request(lowered):
             return self._research_task(goal)
+        if self._is_research_execution_request(lowered):
+            return self._research_task(goal)
         if self._is_research_artifact_request(lowered):
             # A research request that promises a report/file is not a bounded
             # background-research task.  Keep it in the complex workflow so
@@ -79,6 +81,8 @@ class GoalNormalizer:
             return self._research_task(goal)
         if self._is_standalone_research_request(lowered):
             return self._research_task(goal, research_only=True)
+        if self._is_mixed_read_write_request(lowered):
+            return self._research_task(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
             return self._install(goal)
         if _starts_with(
@@ -159,6 +163,13 @@ class GoalNormalizer:
                 lowered,
                 ("baue", "bauen", "erstelle", "erstellen", "build", "create"),
             )
+        ) or (
+            _contains_word(lowered, ("windows",))
+            and _contains_word(
+                lowered,
+                ("vm", "virtual machine", "virtuelle maschine", "virtualisierung"),
+            )
+            and _contains_word(lowered, ("installiere", "richte", "qemu"))
         )
 
     def _vm_build(self, goal: str) -> NormalizedGoal:
@@ -217,18 +228,7 @@ class GoalNormalizer:
         Keep this check separate from filename parsing so ``research.txt`` in
         an ordinary write request remains a normal write goal.
         """
-        research_intent = _contains_word(
-            lowered,
-            (
-                "research",
-                "recherche",
-                "recherchiere",
-                "recherchieren",
-                "trusted sources",
-                "vertrauenswürdige quellen",
-                "vertrauenswuerdige quellen",
-            ),
-        )
+        research_intent = _has_research_intent(lowered)
         artifact_intent = _contains_word(
             lowered,
             (
@@ -250,6 +250,58 @@ class GoalNormalizer:
         return research_intent and artifact_intent
 
     @staticmethod
+    def _is_research_execution_request(lowered: str) -> bool:
+        """Keep research-plus-execution requests out of research-only mode."""
+        research_intent = _has_research_intent(lowered)
+        execution_intent = _contains_word(
+            lowered,
+            (
+                "implement",
+                "implementiere",
+                "implementieren",
+                "build",
+                "baue",
+                "erstelle",
+                "create",
+                "entwickle",
+                "entwickeln",
+                "deploy",
+                "install",
+                "installiere",
+                "ausführen",
+                "ausfuehren",
+                "execute",
+                "umsetzen",
+            ),
+        )
+        return research_intent and execution_intent
+
+    @staticmethod
+    def _is_mixed_read_write_request(lowered: str) -> bool:
+        """Do not silently discard a requested output from a read summary."""
+        read_intent = _contains_word(
+            lowered,
+            ("read", "lies", "zeige", "show", "summarize", "zusammenfasse"),
+        )
+        write_intent = _contains_word(
+            lowered,
+            (
+                "write",
+                "create",
+                "erstelle",
+                "erstellen",
+                "schreibe",
+                "save",
+                "speichere",
+                "report",
+                "bericht",
+                "summary",
+                "zusammenfassung",
+            ),
+        )
+        return read_intent and write_intent and _extract_path(lowered) is not None
+
+    @staticmethod
     def _is_complex_research_request(lowered: str) -> bool:
         return _contains_word(
             lowered,
@@ -260,6 +312,8 @@ class GoalNormalizer:
                 "datenbank",
                 "database",
                 "migrationen",
+                "migration",
+                "datenbankmigration",
                 "kubernetes",
                 "deployment",
                 "microservice",
@@ -720,6 +774,20 @@ def _starts_with(value: str, prefixes: tuple[str, ...]) -> bool:
 
 def _contains_word(value: str, words: tuple[str, ...]) -> bool:
     return any(re.search(rf"(?<!\w){re.escape(word)}(?!\w)", value) for word in words)
+
+
+def _has_research_intent(value: str) -> bool:
+    """Recognize research language without treating ``research.txt`` as it."""
+    return bool(
+        re.search(
+            r"(?<![\w.])(?:research|recherche|recherchiere|recherchieren|"
+            r"hintergrundrecherche)(?![\w.])",
+            value,
+        )
+    ) or _contains_word(
+        value,
+        ("trusted sources", "vertrauenswürdige quellen", "vertrauenswuerdige quellen"),
+    )
 
 
 def _extract_path(goal: str) -> str | None:
