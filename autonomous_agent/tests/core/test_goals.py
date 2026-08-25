@@ -39,6 +39,26 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Konzipiere und implementiere eine fehlertolerante verteilte Datenpipeline",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Entwickle einen Compiler mit Lexer, Parser und Bytecode-VM",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Baue eine multimodale 3D-Anwendung mit Echtzeit-Rendering",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Migriere die bestehende Datenbank sicher auf ein versioniertes Schema",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
