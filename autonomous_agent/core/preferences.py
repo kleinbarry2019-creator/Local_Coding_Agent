@@ -107,7 +107,26 @@ class ProfileStore:
             finally:
                 if descriptor >= 0:
                     os.close(descriptor)
-            return _from_mapping(value)
+            preferences = _from_mapping(value)
+            # Profiles written by older versions may still contain personal
+            # fields after the user disabled personalization.  Scrub those
+            # fields on read and persist the scrubbed representation so the
+            # privacy preference applies to data at rest as well as in memory.
+            if not preferences.store_personalization:
+                personal_fields = (
+                    "nickname",
+                    "pronouns",
+                    "interests",
+                    "age",
+                    "occupation",
+                    "gender_identity",
+                )
+                if any(
+                    value.get(name) not in (None, "")
+                    for name in personal_fields
+                ):
+                    self.save(preferences)
+            return preferences
 
     def save(self, preferences: UserPreferences) -> UserPreferences:
         validated = _from_mapping(preferences.to_dict())
@@ -221,6 +240,20 @@ def _from_mapping(value: object) -> UserPreferences:
             raise ValueError(f"invalid preference: {name}")
     if data["test_mode_until"] is not None and not isinstance(data["test_mode_until"], str):
         raise ValueError("invalid preference: test_mode_until")
+    if not data["store_personalization"]:
+        # Never retain optional personal profile fields when the user has
+        # disabled personalization, including during migration of an older
+        # profile file.
+        data.update(
+            {
+                "nickname": "",
+                "pronouns": "",
+                "interests": "",
+                "age": None,
+                "occupation": "",
+                "gender_identity": "",
+            }
+        )
     return UserPreferences(**data)
 
 

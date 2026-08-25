@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -44,6 +45,52 @@ def test_profile_accepts_accessibility_and_voice_preferences(tmp_path: Path) -> 
     assert saved.wake_phrase == "Hey Kumpel"
     assert saved.screen_reader is True
     assert saved.color_blind_mode == "red-green"
+
+
+def test_disabling_personalization_scrubs_existing_profile_fields(tmp_path: Path) -> None:
+    store = ProfileStore(tmp_path)
+    store.update(
+        {
+            "nickname": "Alex",
+            "interests": "robotics",
+            "age": 42,
+            "occupation": "developer",
+            "gender_identity": "non-binary",
+        }
+    )
+
+    saved = store.update({"store_personalization": False})
+
+    assert saved.store_personalization is False
+    assert saved.nickname == ""
+    assert saved.interests == ""
+    assert saved.age is None
+    assert saved.occupation == ""
+    assert saved.gender_identity == ""
+    # The on-disk representation must be scrubbed too, not just the object
+    # returned to the caller.
+    raw = store.path.read_text(encoding="utf-8")
+    assert '"nickname":""' in raw
+    assert '"interests":""' in raw
+    assert '"age":null' in raw
+
+    # A legacy profile can already be stale on disk; loading it must migrate
+    # the file instead of merely hiding the values in memory.
+    legacy = saved.to_dict()
+    legacy.update(
+        {
+            "nickname": "Legacy",
+            "interests": "old data",
+            "age": 55,
+            "occupation": "retired",
+            "gender_identity": "unknown",
+        }
+    )
+    store.path.write_text(json.dumps(legacy), encoding="utf-8")
+    os.chmod(store.path, 0o600)
+    loaded = store.load()
+    assert loaded.nickname == ""
+    assert '"nickname":""' in store.path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
