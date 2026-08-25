@@ -20,6 +20,7 @@ class GoalKind(str, Enum):
     WRITE_FILE = "write-file"
     READ_FILE = "read-file"
     LIST_FILES = "list-files"
+    ANALYZE_PROJECT = "analyze-project"
     RUN_COMMAND = "run-command"
     INSTALL_TOOL = "install-tool"
 
@@ -29,6 +30,7 @@ class CriterionKind(str, Enum):
     FILE_EXISTS = "file-exists"
     FILE_CONTENT_EQUALS = "file-content-equals"
     OUTPUT_PRODUCED = "output-produced"
+    PROJECT_ANALYZED = "project-analyzed"
     COMMAND_EXITED_ZERO = "command-exited-zero"
     TOOL_AVAILABLE = "tool-available"
     E2E_VERIFIED = "e2e-verified"
@@ -73,6 +75,19 @@ class GoalNormalizer:
             return self._read(goal)
         if _contains_word(lowered, ("list", "liste", "auflisten")):
             return self._list(goal)
+        if _contains_word(
+            lowered,
+            (
+                "analyze",
+                "analyse",
+                "analysiere",
+                "inspect",
+                "untersuche",
+                "understand",
+                "verstehe",
+            ),
+        ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
+            return self._analyze(goal)
         raise GoalError("goal is not a supported simple coding or system task")
 
     def _write(self, goal: str) -> NormalizedGoal:
@@ -126,6 +141,19 @@ class GoalNormalizer:
             criteria=(
                 AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
                 AcceptanceCriterion("output", CriterionKind.OUTPUT_PRODUCED),
+                AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
+            ),
+        )
+
+    def _analyze(self, goal: str) -> NormalizedGoal:
+        return _goal(
+            goal,
+            GoalKind.ANALYZE_PROJECT,
+            "Analyze project structure, languages, and test hints",
+            target=".",
+            criteria=(
+                AcceptanceCriterion("action", CriterionKind.ACTION_SUCCEEDED),
+                AcceptanceCriterion("analysis", CriterionKind.PROJECT_ANALYZED),
                 AcceptanceCriterion("e2e", CriterionKind.E2E_VERIFIED),
             ),
         )

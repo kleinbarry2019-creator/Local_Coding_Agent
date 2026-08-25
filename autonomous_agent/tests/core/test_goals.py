@@ -17,6 +17,7 @@ from autonomous_agent.core.goals import (
         ("Write report.md with content ready", GoalKind.WRITE_FILE, "report.md"),
         ("Lies `README.md`", GoalKind.READ_FILE, "README.md"),
         ("Liste Dateien in `docs`", GoalKind.LIST_FILES, "docs"),
+        ("Analysiere das Projekt und seine Sprachen", GoalKind.ANALYZE_PROJECT, "."),
         ("Installiere ruff", GoalKind.INSTALL_TOOL, "ruff"),
     ],
 )

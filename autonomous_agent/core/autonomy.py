@@ -197,6 +197,18 @@ class Planner:
                     purpose="enumerate-the-requested-directory",
                 ),
             )
+        if goal.kind is GoalKind.ANALYZE_PROJECT:
+            return (
+                PlanStep(
+                    "step-analyze",
+                    StepKind.TOOL,
+                    "project.analyze",
+                    {"path": str(root)},
+                    root,
+                    False,
+                    purpose="map-project-languages-manifests-and-test-hints",
+                ),
+            )
         if goal.kind is GoalKind.RUN_COMMAND:
             executable = goal.argv[0]
             return (
@@ -448,6 +460,23 @@ class CompletionEvaluator:
         elif criterion.kind is CriterionKind.OUTPUT_PRODUCED:
             passed = any(item.get("data") is not None for item in outputs)
             evidence = "typed-output-observed" if passed else "output-missing"
+        elif criterion.kind is CriterionKind.PROJECT_ANALYZED:
+            analysis: Mapping[str, object] | None = None
+            for item in outputs:
+                data = item.get("data")
+                if isinstance(data, Mapping) and isinstance(
+                    data.get("languages"), Mapping
+                ):
+                    analysis = data
+                    break
+            passed = isinstance(analysis, Mapping) and isinstance(
+                analysis.get("files"), int
+            )
+            evidence = (
+                "project-language-map-and-structure-observed"
+                if passed
+                else "project-analysis-missing"
+            )
         elif criterion.kind is CriterionKind.COMMAND_EXITED_ZERO:
             passed = any(_exit_code_zero(item) for item in outputs)
             evidence = "sandbox-exit-zero" if passed else "sandbox-command-failed"
@@ -1130,6 +1159,14 @@ def _direct_e2e(
             return False
     if goal.kind in {GoalKind.READ_FILE, GoalKind.LIST_FILES}:
         return any(item.get("data") is not None for item in outputs)
+    if goal.kind is GoalKind.ANALYZE_PROJECT:
+        for item in outputs:
+            data = item.get("data")
+            if isinstance(data, Mapping) and isinstance(
+                data.get("languages"), Mapping
+            ) and isinstance(data.get("files"), int):
+                return True
+        return False
     if goal.kind is GoalKind.RUN_COMMAND:
         return any(_exit_code_zero(item) for item in outputs)
     if goal.kind is GoalKind.INSTALL_TOOL:

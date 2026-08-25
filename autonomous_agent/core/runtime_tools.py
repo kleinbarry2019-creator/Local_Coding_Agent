@@ -17,6 +17,7 @@ from autonomous_agent.core.tools import ExecutionContext, ToolRegistry, ToolSpec
 _MAX_FILE_BYTES = 1_048_576
 _MAX_ENTRIES = 2_000
 _MAX_ARGUMENTS = 256
+_MAX_ANALYSIS_FILES = 4_000
 _TRUSTED_EXECUTABLE_ROOTS = (
     Path("/usr/bin"),
     Path("/bin"),
@@ -62,6 +63,23 @@ class ListFilesInput:
 class ListFilesOutput:
     path: str
     entries: list[str]
+
+
+@dataclass(frozen=True)
+class AnalyzeProjectInput:
+    path: Path
+
+
+@dataclass(frozen=True)
+class AnalyzeProjectOutput:
+    path: str
+    files: int
+    directories: int
+    bytes: int
+    languages: dict[str, int]
+    manifests: list[str]
+    test_hints: list[str]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -187,6 +205,24 @@ class ProjectToolRuntime:
         )
         registry.register(
             ToolSpec(
+                name="project.analyze",
+                version="1.0.0",
+                description="Analyze bounded project structure, languages, manifests, and test hints.",
+                input_type=AnalyzeProjectInput,
+                output_type=AnalyzeProjectOutput,
+                capabilities=frozenset({"project.read"}),
+                side_effect=SideEffect.READ_ONLY,
+                network=NetworkKind.NONE,
+                requires_elevation=False,
+                requires_recovery=False,
+                default_timeout_s=10.0,
+                max_output_bytes=131_072,
+                handler=self.analyze_project,
+                target_resolver=lambda item: (item.path,),
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="project.run-process",
                 version="1.0.0",
                 description="Run a command without a shell in a networkless sandbox.",
@@ -279,6 +315,103 @@ class ProjectToolRuntime:
         return ListFilesOutput(
             path=path.relative_to(self.project_root).as_posix() or ".",
             entries=entries,
+        )
+
+    def analyze_project(
+        self, request: AnalyzeProjectInput, context: ExecutionContext
+    ) -> AnalyzeProjectOutput:
+        del context
+        path = self.paths.resolve(request.path)
+        if not path.is_dir():
+            raise RuntimeToolError("analysis target is not a directory")
+        languages: dict[str, int] = {}
+        manifests: list[str] = []
+        test_hints: list[str] = []
+        total_bytes = 0
+        files = 0
+        directories = 0
+        truncated = False
+        extensions = {
+            ".py": "Python",
+            ".js": "JavaScript",
+            ".jsx": "JavaScript/JSX",
+            ".ts": "TypeScript",
+            ".tsx": "TypeScript/TSX",
+            ".java": "Java",
+            ".kt": "Kotlin",
+            ".go": "Go",
+            ".rs": "Rust",
+            ".c": "C",
+            ".h": "C/C++ headers",
+            ".cpp": "C++",
+            ".cs": "C#",
+            ".swift": "Swift",
+            ".rb": "Ruby",
+            ".php": "PHP",
+            ".dart": "Dart",
+            ".scala": "Scala",
+            ".sh": "Shell",
+            ".sql": "SQL",
+            ".html": "HTML",
+            ".css": "CSS",
+        }
+        known_manifests = {
+            "pyproject.toml": "Python project metadata",
+            "package.json": "Node.js project metadata",
+            "Cargo.toml": "Rust project metadata",
+            "go.mod": "Go module metadata",
+            "pom.xml": "Maven project metadata",
+            "build.gradle": "Gradle project metadata",
+            "composer.json": "PHP Composer metadata",
+            "Gemfile": "Ruby Bundler metadata",
+            "Package.swift": "Swift package metadata",
+            "CMakeLists.txt": "CMake build metadata",
+            "Makefile": "Make build metadata",
+        }
+        for item in sorted(path.rglob("*")):
+            if item.is_symlink():
+                continue
+            if item.is_dir():
+                directories += 1
+                continue
+            if not item.is_file():
+                continue
+            files += 1
+            relative = item.relative_to(self.project_root).as_posix()
+            if item.name in known_manifests and len(manifests) < 64:
+                manifests.append(f"{relative}: {known_manifests[item.name]}")
+            if (
+                item.name
+                in {"pytest.ini", "tox.ini", "setup.cfg", "jest.config.js", "vitest.config.ts"}
+                and len(test_hints) < 64
+            ):
+                test_hints.append(relative)
+            language = extensions.get(item.suffix.casefold())
+            if language is not None:
+                languages[language] = languages.get(language, 0) + 1
+            try:
+                total_bytes += item.stat().st_size
+            except OSError:
+                pass
+            if files >= _MAX_ANALYSIS_FILES:
+                truncated = True
+                break
+        for manifest in manifests:
+            if manifest.endswith("pyproject.toml: Python project metadata"):
+                test_hints.append("Python: pytest/unittest discovery should be checked")
+            elif manifest.endswith("package.json: Node.js project metadata"):
+                test_hints.append("Node.js: package scripts should be inspected")
+            elif manifest.endswith("Cargo.toml: Rust project metadata"):
+                test_hints.append("Rust: cargo test/check should be inspected")
+        return AnalyzeProjectOutput(
+            path=path.relative_to(self.project_root).as_posix() or ".",
+            files=files,
+            directories=directories,
+            bytes=total_bytes,
+            languages=dict(sorted(languages.items())),
+            manifests=manifests,
+            test_hints=list(dict.fromkeys(test_hints)),
+            truncated=truncated,
         )
 
     def run_process(
@@ -392,6 +525,8 @@ def sandbox_command(
 
 
 __all__ = [
+    "AnalyzeProjectInput",
+    "AnalyzeProjectOutput",
     "ListFilesInput",
     "ListFilesOutput",
     "ProjectPathResolver",

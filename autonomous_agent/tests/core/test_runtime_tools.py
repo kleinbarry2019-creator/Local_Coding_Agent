@@ -124,3 +124,24 @@ def test_process_runs_without_shell_in_networkless_bubblewrap(tmp_path: Path) ->
     assert result.data is not None
     assert result.data["exit_code"] == 0
     assert result.data["stdout"] == "E2E_OK\n"
+
+
+def test_project_analysis_detects_languages_manifests_and_test_hints(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    (root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    (root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    (root / "web.ts").write_text("export const ok = true\n", encoding="utf-8")
+    result = ProjectToolRuntime(root).registry().execute(
+        "project.analyze",
+        {"path": str(root)},
+        _context(root, (root,)),
+    )
+    assert result.status is ToolStatus.OK
+    assert result.data is not None
+    assert result.data["files"] == 4
+    assert result.data["languages"] == {"Python": 1, "TypeScript": 1}
+    assert "pytest.ini" in result.data["test_hints"]
+    assert any("Python project metadata" in item for item in result.data["manifests"])

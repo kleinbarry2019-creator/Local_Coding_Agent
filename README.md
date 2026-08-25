@@ -96,6 +96,13 @@ Symlink-Ziele und Ziele außerhalb des Projektbereichs. Risiko, Reihenfolge und
 eventuelle Blocker werden im Feld `plan_assessment` mit dem Auftrag gespeichert;
 ein ungültiger Plan wird vor dem ersten Tool-Aufruf sicher beendet.
 
+Für Coding-Aufträge kann ACB ein Projekt lokal und offline vermessen. Der
+gemeinsame Read-only-Tool `project.analyze` erkennt bounded die vorhandenen
+Programmiersprachen, Projekt-/Build-Manifeste, Testkonfigurationen, Datei- und
+Verzeichnisstruktur sowie testbare nächste Hinweise. Die Analyse liest keine
+externen Quellen und führt keinen gefundenen Code aus; sie liefert nur
+verifizierbare Grundlage für die anschließende Planung.
+
 ## Grafische Oberfläche
 
 ACB enthält eine lokale Browser-Oberfläche für Aufträge, Status, Sessions und

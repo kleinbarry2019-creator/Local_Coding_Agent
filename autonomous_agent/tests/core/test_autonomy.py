@@ -70,6 +70,26 @@ def test_runtime_completes_only_after_independent_file_readback(tmp_path: Path) 
     assert runtime.audit.verify().ok
 
 
+def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    (config.paths.project_root / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
+    (config.paths.project_root / "main.py").write_text(
+        "print('ok')\n", encoding="utf-8"
+    )
+    result = AutonomyRuntime(config).run(
+        "Analysiere das Projekt und seine Programmiersprachen"
+    )
+    assert result.status == "completed"
+    assert result.completion.completed
+    analysis = result.outputs[-1]["data"]
+    assert isinstance(analysis, dict)
+    assert analysis["languages"] == {"Python": 1}
+    assert result.plan_assessment is not None
+    assert result.plan_assessment["valid"] is True
+
+
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = AutonomyRuntime(config)
