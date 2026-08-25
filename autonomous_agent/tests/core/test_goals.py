@@ -159,6 +159,21 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "I need a fault-tolerant satellite communication stack with formal verification, radiation testing, and secure key rotation",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Please prepare a Windows virtual machine with hardware passthrough, snapshots, rollback, and crash recovery",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "A production-grade secrets management service with HSM integration, rotation, disaster recovery, and compliance evidence",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
@@ -180,6 +195,15 @@ def test_command_is_tokenized_without_a_shell() -> None:
     assert CriterionKind.COMMAND_EXITED_ZERO in {
         item.kind for item in goal.acceptance_criteria
     }
+
+
+def test_polite_run_request_extracts_command_before_verification_text() -> None:
+    goal = GoalNormalizer().normalize(
+        "Could you run python3 -c 'print(42)' and verify the result"
+    )
+
+    assert goal.kind is GoalKind.RUN_COMMAND
+    assert goal.argv == ("python3", "-c", "print(42)")
 
 
 def test_write_derives_content_acceptance_criterion() -> None:

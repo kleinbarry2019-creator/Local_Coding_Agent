@@ -102,6 +102,8 @@ class GoalNormalizer:
             ),
         ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
             return self._analyze(goal)
+        if self._is_natural_run_request(lowered):
+            return self._run_natural(goal)
         if self._is_standalone_research_request(lowered):
             return self._research_task(goal, research_only=True)
         if self._is_complex_research_request(lowered):
@@ -301,6 +303,7 @@ class GoalNormalizer:
                 "implement",
                 "configure",
                 "deploy",
+                "prepare",
                 "redesign",
                 "refactor",
                 "rewrite",
@@ -347,6 +350,83 @@ class GoalNormalizer:
                 "richte",
                 "richte ein",
             ),
+        ) or (
+            _contains_word(
+                lowered,
+                (
+                    "i need",
+                    "i want",
+                    "can you",
+                    "please",
+                    "what would it take",
+                    "ich brauche",
+                    "ich möchte",
+                    "kannst du",
+                    "bitte",
+                ),
+            )
+            and _contains_word(
+                lowered,
+                (
+                    "system",
+                    "service",
+                    "stack",
+                    "pipeline",
+                    "engine",
+                    "platform",
+                    "compiler",
+                    "virtual machine",
+                    "database",
+                    "security",
+                    "sicherheit",
+                    "distributed",
+                    "verteilt",
+                    "production",
+                    "formal",
+                    "hardware",
+                    "recovery",
+                    "wiederherstellung",
+                    "encryption",
+                    "verschlüsselung",
+                ),
+            )
+        ) or (
+            word_count >= 10
+            and _contains_word(
+                lowered,
+                (
+                    "system",
+                    "service",
+                    "stack",
+                    "pipeline",
+                    "engine",
+                    "platform",
+                    "compiler",
+                    "virtual machine",
+                    "database",
+                    "security",
+                    "sicherheit",
+                    "distributed",
+                    "verteilt",
+                    "production",
+                    "formal",
+                    "hardware",
+                    "recovery",
+                    "wiederherstellung",
+                    "encryption",
+                    "verschlüsselung",
+                ),
+            )
+        )
+
+    @staticmethod
+    def _is_natural_run_request(lowered: str) -> bool:
+        return bool(
+            re.search(
+                r"(?:could\s+you|can\s+you|please|kannst\s+du|bitte)"
+                r".*\b(?:run|execute|starte|führe|fuehre)\b",
+                lowered,
+            )
         )
 
     def _research_task(
@@ -437,7 +517,25 @@ class GoalNormalizer:
         )
 
     def _run(self, goal: str) -> NormalizedGoal:
-        command = _after_command_verb(goal)
+        return self._run_command(goal, _after_command_verb(goal))
+
+    def _run_natural(self, goal: str) -> NormalizedGoal:
+        match = re.search(
+            r"\b(?:run|execute|starte|führe|fuehre)\b\s+(.+)",
+            goal,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            raise GoalError("natural run goal requires a command")
+        command = re.split(
+            r"\s+(?:and|und)\s+(?:verify|prüfe|pruefe|teste|test)\b",
+            match.group(1),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip()
+        return self._run_command(goal, command)
+
+    def _run_command(self, goal: str, command: str) -> NormalizedGoal:
         try:
             argv = tuple(shlex.split(command, posix=True))
         except ValueError as error:
