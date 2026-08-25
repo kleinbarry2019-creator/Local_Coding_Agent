@@ -166,6 +166,26 @@ def test_failed_task_review_becomes_high_priority_learning_lead(tmp_path: Path) 
     assert context[0]["topic"] == "experience"
 
 
+def test_repeated_failed_criterion_creates_root_cause_proposal(tmp_path: Path) -> None:
+    service = _service(tmp_path, network_enabled=False)
+    result = {
+        "completion": {
+            "completed": False,
+            "criteria": [{"criterion_id": "tool", "passed": False}],
+        }
+    }
+    service.review_task("Installiere das fehlende Werkzeug", result)
+    service.review_task("Starte das Werkzeug erneut", result)
+    recurring = [
+        item
+        for item in service.store.suggestions()
+        if item.kind == "recurring-failure"
+    ]
+    assert len(recurring) == 1
+    assert recurring[0].priority == "high"
+    assert "Regressionstest" in recurring[0].description
+
+
 def test_feedback_becomes_gated_improvement_proposal(tmp_path: Path) -> None:
     service = _service(tmp_path, network_enabled=False)
     service.record_feedback("session-123", 3, "Die Erklärung war zu knapp.")

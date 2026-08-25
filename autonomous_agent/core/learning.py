@@ -615,6 +615,8 @@ class LearningService:
                 created_at=now,
             )
         )
+        if not completed:
+            self._detect_recurring_failure(failed_criteria)
         if completed:
             title = f"Nachprüfung: {goal[:96]}"
             description = (
@@ -647,6 +649,40 @@ class LearningService:
                 updated_at=now,
             )
         )
+
+    def _detect_recurring_failure(self, failed_criteria: Sequence[str]) -> None:
+        """Create one bounded root-cause lead for repeated failed criteria."""
+        experiences = self.store.experiences(MAX_EXPERIENCES)
+        for criterion in tuple(item for item in failed_criteria if item):
+            matches = tuple(
+                item
+                for item in experiences
+                if criterion in item.failed_criteria and item.outcome == "failed"
+            )
+            if len(matches) < 2:
+                continue
+            now = _timestamp()
+            self.store.add_suggestion(
+                ImprovementSuggestion(
+                    suggestion_id=f"suggestion-{uuid.uuid4().hex}",
+                    kind="recurring-failure",
+                    title=f"Wiederkehrendes Problem: {criterion[:80]}",
+                    description=(
+                        f"Das Kriterium {criterion} ist in mindestens "
+                        f"{len(matches)} Aufträgen fehlgeschlagen. Ermittle die "
+                        "gemeinsame Ursache in Planner, Tool oder Umgebung, "
+                        "ergänze einen Regressionstest und prüfe danach das "
+                        "vollständige Release-Gate."
+                    ),
+                    source_ids=tuple(item.experience_id for item in matches[:8]),
+                    status="candidate",
+                    priority="high",
+                    auto_apply=False,
+                    release_gate_required=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
     def knowledge_context(
         self, goal: str, *, limit: int = 5

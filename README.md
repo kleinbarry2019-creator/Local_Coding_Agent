@@ -149,6 +149,8 @@ Abgeschlossene Aufgaben erzeugen automatisch eine spätere Review-Notiz, zum
 Beispiel für Regressionstests, Dokumentation oder sicherere Automatisierung.
 Auch fehlgeschlagene oder unvollständige Aufträge werden mit den nicht
 erfüllten Akzeptanzkriterien als hoch priorisierte Lernvorschläge erfasst.
+Wiederholt fehlgeschlagene Kriterien werden zu einem gemeinsamen
+Root-Cause-/Regressionstest-Vorschlag verdichtet.
 Eine Nutzerbewertung erzeugt zusätzlich einen nachvollziehbaren Vorschlag zur
 Verbesserung; alle diese Vorschläge bleiben zunächst nur Kandidaten und
 benötigen vor jeder Übernahme Tests, Security-Scan, Release-Gate und Rollback.
