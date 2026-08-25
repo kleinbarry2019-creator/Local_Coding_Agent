@@ -69,10 +69,6 @@ class GoalNormalizer:
         lowered = goal.casefold()
         if self._is_windows_vm_request(lowered):
             return self._vm_build(goal)
-        if self._is_standalone_research_request(lowered):
-            return self._research_task(goal, research_only=True)
-        if self._is_complex_research_request(lowered):
-            return self._research_task(goal)
         if _starts_with(lowered, ("install ", "installiere ")):
             return self._install(goal)
         if _starts_with(
@@ -106,6 +102,10 @@ class GoalNormalizer:
             ),
         ) and _contains_word(lowered, ("project", "projekt", "repo", "repository", "code")):
             return self._analyze(goal)
+        if self._is_standalone_research_request(lowered):
+            return self._research_task(goal, research_only=True)
+        if self._is_complex_research_request(lowered):
+            return self._research_task(goal)
         if self._is_ambitious_unknown_request(lowered):
             return self._research_task(goal)
         raise GoalError("goal is not a supported simple coding or system task")
@@ -292,15 +292,31 @@ class GoalNormalizer:
                 "create",
                 "design",
                 "develop",
+                "engineer",
+                "construct",
+                "architect",
+                "assemble",
+                "formulate",
+                "establish",
                 "implement",
                 "configure",
                 "deploy",
+                "redesign",
+                "refactor",
+                "rewrite",
+                "rebuild",
                 "port",
                 "train",
                 "evaluate",
                 "solve",
                 "analyze",
                 "analyse",
+                "optimize",
+                "optimise",
+                "integrate",
+                "migrate",
+                "prove",
+                "verify",
                 "plan",
                 "plane",
                 "entwickle",
@@ -316,6 +332,15 @@ class GoalNormalizer:
                 "analysieren",
                 "untersuche",
                 "untersuchen",
+                "verifiziere",
+                "verifizieren",
+                "prüfe",
+                "pruefe",
+                "simuliere",
+                "simulieren",
+                "bewerte",
+                "bewerten",
+                "evaluieren",
                 "führe",
                 "fuehre",
                 "set up",

@@ -139,6 +139,26 @@ from autonomous_agent.core.goals import (
             GoalKind.RESEARCH_TASK,
             "complex-task",
         ),
+        (
+            "Engineer a fault-tolerant satellite communication protocol with formal verification, radiation testing, and key rotation",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Construct a market-risk engine with Monte Carlo simulation, stress scenarios, explainable reports, and audit trails",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Redesign the storage layer for erasure coding, online repair, snapshots, and disaster recovery",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
+        (
+            "Verifiziere eine sicherheitskritische Steuerungssoftware formal und liefere reproduzierbare Beweise",
+            GoalKind.RESEARCH_TASK,
+            "complex-task",
+        ),
     ],
 )
 def test_normalizes_simple_german_and_english_requests(
@@ -175,6 +195,14 @@ def test_write_derives_content_acceptance_criterion() -> None:
     assert goal.content == "verified"
     assert criterion.target == "result.txt"
     assert criterion.expected == "verified"
+
+
+def test_research_word_in_filename_does_not_override_write_intent() -> None:
+    goal = GoalNormalizer().normalize("Erstelle research.txt mit dem Inhalt verified")
+
+    assert goal.kind is GoalKind.WRITE_FILE
+    assert goal.target == "research.txt"
+    assert goal.content == "verified"
 
 
 @pytest.mark.parametrize(
