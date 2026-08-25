@@ -532,6 +532,10 @@ class AcbUiServer:
     def learning_snapshot(self) -> dict[str, object]:
         return self._controller.learning_snapshot()
 
+    def authenticate(self, username: str, password: str) -> dict[str, object] | None:
+        account = self._controller.authenticate(username, password)
+        return None if account is None else account.to_public_dict()
+
     def sync_manifest(self) -> dict[str, object]:
         return self._controller.sync_manifest()
 
@@ -848,6 +852,17 @@ class _AcbRequestHandler(BaseHTTPRequestHandler):
                     result = self._app().reset_password(username, answer, new_password)
                     if result is None:
                         self._send_error_json(HTTPStatus.FORBIDDEN, "recovery verification failed")
+                        return
+                elif action == "authenticate":
+                    username = payload.get("username")
+                    password = payload.get("password")
+                    if not all(isinstance(item, str) for item in (username, password)):
+                        raise ValueError("authentication fields are invalid")
+                    result = self._app().authenticate(
+                        cast(str, username), cast(str, password)
+                    )
+                    if result is None:
+                        self._send_error_json(HTTPStatus.FORBIDDEN, "authentication failed")
                         return
                 else:
                     raise ValueError("account action is invalid")

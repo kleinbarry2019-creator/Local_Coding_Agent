@@ -515,6 +515,24 @@ def test_ui_http_account_recovery_never_returns_credentials(tmp_path: Path) -> N
         )
         assert onboarding_status == 200
         assert onboarding["phase"] == "ready"
+        status, authenticated = _post_json(
+            f"{server.url}api/account",
+            {
+                "action": "authenticate",
+                "username": "owner",
+                "password": "correct horse battery",
+            },
+            token=server.token,
+        )
+        assert status == 200
+        assert authenticated["username"] == "owner"
+        assert "password_hash" not in str(authenticated)
+        status, _ = _post_json(
+            f"{server.url}api/account",
+            {"action": "authenticate", "username": "owner", "password": "wrong"},
+            token=server.token,
+        )
+        assert status == 403
         status, denied = _post_json(
             f"{server.url}api/account",
             {
