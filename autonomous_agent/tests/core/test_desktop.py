@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from autonomous_agent.desktop import DESKTOP_ENTRY, install_desktop_entry
+from autonomous_agent.desktop import install_desktop_entry
 
 
 def test_desktop_entry_is_installed_atomically(tmp_path: Path) -> None:
@@ -13,7 +13,12 @@ def test_desktop_entry_is_installed_atomically(tmp_path: Path) -> None:
     installed = install_desktop_entry(target)
 
     assert installed == target
-    assert target.read_text(encoding="utf-8") == DESKTOP_ENTRY
+    content = target.read_text(encoding="utf-8")
+    assert "TryExec=\"" in content
+    assert "Exec=\"" in content
+    assert " app --project \"" in content
+    assert " --state-dir \"" in content
+    assert "ACB-Projects" in content
     assert target.stat().st_mode & 0o777 == 0o644
     assert not list(target.parent.glob(".acb.desktop.*"))
 
