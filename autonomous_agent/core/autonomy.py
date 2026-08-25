@@ -228,7 +228,7 @@ class Planner:
                     "project.run-process",
                     {"argv": list(goal.argv), "cwd": str(root)},
                     root,
-                    True,
+                    not _command_is_read_only(goal.argv),
                     depends_on=("step-capability",),
                     purpose="execute-the-requested-command",
                 ),
@@ -1345,6 +1345,64 @@ def _required(value: str | None) -> str:
     if value is None or not value:
         raise ValueError("required normalized goal value is missing")
     return value
+
+
+def _command_is_read_only(argv: tuple[str, ...]) -> bool:
+    """Avoid tree snapshots for commands that cannot mutate the project.
+
+    A whole-project checkpoint is intentionally bounded.  Large repositories
+    should still be able to run diagnostics and probes; only commands with a
+    credible mutation path require the expensive rollback snapshot.
+    """
+    if not argv:
+        return False
+    executable = Path(argv[0]).name.casefold()
+    if executable in {
+        "cat",
+        "echo",
+        "find",
+        "grep",
+        "head",
+        "ls",
+        "printf",
+        "pwd",
+        "rg",
+        "tail",
+        "true",
+        "false",
+        "which",
+    }:
+        return True
+    if executable == "git":
+        return len(argv) > 1 and argv[1].casefold() in {
+            "branch",
+            "diff",
+            "log",
+            "ls-files",
+            "status",
+            "show",
+            "rev-parse",
+        }
+    if executable in {"python", "python3", "python3.12", "python3.14"}:
+        command = " ".join(argv[1:]).casefold()
+        if "-c" not in command and "-m" not in command:
+            return False
+        return not any(
+            marker in command
+            for marker in (
+                "open(",
+                ".write(",
+                ".unlink(",
+                ".rename(",
+                ".replace(",
+                ".mkdir(",
+                ".rmdir(",
+                "subprocess",
+                "shutil.",
+                "os.system",
+            )
+        )
+    return False
 
 
 def _exit_code_zero(output: Mapping[str, object]) -> bool:

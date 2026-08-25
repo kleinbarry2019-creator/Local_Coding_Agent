@@ -355,6 +355,19 @@ def test_real_sandbox_command_is_e2e_verified(tmp_path: Path) -> None:
     assert result.completion.e2e_verified
 
 
+def test_read_only_command_does_not_require_a_full_tree_checkpoint(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    goal = GoalNormalizer().normalize(
+        "Run python3 -c 'print(42)' and verify the result"
+    )
+
+    plan = Planner().create_plan(goal, project)
+
+    assert plan[-1].tool == "project.run-process"
+    assert plan[-1].mutates is False
+
+
 def test_completed_task_can_be_recovered_after_runtime_restart(tmp_path: Path) -> None:
     config = _config(tmp_path)
     first_runtime = AutonomyRuntime(config)
