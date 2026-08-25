@@ -104,6 +104,14 @@ Testdateien und Testbefehle. Die Analyse liest keine externen Quellen und führt
 keinen gefundenen Code aus; sie liefert nur verifizierbare Grundlage für die
 anschließende Planung und automatische Testauswahl.
 
+Für Sicherheitsaufträge stehen zwei getrennte, read-only Prüfungen bereit:
+`Prüfe die Projektsicherheit` untersucht bounded Projektdateien auf typische
+Secrets, private Schlüssel und gefährliche Ausführungsmuster; `Prüfe die
+Systemsicherheit und offene Ports` liest zusätzlich ausgewählte Kernel-
+Schutzwerte, TCP-Listener und Prozessmuster des lokalen Hosts. Beide Aufträge
+geben nur redigierte Befunde aus, verändern nichts am System und werden erst
+nach erfolgreicher E2E-Nachprüfung als abgeschlossen markiert.
+
 Erweiterungen werden nicht blind aus Python-Dateien geladen. Unter
 `.acb/plugins/*.json` kann ein Projekt ein Plugin-Manifest mit Entry-Point,
 Berechtigungen und SHA-256-Digest hinterlegen. `/api/plugins` zeigt nur
