@@ -107,6 +107,22 @@ def test_unknown_missing_tool_is_not_installable(tmp_path: Path) -> None:
     assert result.diagnostic == "untrusted-or-unsupported-tool"
 
 
+def test_missing_qemu_is_researched_against_trusted_catalog(tmp_path: Path) -> None:
+    research = CapabilityRegistry(tmp_path).research("qemu-system-x86_64")
+
+    if Path("/run/ostree-booted").is_file():
+        assert not research.supported
+        assert research.source == "host-profile"
+        assert research.manager == "rpm-ostree"
+        assert research.package == "qemu-system-x86-core"
+        assert "rpm-ostree" in research.rationale
+    else:
+        assert research.supported
+        assert research.source == "trusted-catalog"
+        assert research.manager in {"apt", "dnf", "brew"}
+        assert research.package
+
+
 def test_system_tool_requires_exact_action_scoped_authority(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     capabilities = CapabilityRegistry(root)

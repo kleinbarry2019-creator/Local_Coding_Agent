@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess  # nosec B404
 from collections.abc import Mapping
@@ -23,6 +24,11 @@ _TRUSTED_CATALOG: Mapping[str, Mapping[str, str]] = MappingProxyType(
         "node": MappingProxyType({"apt": "nodejs", "dnf": "nodejs", "brew": "node"}),
         "npm": MappingProxyType({"apt": "npm", "dnf": "npm", "brew": "node"}),
         "ollama": MappingProxyType({"brew": "ollama"}),
+        # Fedora's qemu-system-x86-core and Debian's qemu-system-x86 packages
+        # provide the trusted x86_64 QEMU executable used by the VM preflight.
+        "qemu-system-x86_64": MappingProxyType(
+            {"apt": "qemu-system-x86", "dnf": "qemu-system-x86-core"}
+        ),
     }
 )
 
@@ -41,6 +47,16 @@ class InstallResult:
     installed: bool
     capability: Capability
     diagnostic: str
+
+
+@dataclass(frozen=True)
+class CapabilityResearch:
+    name: str
+    supported: bool
+    source: str
+    manager: str | None
+    package: str | None
+    rationale: str
 
 
 class CapabilityRegistry:
@@ -94,6 +110,39 @@ class CapabilityRegistry:
             else "installation-or-verification-failed",
         )
 
+    def research(self, name: str) -> CapabilityResearch:
+        """Resolve a missing capability against the bounded trusted catalog."""
+        if not _valid_name(name):
+            raise ValueError("capability name is invalid")
+        recipe = _installation_recipe(name)
+        if recipe is None:
+            immutable = _is_immutable_host()
+            rationale = (
+                "The host is immutable; package layering requires rpm-ostree and a planned reboot, so unattended dnf installation is refused."
+                if immutable
+                else "No verified package recipe is available; autonomous installation is refused."
+            )
+            return CapabilityResearch(
+                name=name,
+                supported=False,
+                source="host-profile" if immutable else "trusted-catalog",
+                manager="rpm-ostree" if immutable else None,
+                package=(
+                    _TRUSTED_CATALOG[name].get("dnf")
+                    if immutable and name in _TRUSTED_CATALOG
+                    else None
+                ),
+                rationale=rationale,
+            )
+        return CapabilityResearch(
+            name=name,
+            supported=True,
+            source="trusted-catalog",
+            manager=recipe.manager,
+            package=recipe.package,
+            rationale="A verified package recipe is available and will be version-probed after installation.",
+        )
+
     def snapshot(self) -> tuple[Capability, ...]:
         return tuple(self._capabilities[name] for name in sorted(self._capabilities))
 
@@ -125,19 +174,37 @@ class PrivilegedSystemExecutor:
             if not sudo.is_file():
                 raise RuntimeError("non-interactive privilege broker is unavailable")
             command = [str(sudo), "-n", *command]
+        process = subprocess.Popen(  # nosec B603
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+            shell=False,
+            start_new_session=True,
+        )
         try:
-            completed = subprocess.run(  # nosec B603
-                command,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=False,
-                shell=False,
-                check=False,
-                timeout=300.0,
-            )
+            _stdout, _stderr = process.communicate(timeout=60.0)
         except subprocess.TimeoutExpired:
+            _terminate_process_group(process)
             return 124
-        return completed.returncode
+        return process.returncode
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop an installer and descendants when a package manager hangs."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except OSError:
+        process.terminate()
+    try:
+        process.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            process.kill()
+        process.communicate()
 
 
 def _installation_recipe(name: str) -> InstallationRecipe | None:
@@ -155,6 +222,8 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
         ),
     )
     for manager, executable, arguments, elevation in managers:
+        if manager == "dnf" and _is_immutable_host():
+            continue
         package = packages.get(manager)
         if package is not None and executable.is_file():
             return InstallationRecipe(
@@ -165,6 +234,11 @@ def _installation_recipe(name: str) -> InstallationRecipe | None:
                 requires_elevation=elevation,
             )
     return None
+
+
+def _is_immutable_host() -> bool:
+    """Detect ostree-based hosts where dnf install is intentionally blocked."""
+    return Path("/run/ostree-booted").is_file()
 
 
 def _find_executable(name: str, project_root: Path) -> Path | None:
@@ -249,6 +323,7 @@ def _valid_name(name: object) -> bool:
 __all__ = [
     "Capability",
     "CapabilityRegistry",
+    "CapabilityResearch",
     "InstallResult",
     "InstallationRecipe",
     "PrivilegedSystemExecutor",

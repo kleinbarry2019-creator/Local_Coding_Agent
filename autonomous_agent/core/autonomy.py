@@ -248,12 +248,22 @@ class Planner:
         if goal.kind is GoalKind.VM_BUILD:
             return (
                 PlanStep(
+                    "step-vm-hypervisor",
+                    StepKind.ENSURE_CAPABILITY,
+                    "qemu-system-x86_64",
+                    {"name": "qemu-system-x86_64"},
+                    root,
+                    True,
+                    purpose="research-provision-and-version-verify-the-trusted-hypervisor",
+                ),
+                PlanStep(
                     "step-vm-preflight",
                     StepKind.TOOL,
                     "system.vm-preflight",
                     {"project_root": str(root)},
                     root,
                     False,
+                    depends_on=("step-vm-hypervisor",),
                     purpose="verify-hypervisor-kvm-iso-and-gpu-passthrough-prerequisites",
                 ),
             )
@@ -746,6 +756,26 @@ class AutonomyRuntime:
                 )
                 output = self._execute_step(session_id, step)
                 outputs.append(output)
+                if step.kind is StepKind.ENSURE_CAPABILITY:
+                    research = output.get("data")
+                    if isinstance(research, Mapping) and isinstance(
+                        research.get("research_source"), str
+                    ):
+                        problem_solving.append(
+                            {
+                                "phase": "research",
+                                "step_id": step.step_id,
+                                "capability": step.tool,
+                                "source": research["research_source"],
+                                "package_manager": research.get("package_manager"),
+                                "package": research.get("package"),
+                                "outcome": (
+                                    "available"
+                                    if output.get("success") is True
+                                    else "blocked-or-unavailable"
+                                ),
+                            }
+                        )
                 if output.get("success") is True:
                     succeeded = True
                     break

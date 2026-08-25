@@ -92,7 +92,12 @@ def test_runtime_can_analyze_project_languages_and_test_hints(tmp_path: Path) ->
 
 def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "autonomous_agent.core.capabilities.PrivilegedSystemExecutor.install",
+        lambda _self, _recipe: 1,
+    )
     config = _config(tmp_path)
     result = AutonomyRuntime(config).run(
         "Baue mir eine Windows VM mit Zugriff auf CPU, GPU und Speicher"
@@ -106,8 +111,16 @@ def test_windows_vm_request_runs_bounded_preflight_without_claiming_creation(
         and criterion.evidence == "vm-creation-not-performed"
         for criterion in result.completion.criteria
     )
+    assert any(
+        item.get("phase") == "research"
+        and item.get("capability") == "qemu-system-x86_64"
+        for item in result.problem_solving
+    )
     assert result.plan_assessment is not None
-    assert result.plan_assessment["ordered_step_ids"] == ["step-vm-preflight"]
+    assert result.plan_assessment["ordered_step_ids"] == [
+        "step-vm-hypervisor",
+        "step-vm-preflight",
+    ]
 
 
 def test_runtime_exposes_explicit_undo_for_last_mutation(tmp_path: Path) -> None:

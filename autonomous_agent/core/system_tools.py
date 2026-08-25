@@ -24,6 +24,9 @@ class EnsureToolOutput:
     executable: str | None
     version: str | None
     diagnostic: str
+    research_source: str | None = None
+    package_manager: str | None = None
+    package: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ def register_system_tools(
         del context
         if request.project_root != root:
             raise PermissionError("system tool project scope is invalid")
+        research = capabilities.research(request.name)
         result = capabilities.ensure(request.name)
         return EnsureToolOutput(
             name=result.capability.name,
@@ -70,6 +74,9 @@ def register_system_tools(
             ),
             version=result.capability.version,
             diagnostic=result.diagnostic,
+            research_source=research.source,
+            package_manager=research.manager,
+            package=research.package,
         )
 
     registry.register(

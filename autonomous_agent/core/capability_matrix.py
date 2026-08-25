@@ -67,6 +67,11 @@ def capability_matrix() -> dict[str, object]:
             ("Tests, Security, Release und Rollback-Evidenz sind zwingend.",),
         ),
         CapabilityEntry(
+            "learning.capability-research", "learning", "available",
+            "Erforscht fehlende lokale Capabilities, wählt nur verifizierte Nachrüstungen und startet danach einen begrenzten Retry.",
+            ("Immutable Hosts, fehlende Medien, Reboots und Lizenzbedingungen bleiben explizite externe Grenzen.",),
+        ),
+        CapabilityEntry(
             "recovery.crash-resume", "recovery", "available",
             "Setzt pending-, running- und recovering-Aufträge nach Neustarts fort.",
             ("Persistenter lokaler State erforderlich.",),
