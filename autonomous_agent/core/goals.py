@@ -9,7 +9,6 @@ from enum import Enum
 from pathlib import Path
 
 _MAX_GOAL_BYTES = 32_768
-_PATH_TOKEN = re.compile(r"(?:^|\s)([`\"']?)([^\s`\"']+\.[A-Za-z0-9._-]+)\1")
 
 
 class GoalError(ValueError):
@@ -352,7 +351,7 @@ class GoalNormalizer:
         """Route install-plus-deploy requests through bounded planning."""
         if not _starts_with(lowered, ("install ", "installiere ")):
             return False
-        word_count = len(re.findall(r"(?<!\w)[\w]+(?!\w)", lowered))
+        word_count = len(lowered.split())
         return word_count >= 6 and _contains_word(
             lowered,
             (
@@ -518,7 +517,7 @@ class GoalNormalizer:
     @staticmethod
     def _is_ambitious_unknown_request(lowered: str) -> bool:
         """Route unfamiliar multi-step goals to bounded research, not CLI rejection."""
-        word_count = len(re.findall(r"(?<!\w)[\w]+(?!\w)", lowered))
+        word_count = len(lowered.split())
         if word_count < 8:
             return False
         return _contains_word(
@@ -825,30 +824,56 @@ class GoalNormalizer:
         return self._run_command(goal, _after_command_verb(goal))
 
     def _run_natural(self, goal: str) -> NormalizedGoal:
-        before_verb = re.search(
-            r"(?:kannst\s+du|can\s+you|please|bitte)\s+"
-            r"(?:bitte\s+)?(.+?)\s+"
-            r"(?:ausführen|ausfuehren|starten)\b",
-            goal,
-            flags=re.IGNORECASE,
-        )
-        match = re.search(
-            r"\b(?:run|execute|starte|starten|führe|fuehre)\b\s+(.+)",
-            goal,
-            flags=re.IGNORECASE,
-        )
-        if before_verb is not None:
-            command = before_verb.group(1)
-        elif match is not None:
-            command = match.group(1)
-        else:
+        lowered = goal.casefold()
+        command: str | None = None
+        for prefix in (
+            "kannst du bitte ",
+            "kannst du ",
+            "can you please ",
+            "can you ",
+            "please ",
+            "bitte ",
+        ):
+            if not lowered.startswith(prefix):
+                continue
+            remainder = goal[len(prefix) :]
+            remainder_lowered = lowered[len(prefix) :]
+            for ending in (" ausführen", " ausfuehren", " starten"):
+                marker = remainder_lowered.find(ending)
+                if marker > 0:
+                    command = remainder[:marker]
+                    break
+            if command is not None:
+                break
+        if command is None:
+            for verb_marker in (
+                "run ",
+                "execute ",
+                "starte ",
+                "starten ",
+                "führe ",
+                "fuehre ",
+            ):
+                index = lowered.find(verb_marker)
+                if index >= 0:
+                    command = goal[index + len(verb_marker) :]
+                    break
+        if command is None:
             raise GoalError("natural run goal requires a command")
-        command = re.split(
-            r"\s+(?:and|und)\s+(?:verify|prüfe|pruefe|teste|test|das ergebnis)\b",
-            command,
-            maxsplit=1,
-            flags=re.IGNORECASE,
-        )[0].strip()
+        command_lowered = command.casefold()
+        verification_markers = (
+            " and verify",
+            " und prüfe",
+            " und pruefe",
+            " und teste",
+            " und test",
+            " und das ergebnis",
+        )
+        cut_at = min(
+            (index for marker in verification_markers if (index := command_lowered.find(marker)) >= 0),
+            default=len(command),
+        )
+        command = command[:cut_at].strip()
         if self._is_placeholder_command(command):
             raise GoalError("natural run goal requires a concrete executable")
         return self._run_command(goal, command)
@@ -931,10 +956,16 @@ def _extract_path(goal: str) -> str | None:
     # Prefer an explicit filename token before considering a generic fenced
     # value, otherwise `Erstelle result.txt mit dem Inhalt `value`` would use
     # the content as the path.
-    candidates = [match.group(2) for match in _PATH_TOKEN.finditer(goal)]
-    backtick = re.search(r"`([^`]+)`", goal)
-    if backtick:
-        candidates.append(backtick.group(1))
+    candidates: list[str] = []
+    for token in goal.split():
+        candidate = token.strip("`\"'.,;:!?()[]{}")
+        if "." in candidate and candidate.rsplit(".", 1)[-1].replace("_", "a").replace("-", "a").isalnum():
+            candidates.append(candidate)
+    backtick_start = goal.find("`")
+    if backtick_start >= 0:
+        backtick_end = goal.find("`", backtick_start + 1)
+        if backtick_end > backtick_start:
+            candidates.append(goal[backtick_start + 1 : backtick_end])
     for candidate in candidates:
         candidate = candidate.rstrip(".,;:")
         path = Path(candidate)

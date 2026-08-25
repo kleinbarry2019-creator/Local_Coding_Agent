@@ -80,14 +80,20 @@ class VoiceService:
         if self.output is None:
             return SpeechResult(False, None, "output-engine-unavailable")
         executable = self.output
-        command = [executable, text]
         if executable == "piper":
             return SpeechResult(False, executable, "piper-requires-an-explicit-local-model")
+        # Feed text through stdin so the local speech executable never parses
+        # user text as command-line options or shell syntax.  Both supported
+        # engines accept stdin; the executable itself comes only from the
+        # fixed allowlist above.
+        command = [executable]
         try:
             completed = subprocess.run(  # nosec B603 - fixed executable, no shell
                 command,
                 check=False,
                 shell=False,
+                input=text,
+                text=True,
                 capture_output=True,
                 timeout=VOICE_TIMEOUT_S,
             )
