@@ -842,9 +842,13 @@ def _has_research_intent(value: str) -> bool:
 
 
 def _extract_path(goal: str) -> str | None:
+    # Prefer an explicit filename token before considering a generic fenced
+    # value, otherwise `Erstelle result.txt mit dem Inhalt `value`` would use
+    # the content as the path.
+    candidates = [match.group(2) for match in _PATH_TOKEN.finditer(goal)]
     backtick = re.search(r"`([^`]+)`", goal)
-    candidates = [backtick.group(1)] if backtick else []
-    candidates.extend(match.group(2) for match in _PATH_TOKEN.finditer(goal))
+    if backtick:
+        candidates.append(backtick.group(1))
     for candidate in candidates:
         candidate = candidate.rstrip(".,;:")
         path = Path(candidate)
