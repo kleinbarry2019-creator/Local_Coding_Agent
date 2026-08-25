@@ -586,7 +586,7 @@ def _run_gtk(config: AgentConfig) -> int:
             return page
 
         def _settings_page(self) -> Any:
-            """Build the first-class profile, accessibility, and privacy settings."""
+            """Build the grouped, first-class profile and control settings."""
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             page.set_margin_top(24)
             page.set_margin_bottom(24)
@@ -608,82 +608,136 @@ def _run_gtk(config: AgentConfig) -> int:
             intro.add_css_class("muted")
             page.append(intro)
 
-            scroll = Gtk.ScrolledWindow()
-            scroll.set_vexpand(True)
-            form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            form.set_margin_top(12)
-            form.set_margin_bottom(12)
-            form.set_margin_start(4)
-            form.set_margin_end(12)
+            layout = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+            layout.set_vexpand(True)
+            layout.add_css_class("settings-layout")
+            settings_stack = Gtk.Stack()
+            settings_stack.set_hexpand(True)
+            settings_stack.set_vexpand(True)
+            settings_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+            settings_nav = Gtk.StackSidebar()
+            settings_nav.set_stack(settings_stack)
+            settings_nav.set_vexpand(False)
+            settings_nav.set_size_request(170, -1)
+            settings_nav.add_css_class("settings-nav")
+            layout.append(settings_nav)
+            layout.append(settings_stack)
+            page.append(layout)
 
-            self._settings_section(form, "Erscheinungsbild & Antworten")
-            self._combo_setting(form, "theme", "Darstellung", ("system", "System", "light", "Hell", "dark", "Dunkel"))
+            custom_form, custom_scroll = self._settings_form()
+            self._settings_section(custom_form, "Erscheinungsbild & Antworten")
+            self._combo_setting(custom_form, "theme", "Darstellung", ("system", "System", "light", "Hell", "dark", "Dunkel"))
             self._combo_setting(
-                form,
+                custom_form,
                 "response_style",
                 "Antwortumfang",
                 ("concise", "Kurz", "balanced", "Ausgewogen", "detailed", "Ausführlich"),
             )
             self._combo_setting(
-                form,
+                custom_form,
                 "knowledge_level",
                 "Computerkentnisse",
                 ("beginner", "Anfänger", "hobbyist", "Hobbyist", "advanced", "Fortgeschritten", "expert", "Erweitert fortgeschritten", "developer", "Entwickler/Developer"),
             )
-            self._check_setting(form, "simple_language", "Einfache Sprache verwenden")
-            self._check_setting(form, "gendered_language", "Wenn passend gendern")
-
-            self._settings_section(form, "Persönliche Ansprache (optional)")
-            self._text_setting(form, "nickname", "Nickname / Alias")
-            self._text_setting(form, "pronouns", "Pronomen")
-            self._text_setting(form, "gender_identity", "Geschlechtsidentität")
-            self._text_setting(form, "interests", "Interessen")
-            self._text_setting(form, "occupation", "Beruf / Tätigkeit")
-            self._text_setting(form, "age", "Alter", numeric=True)
-
-            self._settings_section(form, "Sprache & Zugänglichkeit")
-            self._check_setting(form, "voice_input", "Spracheingabe erlauben")
-            self._check_setting(form, "voice_output", "Sprachausgabe erlauben")
-            self._check_setting(form, "wake_phrase_enabled", "Individuellen Sprachbefehl aktivieren")
-            self._text_setting(form, "wake_phrase", "Sprachbefehl")
-            self._check_setting(form, "large_text", "Große Schrift")
-            self._check_setting(form, "high_contrast", "Hoher Kontrast")
-            self._check_setting(form, "screen_reader", "Screenreader-Unterstützung")
-            self._check_setting(form, "braille_input", "Braille-Eingabe")
-            self._check_setting(form, "motor_assistance", "Motorische Unterstützung")
-            self._check_setting(form, "cognitive_support", "Kognitive Unterstützung")
+            self._check_setting(custom_form, "simple_language", "Einfache Sprache verwenden")
+            self._check_setting(custom_form, "gendered_language", "Wenn passend gendern")
+            self._settings_section(custom_form, "Persönliche Ansprache (optional)")
+            self._text_setting(custom_form, "nickname", "Nickname / Alias")
+            self._text_setting(custom_form, "pronouns", "Pronomen")
+            self._text_setting(custom_form, "gender_identity", "Geschlechtsidentität")
+            self._text_setting(custom_form, "interests", "Interessen")
+            self._text_setting(custom_form, "occupation", "Beruf / Tätigkeit")
+            self._text_setting(custom_form, "age", "Alter", numeric=True)
+            self._settings_section(custom_form, "Sprache & Zugänglichkeit")
+            self._check_setting(custom_form, "voice_input", "Spracheingabe erlauben")
+            self._check_setting(custom_form, "voice_output", "Sprachausgabe erlauben")
+            self._check_setting(custom_form, "wake_phrase_enabled", "Individuellen Sprachbefehl aktivieren")
+            self._text_setting(custom_form, "wake_phrase", "Sprachbefehl")
+            self._check_setting(custom_form, "large_text", "Große Schrift")
+            self._check_setting(custom_form, "high_contrast", "Hoher Kontrast")
+            self._check_setting(custom_form, "screen_reader", "Screenreader-Unterstützung")
+            self._check_setting(custom_form, "braille_input", "Braille-Eingabe")
+            self._check_setting(custom_form, "motor_assistance", "Motorische Unterstützung")
+            self._check_setting(custom_form, "cognitive_support", "Kognitive Unterstützung")
             self._combo_setting(
-                form,
+                custom_form,
                 "color_blind_mode",
                 "Farbseh-Unterstützung",
                 ("none", "Keine", "red-green", "Rot-Grün", "blue-yellow", "Blau-Gelb", "monochrome", "Monochrom"),
             )
+            settings_stack.add_titled(custom_scroll, "customisation", "Anpassung")
 
-            self._settings_section(form, "Datenschutz & Recherche")
-            self._check_setting(form, "store_chat_history", "Chatverlauf lokal speichern")
-            self._check_setting(form, "store_task_history", "Aufgabenverlauf lokal speichern")
-            self._check_setting(form, "store_personalization", "Personalisierung lokal speichern")
-            self._check_setting(form, "adaptive_response_learning", "Antwortstil aus Feedback automatisch anpassen")
-            self._check_setting(form, "allow_network_research", "Vertrauenswürdige Online-Recherche erlauben")
-            self._check_setting(form, "require_confirmation_for_sensitive_data", "Vor sensibler Datenfreigabe bestätigen")
+            privacy_form, privacy_scroll = self._settings_form()
+            self._settings_section(privacy_form, "Lokale Datenspeicherung")
+            self._check_setting(privacy_form, "store_chat_history", "Chatverlauf lokal speichern")
+            self._check_setting(privacy_form, "store_task_history", "Aufgabenverlauf lokal speichern")
+            self._check_setting(privacy_form, "store_personalization", "Personalisierung lokal speichern")
+            self._settings_section(privacy_form, "Recherche & Lernverhalten")
+            self._check_setting(privacy_form, "adaptive_response_learning", "Antwortstil aus Feedback automatisch anpassen")
+            self._check_setting(privacy_form, "allow_network_research", "Vertrauenswürdige Online-Recherche erlauben")
+            privacy_note = Gtk.Label(
+                label="Online-Recherche nutzt ausschließlich die geprüfte Quellen-Allowlist. Ohne Freigabe bleibt ACB lokal/offline."
+            )
+            privacy_note.set_xalign(0)
+            privacy_note.set_wrap(True)
+            privacy_note.add_css_class("setting-note")
+            privacy_form.append(privacy_note)
+            settings_stack.add_titled(privacy_scroll, "privacy", "Datenschutz")
 
+            security_form, security_scroll = self._settings_form()
+            self._settings_section(security_form, "Ausführungsschutz")
+            self._check_setting(security_form, "require_confirmation_for_sensitive_data", "Sensible Datenfreigaben immer bestätigen")
+            security_note = Gtk.Label(
+                label="Systemaktionen bleiben durch Policy, Capability-Registry, Audit-Protokoll und Rollback-Gates begrenzt. ACB startet keinen dauerhaften Root-Prozess."
+            )
+            security_note.set_xalign(0)
+            security_note.set_wrap(True)
+            security_note.add_css_class("setting-note")
+            security_form.append(security_note)
+            self._settings_section(security_form, "Vertrauensgrenzen")
+            for label in (
+                "Externe Tools: nur allowlistete und verifizierte Capabilities",
+                "Netzwerk: nur explizit freigegebene HTTPS-Quellen",
+                "Änderungen: Checkpoint, Audit und überprüfbarer Rollback",
+            ):
+                status = Gtk.Label(label="✓  " + label)
+                status.set_xalign(0)
+                status.add_css_class("state-good")
+                security_form.append(status)
+            settings_stack.add_titled(security_scroll, "security", "Sicherheit")
+
+            footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            footer.add_css_class("settings-footer")
             save = Gtk.Button(label="Einstellungen speichern")
             save.set_halign(Gtk.Align.START)
             save.add_css_class("suggested-action")
             save.connect("clicked", self._save_settings)
-            form.append(save)
+            footer.append(save)
             self.preference_status = Gtk.Label(label="Noch keine Änderungen gespeichert.")
             self.preference_status.set_xalign(0)
             self.preference_status.set_wrap(True)
             self.preference_status.add_css_class("muted")
-            form.append(self.preference_status)
-            scroll.set_child(form)
-            page.append(scroll)
+            footer.append(self.preference_status)
+            page.append(footer)
             self._load_settings_controls()
             preferences = self.controller.preferences()
             self._apply_theme(preferences.theme)
             self._apply_accessibility(preferences)
             return page
+
+        @staticmethod
+        def _settings_form() -> tuple[Any, Any]:
+            form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            form.set_margin_top(4)
+            form.set_margin_bottom(12)
+            form.set_margin_start(4)
+            form.set_margin_end(12)
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_vexpand(True)
+            scroll.set_hexpand(True)
+            scroll.add_css_class("settings-scroll")
+            scroll.set_child(form)
+            return form, scroll
 
         @staticmethod
         def _settings_section(form: Any, label: str) -> None:
@@ -1363,6 +1417,14 @@ def _run_gtk(config: AgentConfig) -> int:
                 .quick-label { color: #7890af; font-size: 12px; font-weight: 700; margin-right: 4px; }
                 button.quick-action { background: #122239; border: 1px solid #2a4567; color: #c8d8ed; padding: 7px 10px; }
                 button.quick-action:hover { background: #1a3452; border-color: #64e6d1; color: #ffffff; }
+                .settings-layout { min-height: 0; }
+                .settings-nav { background: #0f1c30; border: 1px solid #203653; border-radius: 12px; padding: 8px; }
+                .settings-nav row { color: #9aacc6; border-radius: 8px; padding: 8px 10px; margin-bottom: 3px; }
+                .settings-nav row:hover { background: #172b46; color: #edf4ff; }
+                .settings-nav row:selected { background: #1d3b58; color: #64e6d1; font-weight: 700; }
+                .settings-scroll { background: #0f1c30; border: 1px solid #203653; border-radius: 14px; padding: 8px; }
+                .settings-footer { padding-top: 2px; }
+                .setting-note { color: #9aacc6; background: #13243b; border: 1px solid #253d5d; border-radius: 10px; padding: 10px 12px; }
                 .workspace-card { background: #13243b; border: 1px solid #253d5d; border-radius: 14px; padding: 14px; }
                 .history-list { background: transparent; }
                 .history-list row { background: #122239; border-radius: 9px; margin-bottom: 5px; padding: 7px 9px; }
@@ -1385,6 +1447,11 @@ def _run_gtk(config: AgentConfig) -> int:
                 .theme-light .quick-label { color: #6b7d97; }
                 .theme-light button.quick-action { background: #f8fbff; border-color: #cbd7e7; color: #34445c; }
                 .theme-light button.quick-action:hover { background: #e7f7f3; border-color: #087f6e; color: #172033; }
+                .theme-light .settings-nav, .theme-light .settings-scroll { background: #ffffff; border-color: #d7e1ef; }
+                .theme-light .settings-nav row { color: #53627a; }
+                .theme-light .settings-nav row:hover { background: #dce8f6; color: #172033; }
+                .theme-light .settings-nav row:selected { background: #cdeee8; color: #087f6e; }
+                .theme-light .setting-note { color: #53627a; background: #f8fbff; border-color: #d7e1ef; }
                 .theme-light .workspace-card { background: #f8fbff; border-color: #d7e1ef; }
                 .theme-light .history-list row { background: #f8fbff; }
                 .theme-light .conversation-frame { background: #ffffff; border-color: #d7e1ef; }
